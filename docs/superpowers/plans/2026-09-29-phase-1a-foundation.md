@@ -4004,11 +4004,20 @@ mod db
 default:
     @just --list --list-submodules
 
-# Install Python + JavaScript dependencies and the Playwright browser
+# Install Python + JavaScript dependencies, the Playwright browser and git hooks
 install:
     uv sync --directory backend
     pnpm install
     pnpm --dir web exec playwright install chromium
+    git config core.hooksPath .githooks
+
+# Enable the repo's git hooks (commit-msg guard)
+hooks:
+    git config core.hooksPath .githooks
+
+# Unit tests for the TypeScript helper scripts
+test-scripts:
+    pnpm exec tsx --test scripts/lib/commit-msg.test.ts
 
 # First-time setup: dependencies, .env, database and migrations (Docker must be running)
 setup: install
@@ -4034,11 +4043,13 @@ check:
 test:
     just backend::test
     just web::test
+    just test-scripts
 
 # Tests that need no database (macOS CI)
 test-unit:
     just backend::test-unit
     just web::test
+    just test-scripts
 
 # End-to-end browser tests against the test database
 e2e:
@@ -4442,30 +4453,17 @@ Breaking changes appear under the preset's own "⚠ BREAKING CHANGES" heading. T
 Run: `pnpm exec tsx scripts/set-version.ts 0.1.0`, then `git checkout -- backend/pyproject.toml backend/uv.lock`
 Expected: only `web/package.json` keeps its change. It now has `"version": "0.1.0"` after `"name"`. `backend/pyproject.toml` keeps `0.2.0`, which CI overwrites on the first release.
 
-Root `justfile`: add the recipes below, and change `test` and `test-unit` so they also run `just test-scripts`:
+Root `justfile`: `test-scripts`, `test` and `test-unit` already exist (Tasks 11 and 14). Add `version.test.ts` to `test-scripts`, and add `release-dry-run`:
 
 ```just
 # Unit tests for the TypeScript helper scripts
 test-scripts:
+    pnpm exec tsx --test scripts/lib/commit-msg.test.ts
     pnpm exec tsx --test scripts/lib/version.test.ts
 
 # Preview the next release locally (needs GITHUB_TOKEN; see README)
 release-dry-run:
     pnpm exec semantic-release --dry-run --no-ci
-```
-
-```just
-# All tests (needs the database)
-test:
-    just backend::test
-    just web::test
-    just test-scripts
-
-# Tests that need no database (macOS CI)
-test-unit:
-    just backend::test-unit
-    just web::test
-    just test-scripts
 ```
 
 - [ ] **Step 7: Add the release job to `.github/workflows/ci.yml`**
@@ -4556,3 +4554,230 @@ git push origin main
 Expected: CI runs `linux` and `macos`, then `release`. The release job creates `v0.2.0` from the Phase 1a `feat` commits. That means a GitHub Release with 🚀 Features notes, and a `chore(release): v0.2.0 [skip ci]` commit that bumps `backend/pyproject.toml`, `backend/uv.lock` and `web/package.json`. Run `git pull` afterwards to fetch the release commit.
 
 If `release-dry-run` is used before this step, it should report the next version as 0.2.0 once `v0.1.0` exists locally.
+
+---
+
+### Task 14: commit-msg guard hook (runs right after Task 9)
+
+Added 2026-09-29 at the owner's request, after a subagent pushed a commit with a `Co-Authored-By: Claude …` trailer. A tracked git hook rejects AI attribution and malformed Conventional Commits headers, whatever tool or agent is committing. **Execution order:** this task runs after Task 9 and before Task 10. Tasks 11 and 13 already keep its recipes in their final justfile versions.
+
+**Files:**
+- Create: `.githooks/commit-msg`, `scripts/lib/commit-msg.ts`, `scripts/lib/commit-msg.test.ts`, `scripts/check-commit-msg.ts`
+- Modify: root `justfile` (`hooks`, `test-scripts`; `install` sets `core.hooksPath`), `README.md` (a short "Commit messages" section)
+
+**Interfaces:**
+- Consumes: the root workspace's `tsx` (Task 1).
+- Produces:
+  - `scripts/lib/commit-msg.ts` exports `checkCommitMessage(raw: string): CommitCheck`, where `CommitCheck = { ok: boolean; errors: string[]; warnings: string[] }`.
+  - The hook `.githooks/commit-msg`.
+  - The recipes `just hooks` and `just test-scripts`. Task 13 adds `scripts/lib/version.test.ts` to `test-scripts`.
+
+- [ ] **Step 1: Write the failing tests `scripts/lib/commit-msg.test.ts`**
+
+```ts
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { checkCommitMessage } from "./commit-msg.ts";
+
+const ok = (message: string) => {
+  const result = checkCommitMessage(message);
+  assert.equal(result.ok, true, `expected ok for ${JSON.stringify(message)}: ${result.errors.join("; ")}`);
+  return result;
+};
+const rejected = (message: string, pattern: RegExp) => {
+  const result = checkCommitMessage(message);
+  assert.equal(result.ok, false, `expected rejection for ${JSON.stringify(message)}`);
+  assert.ok(result.errors.some((e) => pattern.test(e)), result.errors.join("; "));
+};
+
+test("accepts conventional headers with and without scope, body and footer", () => {
+  ok("feat(web): add login page\n");
+  ok("fix: handle empty cookie\n\nExplain why.\n\nCloses #12\n");
+  ok("feat(api)!: drop v0 routes\n\nBREAKING CHANGE: /v0 removed\n");
+  ok("chore(release): v0.2.0 [skip ci]\n");
+  ok("ci: add Linux and macOS workflows\n");
+});
+
+test("rejects Co-Authored-By trailers in any case", () => {
+  rejected("feat: x\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>\n", /attribution/i);
+  rejected("feat: x\n\nco-authored-by: Someone <a@b.c>\n", /attribution/i);
+});
+
+test("rejects Claude Code attribution lines", () => {
+  rejected("feat: x\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n", /attribution/i);
+  rejected("feat: x\n\nGenerated with Claude Code\n", /attribution/i);
+});
+
+test("ignores git comment lines", () => {
+  ok("feat: x\n# Co-Authored-By: this is only a comment\n");
+});
+
+test("rejects malformed headers", () => {
+  rejected("Added login page\n", /type\(scope\): summary/);
+  rejected("feature: add x\n", /type\(scope\): summary/);
+  rejected("feat: add login page.\n", /period/);
+  rejected(`feat: ${"x".repeat(70)}\n`, /hard limit is 72/);
+  rejected("feat: x\nbody without blank line\n", /blank line/);
+});
+
+test("warns but accepts headers between 51 and 72 characters", () => {
+  const result = ok("fix(web): clean biome output, check borders on surface\n");
+  assert.ok(result.warnings.some((w) => /aim for ≤ 50/.test(w)));
+});
+
+test("exempts merge, revert and fixup commits from the header format", () => {
+  ok("Merge branch 'x' into main\n");
+  ok('Revert "feat: x"\n\nThis reverts commit abc.\n');
+  ok("fixup! feat: x\n");
+});
+
+test("CRLF messages are handled", () => {
+  ok("feat: x\r\n\r\nbody\r\n");
+  rejected("feat: x\r\n\r\nCo-Authored-By: A <a@b.c>\r\n", /attribution/i);
+});
+```
+
+Run: `pnpm exec tsx --test scripts/lib/commit-msg.test.ts`
+Expected: FAIL (`Cannot find module './commit-msg.ts'`).
+
+- [ ] **Step 2: Implement `scripts/lib/commit-msg.ts`**
+
+```ts
+export type CommitCheck = { ok: boolean; errors: string[]; warnings: string[] };
+
+const TYPES = ["feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"];
+const HEADER = new RegExp(`^(${TYPES.join("|")})(\\([a-z0-9._/-]+\\))?!?: \\S`);
+const EXEMPT = /^(Merge |Revert "|fixup! |squash! |amend! )/;
+const ATTRIBUTION = [
+  /^\s*co-authored-by:/im,
+  /generated with \[?claude/i,
+  /noreply@anthropic\.com/i,
+  /\u{1F916}/u,
+];
+
+/** Validate a commit message: no AI attribution, Conventional Commits header. */
+export function checkCommitMessage(raw: string): CommitCheck {
+  const lines = raw
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter((line) => !line.startsWith("#"));
+  const message = lines.join("\n").trim();
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (ATTRIBUTION.some((pattern) => pattern.test(message))) {
+    errors.push("AI attribution (Co-Authored-By / 'Generated with Claude') is not allowed. Remove it.");
+  }
+
+  const [header = "", second] = message.split("\n");
+  if (!EXEMPT.test(header)) {
+    if (!HEADER.test(header)) {
+      errors.push(`Header must be "type(scope): summary" with type one of: ${TYPES.join(", ")}.`);
+    }
+    if (header.endsWith(".")) errors.push("Header must not end with a period.");
+    if (header.length > 72) {
+      errors.push(`Header is ${header.length} characters; the hard limit is 72.`);
+    } else if (header.length > 50) {
+      warnings.push(`Header is ${header.length} characters; aim for ≤ 50.`);
+    }
+  }
+  if (second !== undefined && second !== "") errors.push("Leave a blank line after the header.");
+
+  return { ok: errors.length === 0, errors, warnings };
+}
+```
+
+Run: `pnpm exec tsx --test scripts/lib/commit-msg.test.ts`
+Expected: all pass.
+
+- [ ] **Step 3: Write `scripts/check-commit-msg.ts` and the hook**
+
+`scripts/check-commit-msg.ts`:
+
+```ts
+import { readFileSync } from "node:fs";
+import { checkCommitMessage } from "./lib/commit-msg.ts";
+
+const path = process.argv[2];
+if (!path) {
+  console.error("usage: check-commit-msg <commit-message-file>");
+  process.exit(2);
+}
+const result = checkCommitMessage(readFileSync(path, "utf8"));
+for (const warning of result.warnings) console.warn(`commit-msg: warning: ${warning}`);
+if (!result.ok) {
+  for (const error of result.errors) console.error(`commit-msg: ${error}`);
+  console.error("Commit rejected. Format: type(scope): summary (see README > Commit messages).");
+  process.exit(1);
+}
+```
+
+`.githooks/commit-msg` (LF endings; git runs hooks with `sh` on Windows, macOS and Linux):
+
+```sh
+#!/bin/sh
+# Rejects AI attribution and non-Conventional-Commits headers. Enabled by `just install` / `just hooks`.
+exec pnpm exec tsx scripts/check-commit-msg.ts "$1"
+```
+
+Make it executable in git (this matters on macOS/Linux), then enable it locally:
+
+```bash
+git add --chmod=+x .githooks/commit-msg
+git config core.hooksPath .githooks
+```
+
+- [ ] **Step 4: Add recipes and README section**
+
+Root `justfile`:
+- Add the two recipes below.
+- Add the line `git config core.hooksPath .githooks` as the last line of the existing `install` recipe.
+
+```just
+# Enable the repo's git hooks (commit-msg guard)
+hooks:
+    git config core.hooksPath .githooks
+
+# Unit tests for the TypeScript helper scripts
+test-scripts:
+    pnpm exec tsx --test scripts/lib/commit-msg.test.ts
+```
+
+`README.md`: append:
+
+````markdown
+## Commit messages
+
+Conventional Commits: `type(scope): summary`. The header is imperative, ≤ 50 characters
+(72 is the hard limit) and has no period. An optional body explains what and why, wrapped at
+72. The optional footer holds `BREAKING CHANGE:` / `Closes #n`. AI attribution
+(`Co-Authored-By`, "Generated with Claude") is never allowed. The `commit-msg` hook in
+`.githooks/` enforces this. `just install` enables it (`just hooks` on its own).
+````
+
+- [ ] **Step 5: Prove the hook works, then commit and push**
+
+Run: `just test-scripts`
+Expected: all pass.
+
+Prove rejection on a throwaway commit attempt. Stage nothing; `--allow-empty` makes no file changes:
+
+```bash
+git commit --allow-empty -m "feat: probe" -m "Co-Authored-By: Probe <p@example.com>"
+```
+
+Expected: the commit is rejected with `commit-msg: AI attribution …` and exit code 1. Confirm `git log -1` did not change.
+
+```bash
+git commit --allow-empty -m "bad header"
+```
+
+Expected: rejected with the header-format error.
+
+Then commit the task (the hook itself validates this message):
+
+```bash
+git add -A
+git commit -m "build: add commit-msg guard hook" -m "Reject AI attribution trailers and malformed Conventional Commits\nheaders for every committer, including agents."
+git push origin main
+```
