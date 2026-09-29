@@ -34,6 +34,9 @@ jobs:
       - run: just check
       - run: just test
       - run: just e2e
+        timeout-minutes: 8
+        env:
+          DEBUG: pw:webserver
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
