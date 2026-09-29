@@ -4,8 +4,10 @@ version = "0.2.1"
 description = "Private-by-default personal knowledge system: backend API, worker and admin CLI"
 requires-python = ">=3.12"
 dependencies = [
+    "anthropic>=1.9",
     "argon2-cffi>=23.1",
     "fastapi>=0.118",
+    "httpx2>=2.13.1",
     "psycopg[binary,pool]>=3.2",
     "pydantic-settings>=2.7",
     "typer>=0.15",
@@ -17,9 +19,9 @@ ai-second-brain = "ai_second_brain.interfaces.cli.main:app"
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.13.1",
     "pyright>=1.1.400",
     "pytest>=8.3",
+    "pytest-socket>=0.8",
     "ruff>=0.15",
 ]
 
@@ -42,7 +44,7 @@ venv = ".venv"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["--strict-markers"]
+addopts = ["--strict-markers", "--allow-hosts=127.0.0.1,::1"]
 markers = ["integration: needs PostgreSQL at TEST_DATABASE_URL (run via `just test`)"]
 
 [build-system]

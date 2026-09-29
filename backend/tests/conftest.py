@@ -1,5 +1,5 @@
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from typing import Any
 
 import pytest
@@ -21,6 +21,15 @@ def make_client(app: FastAPI) -> TestClient:
     return TestClient(app, backend_options={"loop_factory": new_event_loop})
 
 
+def run_async[T](coro: Coroutine[Any, Any, T]) -> T:
+    """Run a coroutine on a fresh selector loop (psycopg async needs one on Windows)."""
+    loop = new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
 @pytest.fixture(autouse=True)
 def isolate_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the developer's .env (exported by just) from leaking into tests.
@@ -28,7 +37,7 @@ def isolate_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     TEST_DATABASE_URL stays: the integration tests read it deliberately.
     """
     for name in list(os.environ):
-        if name.startswith("SB_") or name == "DATABASE_URL":
+        if name.startswith("SB_") or name == "DATABASE_URL" or name.lower().endswith("_proxy"):
             monkeypatch.delenv(name)
 
 

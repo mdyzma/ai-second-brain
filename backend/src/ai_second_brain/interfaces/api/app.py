@@ -26,6 +26,10 @@ logger = logging.getLogger("ai_second_brain.api")
 
 PLACEHOLDER_HASH = "$argon2id$v=19$m=65536,t=3,p=4$placeholder$placeholder"
 
+# API contract version: bumped only for breaking API changes, independent of app releases,
+# so a release never makes the generated web client stale.
+API_VERSION = "1.0"
+
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
@@ -94,7 +98,7 @@ def create_app(
     docs_enabled = settings.env == "dev"
     app = FastAPI(
         title="Second Brain API",
-        version="0.2.0",
+        version=API_VERSION,
         lifespan=lifespan,
         docs_url="/api/docs" if docs_enabled else None,
         redoc_url=None,
