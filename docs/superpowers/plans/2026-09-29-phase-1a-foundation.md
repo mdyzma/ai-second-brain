@@ -4538,7 +4538,8 @@ Expected: all green.
 
 ```bash
 git add -A
-git commit -m "ci(release): automate SemVer releases" -m "Add semantic-release: CI derives the version from Conventional\nCommits, bumps version files, tags vX.Y.Z and publishes notes."
+git commit -m "ci(release): automate SemVer releases" -m "Derive versions from Conventional Commits, tag vX.Y.Z and publish
+notes via semantic-release."
 ```
 
 - [ ] **Step 10: Baseline tag and first release (controller runs this step with the owner's approval)**
