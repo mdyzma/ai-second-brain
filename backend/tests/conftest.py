@@ -1,3 +1,4 @@
+import os
 from collections.abc import Callable
 from typing import Any
 
@@ -18,6 +19,17 @@ UNUSED_DB = "postgres://brain:brain@127.0.0.1:1/unused?connect_timeout=1"
 def make_client(app: FastAPI) -> TestClient:
     """TestClient on a selector event loop (required by psycopg async on Windows)."""
     return TestClient(app, backend_options={"loop_factory": new_event_loop})
+
+
+@pytest.fixture(autouse=True)
+def isolate_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the developer's .env (exported by just) from leaking into tests.
+
+    TEST_DATABASE_URL stays: the integration tests read it deliberately.
+    """
+    for name in list(os.environ):
+        if name.startswith("SB_") or name == "DATABASE_URL":
+            monkeypatch.delenv(name)
 
 
 @pytest.fixture
