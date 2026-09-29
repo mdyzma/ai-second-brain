@@ -1,6 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { isRedirect } from "@tanstack/react-router";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { requireSession } from "./guard";
 import { sessionQueryKey } from "./session";
 
@@ -8,6 +8,11 @@ const get = vi.hoisted(() => vi.fn());
 vi.mock("@/api/client", () => ({ api: { GET: get } }));
 
 describe("requireSession", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    get.mockReset();
+  });
+
   it("treats a failed session fetch as no session and redirects to /login", async () => {
     get.mockRejectedValue(new Error("offline"));
     const error = await requireSession(new QueryClient(), "/ask").catch((e: unknown) => e);
@@ -35,5 +40,21 @@ describe("requireSession", () => {
       expires_at: "2026-10-13T00:00:00Z",
     });
     await expect(requireSession(queryClient, "/ask")).resolves.toBeUndefined();
+  });
+
+  it("refetches a session that is older than its staleTime", async () => {
+    vi.useFakeTimers();
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(
+      sessionQueryKey,
+      { authenticated: true, expires_at: "2026-10-13T00:00:00Z" },
+      { updatedAt: Date.now() - 10 * 60_000 },
+    );
+    get.mockResolvedValue({
+      data: { authenticated: true, expires_at: "2026-10-14T00:00:00Z" },
+      response: { status: 200 },
+    });
+    await expect(requireSession(queryClient, "/ask")).resolves.toBeUndefined();
+    await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
   });
 });
