@@ -16,7 +16,7 @@ Replace the discarded MVP with the greenfield monorepo on which every later phas
 
 ## 2. Scope
 
-**In:** repository layout, root justfile, backend skeleton (config, DB pool, auth, health, admin CLI), first migration, web skeleton (routing, auth guard, shell, tokens, primitives), generated API client, tests, CI, README rewrite, `.env.example`.
+**In:** repository layout, root justfile, backend skeleton (config, DB pool, auth, health, admin CLI), first migration, web skeleton (routing, auth guard, shell, tokens, primitives), generated API client, tests, CI, automated SemVer releases (§11.1), README rewrite, `.env.example`.
 
 **Out:** chat, retrieval, embeddings, Ollama, the job worker (procrastinate), the Obsidian sync, Caddy/TLS and production deployment, import-linter contracts (added with the first domain modules in 1b/2), MCP, Storybook.
 
@@ -285,6 +285,30 @@ The root `justfile` uses `set dotenv-load`, `set windows-shell := ["powershell.e
 - Playwright traces are uploaded on failure.
 - No secrets are required.
 
+### 11.1 Automated releases (added 2026-09-29, owner decision)
+
+Versioning follows SemVer. Tags are `vMAJOR.MINOR.PATCH`, and CI creates them from Conventional Commits. Nobody picks version numbers by hand.
+
+- **Tool:** **semantic-release**. It suits one app with a single version and direct commits to `main`. It is a root pnpm devDependency with these plugins:
+  - commit-analyzer and release-notes-generator, both using the `conventionalcommits` preset;
+  - `@semantic-release/exec`, `@semantic-release/git` and `@semantic-release/github`.
+- **Trigger:** a `release` job in `ci.yml`. It needs `linux` and `macos` to pass, and runs only on push to `main`.
+- **Version bump:**
+  - `BREAKING CHANGE:` or `type!:` → MAJOR
+  - `feat` → MINOR
+  - `fix` or `perf` → PATCH
+  - Other types alone do not release.
+- **On release:**
+  1. `scripts/set-version.ts X.Y.Z` writes the version into `backend/pyproject.toml` (the `[project]` table) and `web/package.json`, then runs `uv lock`.
+  2. `@semantic-release/git` commits those files as `chore(release): vX.Y.Z [skip ci]`, with no attribution.
+  3. The tag `vX.Y.Z` and a GitHub Release are published. Its notes are generated and grouped as 🚀 Features, 🐛 Bug Fixes, ⚡ Performance and ⚠ Breaking Changes.
+- **Baseline:** the owner approved a one-time manual tag, `v0.1.0`, on the last pre-rebuild commit (`14a68fb`, the MVP state). The first CI release is therefore `v0.2.0`, and its notes cover Phase 1a. After that, only CI creates tags.
+- **Rules:**
+  - Tags are never reused, moved or deleted. Fix forward with a PATCH release.
+  - No hand-written changelog.
+  - The owner is advised to protect `v*` tags in the GitHub repository rules.
+- **Out of scope:** deployment artifacts (Docker images, Proxmox deploy). There is nothing to publish yet, so the release is notes plus a version bump only.
+
 ## 12. Risks and mitigations
 
 | Risk | Mitigation |
@@ -308,3 +332,4 @@ The root `justfile` uses `set dotenv-load`, `set windows-shell := ["powershell.e
 - [ ] No recipe contains pipes, `&&`, redirects or OS-specific utilities (reviewed against the §8 rule).
 - [ ] No hardcoded colors outside `tokens.css`; the contrast check passes for both themes.
 - [ ] No secrets committed (`.env` ignored; `.env.test` has test-only values).
+- [ ] The baseline tag `v0.1.0` is pushed. The first CI release creates `v0.2.0`, with a GitHub Release, grouped notes and a version-bump commit that has no attribution.

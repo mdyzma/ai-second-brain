@@ -101,7 +101,8 @@ web/src/features/screens/{screens.ts,PlaceholderScreen.tsx}
 web/src/routes/{__root.tsx,index.tsx,login.tsx,_app.tsx}
 web/src/routes/_app/{ask,search,projects,digest,review,nodes,sources,settings}.tsx
 web/tests/e2e/auth.spec.ts
-.github/workflows/ci.yml
+.github/workflows/ci.yml       # + release job (Task 13)
+.releaserc.json scripts/set-version.ts scripts/lib/version.ts scripts/lib/version.test.ts  # Task 13
 ```
 
 ---
@@ -4243,3 +4244,315 @@ Expected: both `linux` and `macos` jobs pass on the push. If one fails, read the
 - [ ] No recipe contains pipes, `&&`, redirects or OS-specific utilities (review every `justfile`).
 - [ ] No hardcoded colors outside `tokens.css`, and the contrast check passes in both themes.
 - [ ] No secrets committed: `.env` is ignored, and `.env.test` holds test-only values.
+
+---
+
+### Task 13: Automated SemVer releases (semantic-release)
+
+Added 2026-09-29 at the owner's request. Spec §11.1 is binding. CI computes versions from Conventional Commits, tags `vX.Y.Z`, bumps the version files and publishes a GitHub Release with generated notes. Tags are never created by hand, except the one baseline tag the owner approved.
+
+**Files:**
+- Create: `.releaserc.json`, `scripts/lib/version.ts`, `scripts/lib/version.test.ts`, `scripts/set-version.ts`
+- Modify: root `package.json` (devDependencies), `pnpm-lock.yaml`, `web/package.json` (gains `"version"`), root `justfile` (`test-scripts`, `test`, `test-unit`, `release-dry-run`), `.github/workflows/ci.yml` (workflow `permissions`, `release` job), `README.md` (Releases section)
+
+**Interfaces:**
+- Consumes: `repoRoot` from `scripts/lib/docker.ts` (Task 1); the CI jobs `linux` and `macos` (Task 12); the `[project]` table in `backend/pyproject.toml` (Task 3).
+- Produces:
+  - `scripts/lib/version.ts` exports `assertSemver(version: string): void`, `setPyprojectVersion(toml: string, version: string): string` and `setPackageJsonVersion(json: string, version: string): string`.
+  - The CLI `tsx scripts/set-version.ts <X.Y.Z>`.
+  - Release commits `chore(release): vX.Y.Z [skip ci]`.
+
+- [ ] **Step 1: Install semantic-release at the workspace root**
+
+```bash
+pnpm add -D -w semantic-release @semantic-release/exec @semantic-release/git conventional-changelog-conventionalcommits
+```
+
+Expected: semantic-release 25.x. Its engines require Node `^22.14 || >=24.10`, which both CI's Node 24 and the local Node 25 satisfy. Apply the Task 1 Step 7 `allowBuilds` rule if pnpm reports ignored build scripts.
+
+- [ ] **Step 2: Write the failing tests `scripts/lib/version.test.ts`** (Node's built-in test runner via tsx)
+
+```ts
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { assertSemver, setPackageJsonVersion, setPyprojectVersion } from "./version.ts";
+
+const PYPROJECT = [
+  "[project]",
+  'name = "ai-second-brain"',
+  'version = "0.2.0"',
+  "",
+  "[tool.other]",
+  'version = "9.9.9"',
+  "",
+].join("\n");
+
+test("setPyprojectVersion replaces only the [project] version", () => {
+  const updated = setPyprojectVersion(PYPROJECT, "1.2.3");
+  assert.match(updated, /\[project\]\nname = "ai-second-brain"\nversion = "1\.2\.3"\n/);
+  assert.match(updated, /\[tool\.other\]\nversion = "9\.9\.9"/);
+});
+
+test("setPyprojectVersion throws when [project] has no version", () => {
+  assert.throws(() => setPyprojectVersion('[project]\nname = "x"\n', "1.0.0"), /no \[project\] version/);
+});
+
+test("setPackageJsonVersion adds the version right after the name", () => {
+  const updated = setPackageJsonVersion('{"name":"@x/web","private":true}', "0.2.0");
+  assert.equal(updated, '{\n  "name": "@x/web",\n  "version": "0.2.0",\n  "private": true\n}\n');
+});
+
+test("setPackageJsonVersion replaces an existing version", () => {
+  const updated = setPackageJsonVersion('{"name":"w","version":"0.1.0","type":"module"}', "0.3.0");
+  assert.deepEqual(JSON.parse(updated), { name: "w", version: "0.3.0", type: "module" });
+});
+
+for (const bad of ["v1.2.3", "1.2", "latest", "", "1.2.3; rm -rf /"]) {
+  test(`assertSemver rejects ${JSON.stringify(bad)}`, () => {
+    assert.throws(() => assertSemver(bad), /Not a SemVer version/);
+  });
+}
+
+test("assertSemver accepts release and pre-release versions", () => {
+  assertSemver("0.2.0");
+  assertSemver("1.0.0-rc.1");
+});
+```
+
+Run: `pnpm exec tsx --test scripts/lib/version.test.ts`
+Expected: FAIL (`Cannot find module './version.ts'`).
+
+- [ ] **Step 3: Implement `scripts/lib/version.ts`**
+
+```ts
+const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+
+export function assertSemver(version: string): void {
+  if (!SEMVER.test(version)) throw new Error(`Not a SemVer version: "${version}"`);
+}
+
+/** Replace `version = "..."` inside the [project] table only. */
+export function setPyprojectVersion(toml: string, version: string): string {
+  assertSemver(version);
+  let inProject = false;
+  let replaced = false;
+  const lines = toml.split("\n").map((line) => {
+    const table = /^\s*\[([^\]]+)\]\s*$/.exec(line);
+    if (table) {
+      inProject = table[1] === "project";
+      return line;
+    }
+    if (inProject && !replaced && /^\s*version\s*=/.test(line)) {
+      replaced = true;
+      return `version = "${version}"`;
+    }
+    return line;
+  });
+  if (!replaced) throw new Error("pyproject.toml has no [project] version");
+  return lines.join("\n");
+}
+
+/** Set "version" (placed right after "name"), keeping other keys and 2-space formatting. */
+export function setPackageJsonVersion(json: string, version: string): string {
+  assertSemver(version);
+  const { name, version: _previous, ...rest } = JSON.parse(json) as Record<string, unknown>;
+  return `${JSON.stringify({ name, version, ...rest }, null, 2)}\n`;
+}
+```
+
+Run: `pnpm exec tsx --test scripts/lib/version.test.ts`
+Expected: all tests pass.
+
+- [ ] **Step 4: Write `scripts/set-version.ts`**
+
+```ts
+import { spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { repoRoot } from "./lib/docker.ts";
+import { assertSemver, setPackageJsonVersion, setPyprojectVersion } from "./lib/version.ts";
+
+const version = process.argv[2] ?? "";
+assertSemver(version);
+
+function edit(relativePath: string, update: (text: string, version: string) => string): void {
+  const path = join(repoRoot, relativePath);
+  writeFileSync(path, update(readFileSync(path, "utf8"), version), "utf8");
+}
+
+edit("backend/pyproject.toml", setPyprojectVersion);
+edit("web/package.json", setPackageJsonVersion);
+
+const lock = spawnSync("uv", ["lock", "--directory", join(repoRoot, "backend")], { stdio: "inherit" });
+if (lock.status !== 0) process.exit(lock.status ?? 1);
+console.log(`Version set to ${version}`);
+```
+
+Verify it on a throwaway run, then revert:
+Run: `pnpm exec tsx scripts/set-version.ts 9.9.9`, then `git diff --stat`
+Expected: `backend/pyproject.toml`, `backend/uv.lock` and `web/package.json` changed, with `version = "9.9.9"` and `"version": "9.9.9"`.
+Run: `git checkout -- backend/pyproject.toml backend/uv.lock web/package.json`
+Run: `pnpm exec tsx scripts/set-version.ts v1`
+Expected: exit non-zero with `Not a SemVer version: "v1"`, and no files changed.
+
+- [ ] **Step 5: Write `.releaserc.json`**
+
+```json
+{
+  "branches": ["main"],
+  "tagFormat": "v${version}",
+  "plugins": [
+    ["@semantic-release/commit-analyzer", { "preset": "conventionalcommits" }],
+    [
+      "@semantic-release/release-notes-generator",
+      {
+        "preset": "conventionalcommits",
+        "presetConfig": {
+          "types": [
+            { "type": "feat", "section": "🚀 Features" },
+            { "type": "fix", "section": "🐛 Bug Fixes" },
+            { "type": "perf", "section": "⚡ Performance" },
+            { "type": "refactor", "section": "♻️ Refactoring", "hidden": true },
+            { "type": "docs", "section": "📝 Documentation", "hidden": true },
+            { "type": "test", "hidden": true },
+            { "type": "ci", "hidden": true },
+            { "type": "chore", "hidden": true },
+            { "type": "style", "hidden": true }
+          ]
+        }
+      }
+    ],
+    ["@semantic-release/exec", { "prepareCmd": "pnpm exec tsx scripts/set-version.ts ${nextRelease.version}" }],
+    [
+      "@semantic-release/git",
+      {
+        "assets": ["backend/pyproject.toml", "backend/uv.lock", "web/package.json"],
+        "message": "chore(release): v${nextRelease.version} [skip ci]"
+      }
+    ],
+    "@semantic-release/github"
+  ]
+}
+```
+
+Breaking changes appear under the preset's own "⚠ BREAKING CHANGES" heading. The release commit has no body and no attribution trailer.
+
+- [ ] **Step 6: Add the version to `web/package.json` and the recipes**
+
+Run: `pnpm exec tsx scripts/set-version.ts 0.1.0`, then `git checkout -- backend/pyproject.toml backend/uv.lock`
+Expected: only `web/package.json` keeps its change. It now has `"version": "0.1.0"` after `"name"`. `backend/pyproject.toml` keeps `0.2.0`, which CI overwrites on the first release.
+
+Root `justfile`: add the recipes below, and change `test` and `test-unit` so they also run `just test-scripts`:
+
+```just
+# Unit tests for the TypeScript helper scripts
+test-scripts:
+    pnpm exec tsx --test scripts/lib/version.test.ts
+
+# Preview the next release locally (needs GITHUB_TOKEN; see README)
+release-dry-run:
+    pnpm exec semantic-release --dry-run --no-ci
+```
+
+```just
+# All tests (needs the database)
+test:
+    just backend::test
+    just web::test
+    just test-scripts
+
+# Tests that need no database (macOS CI)
+test-unit:
+    just backend::test-unit
+    just web::test
+    just test-scripts
+```
+
+- [ ] **Step 7: Add the release job to `.github/workflows/ci.yml`**
+
+Below the `concurrency:` block, add the workflow-level default:
+
+```yaml
+permissions:
+  contents: read
+```
+
+Append this job:
+
+```yaml
+  release:
+    needs: [linux, macos]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Release
+        run: pnpm exec semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+`[skip ci]` in the release commit and the fact that pushes made with `GITHUB_TOKEN` never trigger workflows together prevent release loops.
+
+- [ ] **Step 8: Document releases in `README.md`**
+
+Append:
+
+````markdown
+## Releases
+
+Versions follow SemVer and are fully automated. After CI passes on `main`,
+semantic-release reads the Conventional Commits since the last `v*` tag:
+
+- `feat` bumps MINOR
+- `fix` or `perf` bumps PATCH
+- `BREAKING CHANGE:` or `type!:` bumps MAJOR
+- other types alone do not release
+
+It then updates the version files, commits `chore(release): vX.Y.Z [skip ci]`, tags
+`vX.Y.Z`, and publishes a GitHub Release with generated notes.
+
+- Never create, move or delete `v*` tags by hand. Fix forward with a new release.
+- Recommended: protect `v*` tags in GitHub (Settings → Rules → Rulesets → Tag rules).
+- Preview locally: set `GITHUB_TOKEN` (e.g. `$env:GITHUB_TOKEN = gh auth token` in
+  PowerShell), then run `just release-dry-run`.
+````
+
+- [ ] **Step 9: Verify and commit**
+
+Run: `just test-scripts`, then `just check`
+Expected: all green.
+
+```bash
+git add -A
+git commit -m "ci(release): automate SemVer releases" -m "Add semantic-release: CI derives the version from Conventional\nCommits, bumps version files, tags vX.Y.Z and publishes notes."
+```
+
+- [ ] **Step 10: Baseline tag and first release (controller runs this step with the owner's approval)**
+
+Pushing a tag and pushing to `main` are outward actions. The controller confirms with the owner before running. **Push the tag before `main`:** if `main` reaches GitHub with the release job but without `v0.1.0`, semantic-release would publish `v1.0.0`.
+
+```bash
+git tag -a v0.1.0 14a68fb -m "v0.1.0: MVP baseline before the Phase 1a rebuild"
+git push origin v0.1.0
+git push origin main
+```
+
+Expected: CI runs `linux` and `macos`, then `release`. The release job creates `v0.2.0` from the Phase 1a `feat` commits. That means a GitHub Release with 🚀 Features notes, and a `chore(release): v0.2.0 [skip ci]` commit that bumps `backend/pyproject.toml`, `backend/uv.lock` and `web/package.json`. Run `git pull` afterwards to fetch the release commit.
+
+If `release-dry-run` is used before this step, it should report the next version as 0.2.0 once `v0.1.0` exists locally.
