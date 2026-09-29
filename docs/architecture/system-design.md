@@ -342,7 +342,7 @@ Scheduled at 02:00 via the job scheduler; idempotent per revision.
 4. **Resolve** entities against existing ones (exact name → alias table → embedding similarity of entity names ≥ threshold). New entities are created as `proposed` unless confidence is high.
 5. **Write edges** with `origin='llm:<model>'`, `confidence`, `status='proposed'|'accepted'` by threshold.
 6. **Recompute salience** (4.3) and apply tier transitions.
-7. **Morning digest:** a short report — new entities, low-confidence links awaiting review, "Rediscover" (dormant ideas related to recent work), newly superseded items, failures. It is shown as the **Digest** screen in the web UI (the landing page each morning) and can optionally be written as a note into the vault.
+7. **Morning digest:** a short report — new entities, low-confidence links awaiting review, "Rediscover" (at most 1 dormant idea strongly matching yesterday's work; a 3–5 item batch on Sundays), newly superseded items, failures. It is shown as the **Digest** screen in the web UI (the landing page each morning) and can optionally be written as a note into the vault.
 8. **Suspend** the GPU host if the system woke it and nobody else is using it (check GPU util + logged-in sessions).
 
 All LLM calls in the sleep cycle go through the `llm` gateway with `sensitivity` of the revision; private revisions can only reach the local tier.
@@ -354,7 +354,7 @@ Full rationale is in [ADR-0012](adr/0012-salience-without-popularity-bias.md). A
 - **Relevance dominates.** Salience is a bounded prior: `final = rrf × (1 + prior)`, `prior ∈ [−0.15, +0.15]`. It breaks ties and never overrides a strong match.
 - **Prior components:** user interest (user-originated events only, decayed with a 90-day half-life), a **distinctiveness** bonus (unique ideas with no near neighbours are protected), and a **staleness** penalty backed by evidence (superseded, closed, expired).
 - **Tiers:** Active · Dormant (computed from inactivity; *still searched*; eligible for resurfacing) · Superseded (evidence-based; linked to its successor; penalized) · Archived (user only; the only tier excluded by default). The Pinned flag and `retention='legal'` are never penalized.
-- **Revival by association:** consolidation links new revisions to similar Dormant sources and reports them in the digest. Each result list reserves one "From earlier" slot for the best relevant Dormant item. The digest also has a "Rediscover" section.
+- **Revival by association:** consolidation links new revisions to similar Dormant sources and reports them in the digest. Each result list reserves one "From earlier" slot for the best relevant Dormant item. Rediscover runs on a hybrid cadence: at most 1 association-triggered item per day, plus a Sunday review of 3–5 items (ADR-0012 §4).
 - **Signals:** edit, open, click on a cited source, and pin, plus commits/emails linked to an entity. System exposure (a search hit, an uninteracted citation) is **not** counted.
 - **Per-kind lifecycles:** ideas, projects (explicit status), financial/legal, email threads, chat transcripts.
 - Salience ships only if the eval shows no drop in long-tail recall@10 against a pure-relevance baseline.

@@ -104,7 +104,7 @@ Button, Input, Textarea, Select, Checkbox, Switch, Dialog, AlertDialog (confirma
 | `IngestStatus` | Freshness of a source | pending · searchable · failed (retry) | Used in the Sources table and after capture |
 | `SalienceControl` | Pin / archive / restore / 👍👎 on a source | active · dormant · superseded · archived · pinned | Only explicit user actions change salience; exposure never does |
 | `LinkReviewItem` | Accept or reject a proposed link | proposed · accepted · rejected | Shows evidence snippet + confidence; keyboard `A`/`R` |
-| `DigestSection` | Morning digest blocks | new · needs review · rediscover · newly superseded · failures · deadlines | Each item deep-links to its screen |
+| `DigestSection` | Morning digest blocks | new · needs review · rediscover (daily single / weekly batch) · newly superseded · failures · deadlines | Each item deep-links to its screen |
 | `ResumePanel` | Project resume page sections | loading (skeleton per section) · partial (one source failed) | Sections fail independently |
 | `SystemBanner` | Global degraded state | DB down · no local model · worker backlog | Every private-tier failure ends with "Nothing was sent to the cloud." |
 | `CaptureBox` | Quick note to Inbox | idle · saving · pending · searchable | Global shortcut `C` |

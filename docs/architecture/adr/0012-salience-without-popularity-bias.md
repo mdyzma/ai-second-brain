@@ -66,7 +66,11 @@ Rarity becomes a reason to keep something, not to forget it.
 
 - **During consolidation:** for each new revision, look up its nearest *Dormant* sources above a similarity threshold. If there is a match, propose a link and add a digest item: "Related to an idea from March 2024: *…*". The old idea wakes because something new resembles it, not because it was popular.
 - **At query time:** reserve 1 of the top-k result slots for the best-matching Dormant item above a relevance floor, shown as "From earlier". This is deliberate exploration that breaks the feedback loop (mechanism 1).
-- **In the digest:** a "Rediscover" section with 1–3 dormant, highly distinctive items related to this week's activity (the entities or projects touched). This is spaced resurfacing, not random nostalgia.
+- **Rediscover cadence (owner decision: hybrid):**
+  - *Daily, triggered only:* at most **1** item in the morning digest, and only when yesterday's activity (edits, captures, touched entities) matches a Dormant source above a high similarity threshold. Most days show nothing. This catches the association while the context is fresh.
+  - *Weekly review (Sunday):* **3–5** dormant, highly distinctive items related to the week's projects/entities, each with *keep (pin)*, *let fade*, *merge into…* and *link to…*. This is deliberate, batched reflection.
+  - An item shown in the daily slot is not repeated in the same week's review. An item dismissed ("let fade") is not resurfaced for 6 months unless a new strong association appears.
+  - This is spaced, association-driven resurfacing, not random nostalgia.
 
 ### 5. Count only user-originated signals
 
@@ -118,7 +122,7 @@ Metrics, compared with Option C:
 | Recall@10 on long-tail queries | **must not drop** (hard guardrail) |
 | Currency accuracy (the current source ranks above the superseded one) | must improve |
 | Exposure share of bottom-50 % activity sources in the top-10 over a month | must not fall below the pure-relevance baseline |
-| Rediscover acceptance (link accepted, or item opened/pinned) | ≥ 20 % after one month, otherwise reduce frequency |
+| Rediscover acceptance (link accepted, or item opened/pinned), **tracked separately for daily and weekly** | ≥ 20 % after one month per trigger. Below that: daily → raise the similarity threshold; weekly → reduce to 3 items or move to biweekly |
 
 ## Consequences
 
