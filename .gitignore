@@ -1,15 +1,24 @@
+# OS / editors
 .DS_Store
+.idea/
+.vscode/
+.claude/
+
+# Environment (never commit real secrets; .env.test is test-only and committed)
+.env
+
+# Python
 __pycache__/
 *.py[cod]
-*.egg-info/
-dist/
-build/
 .venv/
-.env
-*.egg
-.ruff_cache/
 .pytest_cache/
-htmlcov/
+.ruff_cache/
 .coverage
-pgdata/
-.claude/
+htmlcov/
+
+# Node / web
+node_modules/
+web/dist/
+web/test-results/
+web/playwright-report/
+*.tsbuildinfo
