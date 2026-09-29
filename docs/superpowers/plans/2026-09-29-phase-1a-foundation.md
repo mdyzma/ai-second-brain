@@ -31,7 +31,7 @@
 - Never log passwords, cookie values, tokens or request bodies. Log lines carry method, path, status and duration only.
 - Components use semantic/domain tokens only. No color literals outside `web/src/design-system/tokens.css`.
 - Placeholder phases: Ask 1b, Search 2, Projects 8, Digest 4, Review 4, Nodes 5, Sources 2, Settings 1b.
-- **Commits:** directly on `main`, conventional messages, **no `Co-Authored-By` or any AI attribution trailer**. Do not push unless asked.
+- **Commits:** directly on `main`. Conventional Commits: `type(scope): summary` header in imperative mood, ≤ 50 characters, no period; an optional body wrapped at 72 characters that explains what and why. Use the exact messages given in each task. **Never** add `Co-Authored-By`, "Generated with Claude Code" or any AI attribution. Do not push unless asked.
 
 ### Deliberate deviations from the spec (verified during planning)
 
@@ -1141,7 +1141,7 @@ Expected: all pass.
 
 ```bash
 git add -A
-git commit -m "feat(auth): add argon2 password verification and login throttle"
+git commit -m "feat(auth): add argon2 verify and login throttle"
 ```
 
 ---
@@ -1447,7 +1447,7 @@ Expected: clean.
 
 ```bash
 git add -A
-git commit -m "feat(api): add app factory, db pool and health endpoints"
+git commit -m "feat(api): add app factory and health endpoints" -m "Add the async psycopg pool and /api/health and /api/health/ready."
 ```
 
 ---
@@ -2024,7 +2024,8 @@ Expected: all green.
 
 ```bash
 git add -A
-git commit -m "feat(auth): add sessions, same-origin guard and login/logout/me endpoints"
+git commit -m "feat(auth): add sessions and login/logout/me API" -m "Store only sha256 token ids server-side, reject cross-origin writes
+and throttle failed logins."
 ```
 
 ---
@@ -2195,7 +2196,7 @@ Expected: `{"database":"ok","status":"ready"}` with Postgres up. The server log 
 
 ```bash
 git add -A
-git commit -m "feat(cli): add serve, openapi and hash-password commands"
+git commit -m "feat(cli): add serve, openapi, hash-password"
 ```
 
 ---
@@ -2868,7 +2869,7 @@ Expected: no errors. Run `just web::fmt` first if only formatting differs.
 
 ```bash
 git add -A
-git commit -m "feat(web): scaffold Vite app with design tokens and contrast/color guards"
+git commit -m "feat(web): scaffold Vite app with design tokens" -m "Add WCAG contrast and hardcoded-color checks for tokens.css."
 ```
 
 ---
@@ -3095,7 +3096,7 @@ Expected: exit 0. Temporarily change `max_length=1024` to `1000` in `schemas.py`
 
 ```bash
 git add -A
-git commit -m "feat(web): add generated API client and auth client logic"
+git commit -m "feat(web): add generated API client and auth logic"
 ```
 
 ---
@@ -3856,7 +3857,7 @@ Expected: it redirects to `/login`. A wrong password shows "Incorrect password",
 
 ```bash
 git add -A
-git commit -m "feat(web): add theme, primitives, app shell, routes and login"
+git commit -m "feat(web): add app shell, routes and login page" -m "Include the theme toggle, UI primitives and the session guard."
 ```
 
 ---
@@ -4131,7 +4132,7 @@ Run: `just dev` and log in once more in the browser. Stop it with Ctrl+C. Both p
 
 ```bash
 git add -A
-git commit -m "feat: add e2e tests, developer recipes and README"
+git commit -m "feat: add e2e tests, dev recipes and README"
 ```
 
 ---
@@ -4224,7 +4225,8 @@ Expected: green. This mirrors the macOS job.
 
 ```bash
 git add .github/workflows/ci.yml
-git commit -m "ci: add Linux (full) and macOS (static + unit) workflows"
+git commit -m "ci: add Linux and macOS workflows" -m "Linux runs the full suite with Postgres; macOS runs checks and
+unit tests on push to main."
 git push origin main
 ```
 
