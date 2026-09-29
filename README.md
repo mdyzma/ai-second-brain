@@ -1,134 +1,60 @@
-# 🧠 Second Brain: pgvector & MCP Integration Guide
+# Second Brain
 
-## 1. Installation (Postgres 18 & pgvector)
+Private-by-default personal knowledge system: notes, documents, engineering history and home-lab
+hardware in one searchable memory, with private data processed only on your own machines.
 
-Perform these steps inside your Proxmox VM or Container (LXC).
+- Architecture and decisions: [docs/architecture/](docs/architecture/README.md)
+- Current phase spec: [Phase 1a foundation](docs/superpowers/specs/2026-09-29-phase-1a-foundation-design.md)
 
-### Install Binaries
+## Prerequisites
+
+|  | Windows | macOS (Apple Silicon) | Linux |
+|---|---|---|---|
+| uv, just | `winget install astral-sh.uv Casey.Just` | `brew install uv just` | official install scripts or distro packages |
+| Node 24 | `winget install OpenJS.NodeJS.LTS` (or fnm) | `brew install fnm && fnm install` (reads `.nvmrc`) | fnm / nvm |
+| pnpm | `corepack enable` | `corepack enable` | `corepack enable` |
+| Docker | Docker Desktop | Docker Desktop or OrbStack | Docker Engine |
+
+Python 3.12 is installed automatically by uv. dbmate comes with the pnpm workspace.
+
+## Quick start
+
+Run every `just` command from the repository root.
 
 ```bash
-# Update repositories
-sudo apt update
-
-# Install Postgres 18 and the matching pgvector version
-sudo apt install postgresql-18 postgresql-18-pgvector
-
+just setup          # deps, .env, Postgres container, migrations (Docker must be running)
+just hash-password  # prints SB_OWNER_PASSWORD_HASH='...'; paste it into .env, keeping the quotes
+just dev            # API + web; open http://localhost:5173
 ```
 
-### Configure Network Access
+## Everyday commands
 
-To allow Obsidian or OpenClaw to connect from your local network (`192.168.88.x`):
+| Command | What it does |
+|---|---|
+| `just check` | Lint, format check, type checks, token contrast, API-client and schema freshness |
+| `just test` | Backend (unit + integration) and web unit tests |
+| `just test-unit` | Tests that need no database |
+| `just e2e` | Playwright login/navigation tests against the test database |
+| `just fmt` | Format and auto-fix |
+| `just db::new <name>` then `just db::migrate` then `just db::dump` | Add a migration and refresh `db/schema.sql` |
+| `just api-client` | Regenerate the TypeScript client after changing API models |
+| `just --list` | Everything else |
 
-1. **Edit `postgresql.conf**`:
-`sudo nano /etc/postgresql/18/main/postgresql.conf`
-Set: `listen_addresses = '*'`
-2. **Edit `pg_hba.conf**`:
-`sudo nano /etc/postgresql/18/main/pg_hba.conf`
-Add at the bottom:
-`host  secondbraindb  midy  192.168.88.0/24  scram-sha-256`
-3. **Restart**:
-`sudo systemctl restart postgresql`
+## Layout
 
----
+`backend/` Python API and CLI (uv) · `web/` React + TypeScript UI (pnpm) · `db/` SQL migrations
+(dbmate) · `infra/` Docker Compose · `scripts/` cross-platform helper scripts · `docs/` design docs.
 
-## 2. Database & User Setup
+## Notes
 
-Log into Postgres as the superuser to initialize the environment.
-
-```sql
--- 1. Create the database
-CREATE DATABASE secondbraindb;
-
--- 2. Create the specialized role
-CREATE USER midy WITH PASSWORD 'your_secure_password';
-
--- 3. Connect to the new DB
-\c secondbraindb
-
--- 4. Enable pgvector
-CREATE EXTENSION IF NOT EXISTS vector;
-
--- 5. Grant Permissions
-GRANT ALL PRIVILEGES ON DATABASE secondbraindb TO midy;
-GRANT ALL ON SCHEMA public TO midy;
-
-```
-
----
-
-## 3. Schema Design (Unified Memory)
-
-This table stores **Obsidian notes**, **Trilium exports**, and **Agent chats** in one place for cross-contextual retrieval.
-
-```sql
-CREATE TABLE agent_memories (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    category text,          -- 'note', 'chat', 'idea'
-    agent_name text,        -- 'System', 'OpenClaw', 'Claude'
-    source_file text,       -- File path or Chat ID
-    content text,           -- The actual text
-    embedding vector(384),  -- 384 for all-MiniLM-L6-v2 (standard/fast)
-    metadata jsonb,         -- YAML frontmatter or timestamps
-    created_at timestamptz DEFAULT now()
-);
-
--- HNSW Index for millisecond search speeds on your Asus Sabertooth
-CREATE INDEX ON agent_memories USING hnsw (embedding vector_cosine_ops);
-
-```
-
----
-
-## 4. Connecting Obsidian
-
-Since Obsidian is local files, we use a **"Push"** script. This script watches your vault and updates Postgres in real-time.
-
-1. **Install Python requirements**:
-`pip install "psycopg[binary]" pgvector sentence-transformers watchdog`
-2. **Run the Sync Script**:
-Create `sync.py` to watch your vault folder. Every time you save a `.md` file, the script chunks the text, creates vectors, and updates the `agent_memories` table with `category='note'`.
-
----
-
-## 5. Connecting OpenClaw via MCP
-
-To give OpenClaw "Long-Term Memory," we use the **Model Context Protocol**.
-
-### The Architecture
-
-Instead of OpenClaw talking directly to SQL, it talks to an **MCP Server**. This server provides "Tools" like `search_memory` or `save_thought`.
-
-### Implementation Steps
-
-1. **Download an MCP Postgres Server**:
-Use a pre-built server like `@modelcontextprotocol/server-postgres`.
-2. **Configure OpenClaw (`mcp_config.json`)**:
-Add the server to your agent's configuration:
-```json
-{
-  "mcpServers": {
-    "second-brain": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://midy:password@192.168.88.231/secondbraindb"]
-    }
-  }
-}
-
-```
-
-
-3. **Agent Interaction**:
-You can now say to OpenClaw: *"Search my memories for my SATA port configuration."*
-The agent will use the MCP tool to run a vector search:
-`SELECT content FROM agent_memories ORDER BY embedding <=> [query_vector] LIMIT 3;`
-
----
-
-## 6. Proxmox Optimization (Asus Sabertooth Mark 2)
-
-* **CPU**: Set the VM CPU type to **"Host"**. This allows the embedding models to use **AVX2 instructions**, making vector generation 3x faster.
-* **Storage**: Ensure the Postgres data partition is on an **SSD**. Vector indexing (HNSW) is I/O intensive.
-* **Memory**: Allocate at least **4GB RAM**. Postgres 18 uses more memory for parallel workers, which speeds up index building.
+- `.env` is never committed. `.env.test` is committed on purpose and contains only test values
+  (the e2e password is `e2e-test-password`).
+- Keep the single quotes around `SB_OWNER_PASSWORD_HASH`. Without them, just's `.env` loader
+  expands the `$` characters and the hash breaks.
+- If the npm dbmate binary can't be downloaded (proxy/offline), install dbmate with scoop/winget
+  or `brew install dbmate`, and set `DBMATE=dbmate` in `.env`.
+- The dev database listens on `127.0.0.1:5433`. Use the IP, not `localhost`, which is slow on
+  Windows.
 
 ## Commit messages
 
