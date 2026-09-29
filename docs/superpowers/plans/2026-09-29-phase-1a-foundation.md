@@ -19,7 +19,7 @@
 - Python **3.12** (`requires-python = ">=3.12"`, `.python-version` = `3.12`). **uv only. Never Poetry.**
 - Node `>=24` (`.nvmrc` = `24`; the local Node 25 is fine). pnpm version pinned in `packageManager` (`pnpm@12.6.0`).
 - TypeScript pinned to **`~5.9.3`** (openapi-typescript 7 peer-requires `^5.x`; do not install TypeScript 6/7).
-- PostgreSQL 17 + pgvector via `pgvector/pgvector:pg17`, published on `127.0.0.1:5432` only.
+- PostgreSQL 17 + pgvector via `pgvector/pgvector:pg17`, published on host port `127.0.0.1:5433` only (5432 is often taken by a native PostgreSQL install; container-internal port stays 5432).
 - **Cross-platform recipe rule:** every `justfile` recipe line is one invocation of `uv`, `pnpm`, `docker`, `git`, `just` or `echo`. No pipes, `&&`, redirects (`>`), globbing, `sed`/`grep`/`test`/PowerShell cmdlets, and no `[windows]`/`[unix]` variants. Logic goes into TypeScript scripts run with `tsx`.
 - Every `justfile` (root and modules) starts with `set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]`. The root one also has `set dotenv-load`.
 - **Run `just` from the repository root.** Inside a subfolder, just picks up that folder's module `justfile` instead.
@@ -193,9 +193,9 @@ Expected: no output; `git status` shows only the files you changed or deleted. T
 ```dotenv
 # Copy to .env (just setup does this for you). Never commit .env.
 # Database shared by dbmate and the backend (dev container from infra/compose.yaml)
-DATABASE_URL=postgres://brain:brain@localhost:5432/ai_second_brain?sslmode=disable
+DATABASE_URL=postgres://brain:brain@localhost:5433/ai_second_brain?sslmode=disable
 # Test database used by pytest and e2e (created by `just db::test-prepare`)
-TEST_DATABASE_URL=postgres://brain:brain@localhost:5432/ai_second_brain_test?sslmode=disable
+TEST_DATABASE_URL=postgres://brain:brain@localhost:5433/ai_second_brain_test?sslmode=disable
 
 # Owner login. Run `just hash-password` and paste the printed line here.
 # KEEP THE SINGLE QUOTES: unquoted '$' characters are expanded by just's .env loader.
@@ -216,7 +216,7 @@ SB_ENV=dev
 ```dotenv
 # TEST-ONLY VALUES, committed on purpose. Not secrets.
 # The e2e owner password is: e2e-test-password
-TEST_DATABASE_URL=postgres://brain:brain@localhost:5432/ai_second_brain_test?sslmode=disable
+TEST_DATABASE_URL=postgres://brain:brain@localhost:5433/ai_second_brain_test?sslmode=disable
 SB_OWNER_PASSWORD_HASH='$argon2id$v=19$m=65536,t=3,p=4$lUbERLF2lShFt/g2zuyNHw$/2JZ1Uy+8w4nXWGCR1KY0IwYFD1CnGSOM7cAtbhtC/w'
 SB_API_PORT=8001
 SB_WEB_PORT=5174
@@ -374,7 +374,7 @@ services:
       POSTGRES_PASSWORD: brain
       POSTGRES_DB: ai_second_brain
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -424,7 +424,7 @@ if (result.status !== 0) {
   console.error("Postgres did not become healthy. Inspect: docker compose -f infra/compose.yaml logs postgres");
   process.exit(result.status ?? 1);
 }
-console.log("Postgres is up (127.0.0.1:5432).");
+console.log("Postgres is up (127.0.0.1:5433).");
 ```
 
 - [ ] **Step 4: Write `scripts/schema-check.ts`**
@@ -550,7 +550,7 @@ mod db
 - [ ] **Step 7: Verify the whole database path** (Docker must be running)
 
 Run: `just db::up`
-Expected: `Postgres is up (127.0.0.1:5432).` With Docker stopped, you get the per-OS hint and exit 1. Check that path once.
+Expected: `Postgres is up (127.0.0.1:5433).` With Docker stopped, you get the per-OS hint and exit 1. Check that path once.
 Run: `just db::migrate`
 Expected: `Applying: 20260929000000_init.sql`.
 Run: `just db::test-prepare`
