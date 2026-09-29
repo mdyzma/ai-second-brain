@@ -82,3 +82,11 @@ def test_reads_single_quoted_hash_from_env_file(tmp_path: Path) -> None:
     assert settings.owner_password_hash == TEST_HASH
     assert settings.database_url == "postgres://u:p@localhost:5432/db"
     assert settings.env == "prod"
+
+
+def test_errors_never_echo_the_rejected_value(make_settings: Callable[..., Settings]) -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        make_settings(owner_password_hash="my-plaintext-password")
+    message = str(excinfo.value)
+    assert "my-plaintext-password" not in message
+    assert "just hash-password" in message

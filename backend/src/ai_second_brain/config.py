@@ -25,6 +25,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         populate_by_name=True,
+        hide_input_in_errors=True,
     )
 
     database_url: str = Field(validation_alias="DATABASE_URL")
