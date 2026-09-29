@@ -30,6 +30,13 @@ describe("safeRedirect", () => {
     ["/login", "/ask"],
     ["/login?redirect=/x", "/ask"],
     ["javascript:alert(1)", "/ask"],
+    ["/\t/evil.example", "/ask"],
+    ["/\n/evil.example", "/ask"],
+    ["/\r/evil.example", "/ask"],
+    ["/\u007f/x", "/ask"],
+    ["/%09/evil.example", "/%09/evil.example"],
+    ["/LOGIN", "/ask"],
+    ["/login#x", "/ask"],
   ])("%s → %s", (input, expected) => {
     expect(safeRedirect(input)).toBe(expected);
   });

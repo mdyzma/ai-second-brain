@@ -59,8 +59,17 @@ export async function logout(): Promise<void> {
 /** Only same-app relative paths are allowed as post-login destinations (no open redirects). */
 export function safeRedirect(target: unknown): string {
   if (typeof target !== "string") return "/ask";
-  if (!target.startsWith("/") || target.startsWith("//") || target.startsWith("/\\")) return "/ask";
-  if (target === "/login" || target.startsWith("/login?") || target.startsWith("/login/"))
+  if (!target.startsWith("/") || target.startsWith("//")) return "/ask";
+  // Control chars (URL parsing strips tab/CR/LF, turning "/\t/x" into "//x") and backslashes.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting control characters is the point
+  if (/[\u0000-\u001f\u007f\\]/.test(target)) return "/ask";
+  try {
+    const base = "http://ai-second-brain.invalid";
+    const url = new URL(target, base);
+    if (url.origin !== base) return "/ask";
+    if (/^\/login(?:[/?#]|$)/i.test(url.pathname + url.search + url.hash)) return "/ask";
+  } catch {
     return "/ask";
+  }
   return target;
 }
