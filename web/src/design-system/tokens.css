@@ -164,6 +164,15 @@
   --color-danger-fg: var(--sb-danger-fg);
   --color-danger-bg: var(--sb-danger-bg);
   --color-danger-border: var(--sb-danger-border);
+  --color-tier-private-fg: var(--sb-tier-private-fg);
+  --color-tier-private-bg: var(--sb-tier-private-bg);
+  --color-tier-private-border: var(--sb-tier-private-border);
+  --color-tier-cloud-fg: var(--sb-tier-cloud-fg);
+  --color-tier-cloud-bg: var(--sb-tier-cloud-bg);
+  --color-tier-cloud-border: var(--sb-tier-cloud-border);
+  --color-warning-fg: var(--sb-warning-fg);
+  --color-warning-bg: var(--sb-warning-bg);
+  --color-warning-border: var(--sb-warning-border);
 
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;

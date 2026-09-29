@@ -21,3 +21,4 @@ export type TurnEvent =
   | ReceiptEvent
   | DoneEvent
   | ErrorEvent;
+export type { TurnState } from "./turn";
