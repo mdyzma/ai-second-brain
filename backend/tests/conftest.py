@@ -10,6 +10,7 @@ from ai_second_brain.auth.passwords import hash_password
 from ai_second_brain.config import Settings
 from ai_second_brain.runtime import new_event_loop
 
+from .fakes.anthropic import FakeAnthropic
 from .fakes.ollama import FakeOllama
 
 TEST_PASSWORD = "correct horse battery staple"
@@ -63,6 +64,20 @@ def make_fake_ollama() -> Iterator[Callable[[], FakeOllama]]:
 
     def _make() -> FakeOllama:
         fake = FakeOllama().start()
+        started.append(fake)
+        return fake
+
+    yield _make
+    for fake in started:
+        fake.stop()
+
+
+@pytest.fixture
+def make_fake_anthropic() -> Iterator[Callable[[], FakeAnthropic]]:
+    started: list[FakeAnthropic] = []
+
+    def _make() -> FakeAnthropic:
+        fake = FakeAnthropic().start()
         started.append(fake)
         return fake
 
