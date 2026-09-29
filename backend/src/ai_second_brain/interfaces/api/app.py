@@ -5,7 +5,7 @@ import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import psycopg
@@ -15,10 +15,11 @@ from fastapi.responses import JSONResponse
 from psycopg_pool import PoolTimeout
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from ai_second_brain.auth.sessions import SessionStore
 from ai_second_brain.auth.throttle import LoginThrottle
 from ai_second_brain.config import Settings, get_settings
 from ai_second_brain.db import create_pool
-from ai_second_brain.interfaces.api.routes import health
+from ai_second_brain.interfaces.api.routes import auth, health
 
 logger = logging.getLogger("ai_second_brain.api")
 
@@ -77,6 +78,11 @@ def create_app(
         pool = create_pool(settings.database_url)
         await pool.open(wait=False)
         app.state.pool = pool
+        app.state.sessions = SessionStore(pool, timedelta(days=settings.session_ttl_days), clock)
+        try:
+            await app.state.sessions.purge_expired()
+        except (PoolTimeout, psycopg.Error, OSError):
+            logger.warning("session purge skipped: database unavailable")
         try:
             yield
         finally:
@@ -102,6 +108,7 @@ def create_app(
     app.middleware("http")(_log_requests)
 
     app.include_router(health.router, prefix="/api")
+    app.include_router(auth.router, prefix="/api/auth")
     return app
 
 

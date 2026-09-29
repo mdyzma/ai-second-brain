@@ -42,7 +42,7 @@ def test_openapi_schema_has_stable_operation_ids() -> None:
     operation_ids = {
         operation["operationId"] for path in schema["paths"].values() for operation in path.values()
     }
-    assert {"health", "ready"} <= operation_ids
+    assert {"health", "ready", "login", "logout", "me"} <= operation_ids
 
 
 def test_method_not_allowed_is_snake_case(make_settings: Callable[..., Settings]) -> None:
