@@ -242,6 +242,10 @@ def test_logs_never_carry_content(
     turn(client, "cloud", "cloud-secret-88")
     ollama.behaviour.chat_status = 500
     turn(client, "private", "failing-secret-23")
+    # positive control: the app's own log lines were captured, so the checks below are not vacuous
+    assert any(r.name.startswith("ai_second_brain.chat") for r in caplog.records)
+    assert "outcome=ok" in caplog.text
+    assert "outcome=error:provider_error" in caplog.text
     for secret in (
         "question-secret-17",
         "answer-secret-51",
