@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: extractions/setup-just@v3
+      - name: Create .env from example
+        run: cp .env.example .env
+      - run: just install
+      - name: Playwright system dependencies
+        run: pnpm --dir web exec playwright install-deps chromium
+      - run: just db::up
+      - run: just db::migrate
+      - run: just db::test-prepare
+      - run: just check
+      - run: just test
+      - run: just e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: |
+            web/test-results
+            web/playwright-report
+          if-no-files-found: ignore
+
+  macos:
+    if: github.event_name == 'push'
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: extractions/setup-just@v3
+      - name: Create .env from example
+        run: cp .env.example .env
+      - run: just install
+      - run: just check
+      - run: just test-unit
