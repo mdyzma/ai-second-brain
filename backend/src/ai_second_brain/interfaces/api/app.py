@@ -1,5 +1,6 @@
 """FastAPI application factory."""
 
+import asyncio
 import http
 import logging
 import time
@@ -100,6 +101,7 @@ def create_app(
     app.state.settings = settings
     app.state.clock = clock
     app.state.throttle = LoginThrottle(clock=throttle_clock)
+    app.state.login_lock = asyncio.Lock()
 
     app.add_exception_handler(PoolTimeout, _database_unavailable)
     app.add_exception_handler(psycopg.OperationalError, _database_unavailable)

@@ -1,6 +1,7 @@
 import logging
 import os
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import psycopg
@@ -217,3 +218,16 @@ def test_login_and_me_are_503_when_database_down(
         assert response.json() == {"detail": "database_unavailable"}
         me = dead.get("/api/auth/me", headers={"Cookie": "sb_session=some-token"})
         assert me.status_code == 503
+
+
+def test_concurrent_wrong_passwords_cannot_exceed_throttle(client: TestClient) -> None:
+    def attempt(_: int) -> tuple[int, dict[str, str]]:
+        response = client.post("/api/auth/login", json={"password": "wrong"}, headers=SAME_ORIGIN)
+        return response.status_code, response.json()
+
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        results = list(pool.map(attempt, range(10)))
+    statuses = [status for status, _ in results]
+    assert statuses.count(401) <= 5
+    assert statuses.count(401) + statuses.count(429) == 10
+    assert all(body == {"detail": "too_many_attempts"} for status, body in results if status == 429)
