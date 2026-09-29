@@ -70,6 +70,20 @@ describe("SessionList", () => {
     expect(onDelete).toHaveBeenCalledWith(SESSION.id);
   });
 
+  it("shows a delete error", () => {
+    render(
+      <SessionList
+        sessions={[SESSION]}
+        error="Couldn't delete the conversation. Try again."
+        onDelete={vi.fn()}
+        renderLink={() => null}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Couldn't delete the conversation. Try again.",
+    );
+  });
+
   it("says when there are none", () => {
     render(<SessionList sessions={[]} onDelete={vi.fn()} renderLink={() => null} />);
     expect(screen.getByText("No conversations yet.")).toBeInTheDocument();

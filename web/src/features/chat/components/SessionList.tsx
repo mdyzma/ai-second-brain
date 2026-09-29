@@ -17,13 +17,19 @@ type Props = {
   sessions: ChatSession[];
   activeId?: string | undefined;
   onDelete: (id: string) => Promise<void>;
+  error?: string | null | undefined;
   renderLink: (session: ChatSession, className: string) => ReactNode;
 };
 
-export function SessionList({ sessions, activeId, onDelete, renderLink }: Props) {
+export function SessionList({ sessions, activeId, onDelete, renderLink, error }: Props) {
   return (
     <nav aria-label="Conversations" className="flex flex-col gap-2">
       <h2 className="text-sm font-semibold">Conversations</h2>
+      {error ? (
+        <p role="alert" className="text-sm text-danger-fg">
+          {error}
+        </p>
+      ) : null}
       {sessions.length === 0 ? (
         <p className="text-sm text-fg-muted">No conversations yet.</p>
       ) : (

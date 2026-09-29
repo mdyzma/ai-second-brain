@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, Outlet, useNavigate, useParams } from "@tanstack/react-router";
+import { useState } from "react";
 import { cn } from "@/design-system/cn";
 import { chatKeys, deleteSession, sessionsQueryOptions } from "@/features/chat/api";
 import { SessionList } from "@/features/chat/components/SessionList";
@@ -11,12 +12,18 @@ function AskLayout() {
   const { sessionId } = useParams({ strict: false });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   async function handleDelete(id: string): Promise<void> {
-    if (!(await deleteSession(id))) return;
-    queryClient.removeQueries({ queryKey: chatKeys.session(id) });
-    await queryClient.invalidateQueries({ queryKey: chatKeys.sessions });
+    if (!(await deleteSession(id))) {
+      setDeleteError("Couldn't delete the conversation. Try again.");
+      return;
+    }
+    setDeleteError(null);
+    // Leave the open conversation first so its screen is unmounted before the query is dropped.
     if (sessionId === id) await navigate({ to: "/ask" });
+    queryClient.removeQueries({ queryKey: chatKeys.session(id) });
+    await queryClient.invalidateQueries({ queryKey: chatKeys.sessions, exact: true });
   }
 
   return (
@@ -33,6 +40,7 @@ function AskLayout() {
             sessions={sessions.data ?? []}
             activeId={sessionId}
             onDelete={handleDelete}
+            error={deleteError}
             renderLink={(session, className) => (
               <Link to="/ask/$sessionId" params={{ sessionId: session.id }} className={className}>
                 {session.title ?? "New conversation"}
