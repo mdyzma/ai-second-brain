@@ -21,13 +21,13 @@
 
 **AI Second Brain** collects the things you know into one searchable memory: Obsidian notes, documents,
 invoices and contracts, email, git history, and the state of your home-lab machines. You can then ask it
-questions and it answers with sources. That is the goal; today only the platform exists. **Planned
-(phase 1b onward):** private content is processed only by models running on your own machines
-(Ollama on your LAN), and a cloud model is used only when you explicitly choose it, with material
-you marked as shareable. Nothing talks to any model yet.
+questions and it answers with sources. That is the goal; today the platform and a private chat exist.
+Private content is processed only by models running on your own machines (Ollama on your LAN), and a
+cloud model is used only when you explicitly choose it. It never reads your notes.
 
-> **Status: Phase 1a "foundation" (see the latest release badge above).** The platform is in place: a secure single-user
-> login, the web app shell, the API, the database, CI and automated releases. The knowledge
+> **Status: Phase 1b "private chat" (see the latest release badge above).** The platform is in place: a secure single-user
+> login, the web app shell, the API, the database, CI and automated releases, plus the Ask screen
+> for chatting with a local model. Your notes are not searchable yet. The knowledge
 > features arrive phase by phase; see the [roadmap](#roadmap). The screens show what each one
 > will do.
 
@@ -50,6 +50,7 @@ you marked as shareable. Nothing talks to any model yet.
 
 | | |
 | --- | --- |
+| 💬 **Ask (private by default)** | Chat with a local Ollama model on your LAN; sources are shown before the answer; nothing is sent to the cloud. Cloud sessions (Anthropic) are an explicit, per-conversation opt-in and never read your notes. Retrieval arrives with Phase 2, so answers currently say "No matching local sources". |
 | 🔐 **Single-owner login** | argon2id password hash, server-side sessions (only a SHA-256 of the token is stored), HttpOnly `SameSite=Strict` cookie, same-origin check on every write, lockout after 5 failed attempts, and protection against open redirects. |
 | 🧭 **Web app shell** | React + TypeScript app with a sidebar on desktop and a bottom bar on phones. It has the eight screens of the product (Ask, Search, Projects, Digest, Review, Nodes, Sources, Settings) and a skip link, and it can be used from the keyboard alone. |
 | 🌗 **Light and dark themes** | Follows your system or your choice. Every colour comes from design tokens, a check keeps all text at WCAG AA contrast in both themes, and another check blocks hard-coded colours. |
@@ -60,6 +61,8 @@ you marked as shareable. Nothing talks to any model yet.
 | 🖥️ **Works on your machines** | The same `just` commands on Windows (PowerShell), macOS (Apple Silicon) and Linux. |
 
 ## Screenshots
+
+![Ask screen](docs/images/readme/ask.jpg)
 
 <table>
   <tr>
@@ -99,7 +102,7 @@ Each phase gets its own spec and plan before any code is written, in
 | Phase | What you get | Status |
 | --- | --- | --- |
 | 1a | Foundation: monorepo, login, app shell, database, CI, releases | ✅ v0.2.0 |
-| 1b | **Ask** privately: chat answered by a local model (Ollama), with sources shown first; settings | Next |
+| 1b | **Ask** privately: chat answered by a local model (Ollama), with sources shown first; settings | ✅ Done |
 | 2 | **Search** and **Sources**: durable Obsidian sync (watcher and nightly reconcile), hybrid vector and full-text search, quick capture | Planned |
 | 3 | Multilingual (Polish/English) embeddings, chosen by measured retrieval quality | Planned |
 | 4 | **Digest** and **Review**: nightly consolidation links notes to projects, people and machines; a morning digest; a review queue | Planned |
@@ -154,6 +157,7 @@ command from the repository root.
 | `just db::new <name>`, then `just db::migrate` and `just db::dump` | Add a migration and refresh `db/schema.sql` |
 | `just db::up` / `just db::down` / `just db::status` | Start or stop the database container, or list migrations |
 | `just hash-password` | Hash a new owner password |
+| `just chat-smoke` | Ask your configured local model one question (nothing is saved) |
 | `just release-dry-run` | Preview the next release version (needs `GITHUB_TOKEN`) |
 | `just --list` | Everything else |
 
@@ -167,6 +171,7 @@ ai-second-brain/
 │   │   ├── db.py               Async PostgreSQL connection pool (psycopg 3)
 │   │   ├── runtime.py          Event loop that psycopg needs on Windows
 │   │   ├── auth/               Password hashing, login throttle, server-side sessions
+│   │   ├── chat/               Private/cloud routing, Ollama and Anthropic clients, conversations
 │   │   └── interfaces/
 │   │       ├── api/            FastAPI app, routes (health, auth), cross-site check, API schemas
 │   │       └── cli/            `ai-second-brain serve | openapi | hash-password`
@@ -175,7 +180,7 @@ ai-second-brain/
 │   ├── src/
 │   │   ├── api/                Generated OpenAPI schema and client (never edited by hand)
 │   │   ├── design-system/      tokens.css (colours, fonts, radii), theme, UI primitives, app shell
-│   │   ├── features/           auth (session, login form, route guard) and screens (placeholders)
+│   │   ├── features/           auth (session, login form, route guard), chat (Ask screen) and screens (placeholders)
 │   │   └── routes/             File-based routes: /login and the protected app screens
 │   ├── scripts/                Contrast checker and hard-coded-colour guard for the design tokens
 │   └── tests/e2e/              Playwright browser tests
@@ -200,20 +205,22 @@ ai-second-brain/
 ```text
 Browser ──HTTP (localhost)──▶ Web app (React SPA) ──/api──▶ FastAPI ──▶ PostgreSQL 17 + pgvector
                                                   │
-                                                  └─ planned (phase 1b+): local models (Ollama on your LAN) for private data,
-                                                     a cloud model only for content you marked shareable
+                                                  ├─ local models (Ollama on your LAN) for private chats
+                                                  └─ a cloud model (Anthropic) only for cloud chats you start
 ```
 
 - **Plain HTTP for now.** Phase 1a runs on localhost over HTTP; TLS comes with deployment.
 - **One backend, one datastore.** A modular Python monolith. PostgreSQL holds relational data,
   vectors, jobs and sessions; there is no Redis and no separate vector or graph database
   ([why](docs/architecture/adr/0002-postgres-single-datastore.md)).
-- **Private by default (planned, phase 1b onward).** A single privacy gateway will decide where any
-  text may go, and private content will never leave your LAN; no model is connected today ([design](docs/architecture/system-design.md#5-privacy-architecture)).
+- **Private by default.** Each conversation is private (local model) or cloud, chosen when it is
+  created and fixed afterwards. Private conversations only reach the Ollama endpoints you configure;
+  cloud conversations never include your notes ([design](docs/architecture/system-design.md#5-privacy-architecture)).
 - **The API contract drives the UI.** Pydantic models produce the OpenAPI schema, which produces
   the TypeScript types. A change on one side that isn't regenerated fails the check.
 - **Endpoints today:** `GET /api/health`, `GET /api/health/ready`, `POST /api/auth/login`,
-  `POST /api/auth/logout` and `GET /api/auth/me`. Errors are always `{"detail": "<code>"}`, where
+  `POST /api/auth/logout`, `GET /api/auth/me`, `GET /api/chat/status` and the conversation
+  endpoints under `/api/sessions` (answers stream as server-sent events). Errors are always `{"detail": "<code>"}`, where
   `<code>` is a snake_case error name.
 
 ## Configuration
@@ -229,6 +236,26 @@ Browser ──HTTP (localhost)──▶ Web app (React SPA) ──/api──▶ 
 | `SB_ALLOWED_ORIGINS` | `http://localhost:5173` | Origins allowed to make changes (the cross-site check) |
 | `SB_API_PORT` / `SB_WEB_PORT` | `8000` / `5173` | Development ports |
 | `SB_ENV` | `dev` | `dev` enables the API docs at `/api/docs`; `prod` hides them |
+
+### Local models (Ollama)
+
+1. Install Ollama on each host and run `ollama pull <model>` yourself; the app never downloads models.
+2. On LAN hosts set `OLLAMA_HOST=0.0.0.0:11434` and keep port 11434 off the internet.
+3. Set `SB_OLLAMA_ENDPOINTS` in order of preference (copy the example from `.env.example`), marking
+   CPU-only hosts `"degraded": true`.
+4. Run `just chat-smoke`.
+5. Optionally set `SB_ANTHROPIC_API_KEY` to allow cloud sessions.
+
+The app enforces routing, not the physical location of a URL: a "local" endpoint is whatever you configure.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SB_OLLAMA_ENDPOINTS` | empty | JSON list of `{label, url, model, degraded?}`; the order is the preference |
+| `SB_ANTHROPIC_API_KEY` | empty | Empty disables cloud sessions |
+| `SB_ANTHROPIC_MODEL` | `claude-sonnet-5-5` | Model for cloud sessions |
+| `SB_ANTHROPIC_BASE_URL` | empty | Tests only |
+| `SB_CHAT_MAX_TOKENS` | `2048` | Maximum answer length |
+| `SB_CHAT_STATUS_TTL_SECONDS` | `10` | How long the endpoint status is cached |
 
 `.env` is never committed. `.env.test` is committed on purpose and contains only test values
 (the e2e password is `e2e-test-password`).
@@ -266,6 +293,8 @@ version files, commits `chore(release): vX.Y.Z [skip ci]`, tags `vX.Y.Z` and pub
   next to a locally installed PostgreSQL.
 - **"Docker is not reachable":** start Docker Desktop (Windows), Docker Desktop or OrbStack (macOS),
   or the Docker service (Linux).
+- **"No local model reachable":** run `just chat-smoke`; every endpoint marked UNREACHABLE failed
+  `GET /api/version` within 1 s. Check `OLLAMA_HOST`, the firewall and the URL in `SB_OLLAMA_ENDPOINTS`.
 - **The dbmate binary can't be downloaded (proxy or offline):** install dbmate with scoop/winget or
   `brew install dbmate`, and set `DBMATE=dbmate` in `.env`.
 

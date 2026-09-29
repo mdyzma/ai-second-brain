@@ -1,5 +1,7 @@
 # Private chat routing: first implementation specification
 
+> **Revision (2026-09-29):** §3 (CLI user contract) and §5 (component layout) are superseded by the [Phase 1b spec](2026-09-29-phase-1b-private-chat-design.md), which implements these rules behind the web API. §4, §6 and §8 still apply.
+
 Date: 2026-09-29. Status: proposed design for human review. Scope: one CLI chat routing boundary. Companion: [project assessment and roadmap](2026-09-29-second-brain-assessment.md).
 
 ## 1. Purpose and success

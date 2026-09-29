@@ -11,7 +11,7 @@ Date: 2026-09-29. Source: the task reviews and the final whole-branch review of 
 
 ## With Phase 1b (first real data)
 
-- **API version:** `openapi.json` `info.version` is hard-coded to 0.2.0. Decide between a separate contract version and deriving it from the app version. If it is derived, `set-version` must also regenerate the client, or `api-client-check` fails after every release.
+- **API version:** resolved in 1b: `info.version` is a separate contract version (`API_VERSION = "1.0"`), changed only for breaking API changes.
 - **Login UX:**
   - `/me` failing after a successful login, or a network error, sends the user back to `/login` with no visible message, and `handleSubmit` has an unhandled rejection.
   - A 403 is shown as "Can't reach the server".
