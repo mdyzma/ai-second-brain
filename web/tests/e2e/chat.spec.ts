@@ -62,7 +62,12 @@ test("Stop interrupts a slow answer, nothing is saved, and the next question wor
   await expect(page.getByText("Stopped — not saved.")).toBeVisible();
 
   await page.reload();
+  // Wait for the reloaded session detail first, so the absence checks are meaningful.
+  await expect(page.getByRole("heading", { name: "New conversation" })).toBeVisible();
   await expect(page.getByText(/word3/)).toHaveCount(0);
+  await expect(
+    page.getByRole("list", { name: "Conversation" }).getByText("please be slow"),
+  ).toHaveCount(0);
 
   await expect(page.getByLabel("Ask privately")).toBeEnabled();
   await page.getByLabel("Ask privately").fill("hello again");
