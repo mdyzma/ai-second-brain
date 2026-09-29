@@ -41,6 +41,8 @@ export default defineConfig({
       env: serverEnv,
       reuseExistingServer: false,
       timeout: 60_000,
+      // Linux CI hung on the default SIGKILL teardown; ask nicely, then force.
+      gracefulShutdown: { signal: "SIGTERM", timeout: 5000 },
     },
     {
       command: "pnpm exec vite",
@@ -48,6 +50,8 @@ export default defineConfig({
       env: serverEnv,
       reuseExistingServer: false,
       timeout: 60_000,
+      // Linux CI hung on the default SIGKILL teardown; ask nicely, then force.
+      gracefulShutdown: { signal: "SIGTERM", timeout: 5000 },
     },
   ],
 });
