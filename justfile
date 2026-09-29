@@ -11,7 +11,7 @@ default:
 
 # Install all dependencies
 setup:
-    poetry install
+    uv sync
 
 # ===========================================
 # QUALITY CONTROL
@@ -19,16 +19,16 @@ setup:
 
 # Run linters
 lint:
-    poetry run ruff check src/ tests/
+    uv run ruff check src/ tests/
 
 # Auto-format code
 fmt:
-    poetry run ruff check --fix src/ tests/
-    poetry run ruff format src/ tests/
+    uv run ruff check --fix src/ tests/
+    uv run ruff format src/ tests/
 
 # Run test suite
 test *args:
-    poetry run pytest {{ args }}
+    uv run pytest {{ args }}
 
 # Full quality check
 check: lint test
@@ -39,15 +39,15 @@ check: lint test
 
 # Start interactive chat
 chat *args:
-    poetry run second-brain chat {{ args }}
+    uv run second-brain chat {{ args }}
 
 # Show memory statistics
 stats:
-    poetry run second-brain stats
+    uv run second-brain stats
 
 # Run Obsidian vault sync watcher
 sync-obsidian:
-    poetry run python -m second_brain.tools.obsidian_sync
+    uv run python -m second_brain.tools.obsidian_sync
 
 # ===========================================
 # DATABASE (Docker)
