@@ -1,83 +1,276 @@
-# Second Brain
+<h1 align="center">🧠 AI Second Brain</h1>
 
-Private-by-default personal knowledge system: notes, documents, engineering history and home-lab
-hardware in one searchable memory, with private data processed only on your own machines.
+<p align="center">
+  <strong>A private-by-default memory for your notes, documents, code history and home lab.</strong><br>
+  Self-hosted · local AI for private data · PostgreSQL + pgvector · web UI · runs on Windows, macOS and Linux
+</p>
 
-- Architecture and decisions: [docs/architecture/](docs/architecture/README.md)
-- Current phase spec: [Phase 1a foundation](docs/superpowers/specs/2026-09-29-phase-1a-foundation-design.md)
+<p align="center">
+  <a href="https://github.com/mdyzma/ai-second-brain/actions/workflows/ci.yml"><img src="https://github.com/mdyzma/ai-second-brain/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/mdyzma/ai-second-brain/releases/latest"><img src="https://img.shields.io/github/v/release/mdyzma/ai-second-brain?sort=semver" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white" alt="Python 3.12">
+  <img src="https://img.shields.io/badge/node-24-339933?logo=node.js&logoColor=white" alt="Node 24">
+  <img src="https://img.shields.io/badge/PostgreSQL-17%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL 17 + pgvector">
+  <img src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React 19">
+  <img src="https://img.shields.io/badge/uv%20%2B%20just-tooling-DE5FE9" alt="uv + just">
+  <a href="https://www.conventionalcommits.org"><img src="https://img.shields.io/badge/commits-conventional-FE5196?logo=conventionalcommits&logoColor=white" alt="Conventional Commits"></a>
+</p>
 
-## Prerequisites
+---
 
-|  | Windows | macOS (Apple Silicon) | Linux |
-|---|---|---|---|
+**AI Second Brain** collects the things you know into one searchable memory: Obsidian notes, documents,
+invoices and contracts, email, git history, and the state of your home-lab machines. You can then ask it
+questions and it answers with sources. Private content is processed **only by models running on your
+own machines** (Ollama on your LAN). A cloud model is used only when you explicitly choose it, and
+only with material you marked as shareable.
+
+> **Status: v0.2.0, Phase 1a "foundation".** The platform is in place: a secure single-user
+> login, the web app shell, the API, the database, CI and automated releases. The knowledge
+> features arrive phase by phase; see the [roadmap](#roadmap). The screens show what each one
+> will do.
+
+## Contents
+
+- [What it does today](#what-it-does-today)
+- [Screenshots](#screenshots)
+- [Roadmap](#roadmap)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Everyday commands](#everyday-commands)
+- [Repository layout](#repository-layout)
+- [How it works](#how-it-works)
+- [Configuration](#configuration)
+- [Commit messages and releases](#commit-messages-and-releases)
+- [Troubleshooting](#troubleshooting)
+- [Documentation](#documentation)
+
+## What it does today
+
+| | |
+| --- | --- |
+| 🔐 **Single-owner login** | argon2id password hash, server-side sessions (only a SHA-256 of the token is stored), HttpOnly `SameSite=Strict` cookie, same-origin check on every write, lockout after 5 failed attempts, and protection against open redirects. |
+| 🧭 **Web app shell** | React + TypeScript app with a sidebar on desktop and a bottom bar on phones. It has the eight screens of the product (Ask, Search, Projects, Digest, Review, Nodes, Sources, Settings) and a skip link, and it can be used from the keyboard alone. |
+| 🌗 **Light and dark themes** | Follows your system or your choice. Every colour comes from design tokens, a check keeps all text at WCAG AA contrast in both themes, and another check blocks hard-coded colours. |
+| 🗄️ **Database ready for vectors** | PostgreSQL 17 with the `pgvector` extension in Docker, versioned SQL migrations (dbmate), and a committed `db/schema.sql` that CI keeps honest. |
+| 🔌 **Typed API** | FastAPI with health/readiness endpoints and auth. The TypeScript client is generated from the API schema, and CI fails if the two drift apart. |
+| 🧪 **Tested end to end** | Python unit and integration tests against a real database, web unit tests, and Playwright browser tests of the login flow, on Linux and macOS in CI. |
+| 🚀 **Automated releases** | Versions and release notes come from the commit history (SemVer + semantic-release), with no manual tagging. |
+| 🖥️ **Works on your machines** | The same `just` commands on Windows (PowerShell), macOS (Apple Silicon) and Linux. |
+
+## Screenshots
+
+<table>
+  <tr>
+    <th width="50%">Desktop, dark theme</th>
+    <th width="50%">Desktop, light theme</th>
+  </tr>
+  <tr>
+    <td><a href="docs/images/readme/app-dark.jpg"><img src="docs/images/readme/app-dark.jpg" alt="App shell in dark theme with the Ask screen"></a></td>
+    <td><a href="docs/images/readme/app-light.jpg"><img src="docs/images/readme/app-light.jpg" alt="App shell in light theme with the Nodes screen"></a></td>
+  </tr>
+  <tr>
+    <td>The sidebar holds the eight screens. Each placeholder says what the screen will do and which phase delivers it.</td>
+    <td>The theme toggle in the header cycles between system, light and dark, and the choice is remembered.</td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <th width="62%">Sign in</th>
+    <th width="38%">On a phone</th>
+  </tr>
+  <tr>
+    <td><a href="docs/images/readme/login.jpg"><img src="docs/images/readme/login.jpg" alt="Login page showing the Incorrect password message"></a></td>
+    <td><a href="docs/images/readme/app-mobile.jpg"><img src="docs/images/readme/app-mobile.jpg" alt="Mobile layout with the bottom navigation bar"></a></td>
+  </tr>
+  <tr>
+    <td>One password for the owner. Errors are announced to screen readers, and repeated failures are locked out for a minute.</td>
+    <td>Below 768 px the sidebar becomes a bottom bar.</td>
+  </tr>
+</table>
+
+## Roadmap
+
+Each phase gets its own spec and plan before any code is written, in
+[`docs/superpowers/`](docs/superpowers/). The full design is in [`docs/architecture/`](docs/architecture/README.md).
+
+| Phase | What you get | Status |
+| --- | --- | --- |
+| 1a | Foundation: monorepo, login, app shell, database, CI, releases | ✅ v0.2.0 |
+| 1b | **Ask** privately: chat answered by a local model (Ollama), with sources shown first; settings | Next |
+| 2 | **Search** and **Sources**: durable Obsidian sync (watcher and nightly reconcile), hybrid vector and full-text search, quick capture | Planned |
+| 3 | Multilingual (Polish/English) embeddings, chosen by measured retrieval quality | Planned |
+| 4 | **Digest** and **Review**: nightly consolidation links notes to projects, people and machines; a morning digest; a review queue | Planned |
+| 5 | **Nodes**: see and wake your machines (RTX workstation, MacBook, Proxmox) with truthful online, offline and unknown states | Planned |
+| 6 | Paperwork and history: invoices and contracts from PDF, email archives, git history | Planned |
+| 7 | Salience: old ideas are surfaced again when they relate to what you're working on, and nothing fades away without your consent | Planned |
+| 8 | **Projects** and MCP: pick a project back up with its full context, and let AI tools use what you marked shareable | Planned |
+
+## Requirements
+
+| | Windows | macOS (Apple Silicon) | Linux |
+| --- | --- | --- | --- |
 | uv, just | `winget install astral-sh.uv Casey.Just` | `brew install uv just` | official install scripts or distro packages |
 | Node 24 | `winget install OpenJS.NodeJS.LTS` (or fnm) | `brew install fnm && fnm install` (reads `.nvmrc`) | fnm / nvm |
 | pnpm | `corepack enable` | `corepack enable` | `corepack enable` |
 | Docker | Docker Desktop | Docker Desktop or OrbStack | Docker Engine |
 
-Python 3.12 is installed automatically by uv. dbmate comes with the pnpm workspace.
+uv installs Python 3.12 itself, so you don't need to. dbmate (migrations), tsx and the other tools
+come with the pnpm workspace.
+
+**Main dependencies:**
+- **Backend:** FastAPI, uvicorn, psycopg 3 (async pool), pydantic-settings, argon2-cffi, Typer.
+- **Web:** React 19, TypeScript 5.9 (strict), Vite 8, TanStack Router and Query, Tailwind CSS 4,
+  Radix/shadcn primitives, openapi-fetch.
+- **Quality tools:** ruff, pyright, pytest, Biome, Vitest, Playwright.
+- **Database:** PostgreSQL 17 with pgvector.
 
 ## Quick start
 
-Run every `just` command from the repository root.
-
 ```bash
-just setup          # deps, .env, Postgres container, migrations (Docker must be running)
+git clone https://github.com/mdyzma/ai-second-brain.git
+cd ai-second-brain
+just setup          # dependencies, .env, the Postgres container and migrations (Docker must be running)
 just hash-password  # prints SB_OWNER_PASSWORD_HASH='...'; paste it into .env, keeping the quotes
-just dev            # API + web; open http://localhost:5173
+just dev            # API and web app together
 ```
+
+Open <http://localhost:5173> and sign in with the password you just hashed. Run every `just`
+command from the repository root.
 
 ## Everyday commands
 
 | Command | What it does |
-|---|---|
-| `just check` | Lint, format check, type checks, token contrast, API-client and schema freshness |
-| `just test` | Backend (unit + integration) and web unit tests |
-| `just test-unit` | Tests that need no database |
-| `just e2e` | Playwright login/navigation tests against the test database |
-| `just fmt` | Format and auto-fix |
-| `just db::new <name>` then `just db::migrate` then `just db::dump` | Add a migration and refresh `db/schema.sql` |
-| `just api-client` | Regenerate the TypeScript client after changing API models |
+| --- | --- |
+| `just dev` | API (auto-reload) and web app (Vite) together, with the database started first |
+| `just check` | Lint, format check, type checks, token contrast, hard-coded colours, API-client and schema freshness: the same as CI |
+| `just test` | Backend (unit and integration), web and helper-script tests |
+| `just test-unit` | Only the tests that need no database |
+| `just e2e` | Playwright browser tests against a separate test database and ports (8001/5174) |
+| `just fmt` | Format and auto-fix everything |
+| `just api-client` | Regenerate the TypeScript API client after changing API models |
+| `just db::new <name>`, then `just db::migrate` and `just db::dump` | Add a migration and refresh `db/schema.sql` |
+| `just db::up` / `just db::down` / `just db::status` | Start or stop the database container, or list migrations |
+| `just hash-password` | Hash a new owner password |
+| `just release-dry-run` | Preview the next release version (needs `GITHUB_TOKEN`) |
 | `just --list` | Everything else |
 
-## Layout
+## Repository layout
 
-`backend/` Python API and CLI (uv) · `web/` React + TypeScript UI (pnpm) · `db/` SQL migrations
-(dbmate) · `infra/` Docker Compose · `scripts/` cross-platform helper scripts · `docs/` design docs.
+```text
+ai-second-brain/
+├── backend/                    Python API and admin CLI (uv project, package ai_second_brain)
+│   ├── src/ai_second_brain/
+│   │   ├── config.py           Settings from .env (pydantic-settings), password-hash validation
+│   │   ├── db.py               Async PostgreSQL connection pool (psycopg 3)
+│   │   ├── runtime.py          Event loop that psycopg needs on Windows
+│   │   ├── auth/               Password hashing, login throttle, server-side sessions
+│   │   └── interfaces/
+│   │       ├── api/            FastAPI app, routes (health, auth), cross-site check, API schemas
+│   │       └── cli/            `ai-second-brain serve | openapi | hash-password`
+│   └── tests/                  unit/ (no database) and integration/ (real Postgres)
+├── web/                        React + TypeScript single-page app (pnpm, Vite)
+│   ├── src/
+│   │   ├── api/                Generated OpenAPI schema and client (never edited by hand)
+│   │   ├── design-system/      tokens.css (colours, fonts, radii), theme, UI primitives, app shell
+│   │   ├── features/           auth (session, login form, route guard) and screens (placeholders)
+│   │   └── routes/             File-based routes: /login and the protected app screens
+│   ├── scripts/                Contrast checker and hard-coded-colour guard for the design tokens
+│   └── tests/e2e/              Playwright browser tests
+├── db/
+│   ├── migrations/             dbmate SQL migrations (the source of truth for the schema)
+│   └── schema.sql              Generated schema snapshot; CI checks it is current
+├── infra/compose.yaml          PostgreSQL 17 + pgvector for development (127.0.0.1:5433)
+├── scripts/                    Cross-platform helper scripts (TypeScript run with tsx): database
+│                               start-up, schema check, .env set-up, version bump, commit-message check
+├── .githooks/commit-msg        Rejects commit messages that aren't Conventional Commits or carry AI attribution
+├── .github/workflows/ci.yml    CI (Linux full suite, macOS checks) and the release job
+├── .releaserc.json             semantic-release configuration
+├── justfile                    The command runner for everything (modules: backend, web, db)
+└── docs/
+    ├── architecture/           System design, ADRs, stack evaluation, design system, product ideas
+    ├── superpowers/            Specs and implementation plans for each phase
+    └── images/readme/          The screenshots on this page
+```
 
-## Notes
+## How it works
 
-- `.env` is never committed. `.env.test` is committed on purpose and contains only test values
-  (the e2e password is `e2e-test-password`).
-- Keep the single quotes around `SB_OWNER_PASSWORD_HASH`. Without them, just's `.env` loader
-  expands the `$` characters and the hash breaks.
-- If the npm dbmate binary can't be downloaded (proxy/offline), install dbmate with scoop/winget
-  or `brew install dbmate`, and set `DBMATE=dbmate` in `.env`.
-- The dev database listens on `127.0.0.1:5433`. Use the IP, not `localhost`, which is slow on
-  Windows.
+```text
+Browser ──HTTPS──▶ Web app (React SPA) ──/api──▶ FastAPI ──▶ PostgreSQL 17 + pgvector
+                                                  │
+                                                  └─ later: local models (Ollama on your LAN) for private data,
+                                                     a cloud model only for content you marked shareable
+```
 
-## Commit messages
+- **One backend, one datastore.** A modular Python monolith. PostgreSQL holds relational data,
+  vectors, jobs and sessions; there is no Redis and no separate vector or graph database
+  ([why](docs/architecture/adr/0002-postgres-single-datastore.md)).
+- **Private by default.** A single gateway decides where any text may go, and private content
+  never leaves your LAN ([design](docs/architecture/system-design.md#5-privacy-architecture)).
+- **The API contract drives the UI.** Pydantic models produce the OpenAPI schema, which produces
+  the TypeScript types. A change on one side that isn't regenerated fails the check.
+- **Endpoints today:** `GET /api/health`, `GET /api/health/ready`, `POST /api/auth/login`,
+  `POST /api/auth/logout` and `GET /api/auth/me`. Errors are always `{"detail": "<code>"}`, where
+  `<code>` is a snake_case error name.
 
-Conventional Commits: `type(scope): summary`. The header is imperative, ≤ 50 characters
-(72 is the hard limit) and has no period. An optional body explains what and why, wrapped at
-72. The optional footer holds `BREAKING CHANGE:` / `Closes #n`. AI attribution
-(`Co-Authored-By`, "Generated with Claude") is never allowed. The `commit-msg` hook in
-`.githooks/` enforces this. `just install` enables it (`just hooks` on its own).
+## Configuration
 
-## Releases
+`just setup` creates `.env` from `.env.example`. The main settings:
 
-Versions follow SemVer and are fully automated. After CI passes on `main`,
-semantic-release reads the Conventional Commits since the last `v*` tag:
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `DATABASE_URL` / `TEST_DATABASE_URL` | `postgres://brain:brain@127.0.0.1:5433/…` | Dev and test databases (the Docker container) |
+| `SB_OWNER_PASSWORD_HASH` | empty | Owner password hash from `just hash-password`, **in single quotes** |
+| `SB_SESSION_TTL_DAYS` | `14` | Session lifetime, extended while you use the app |
+| `SB_COOKIE_SECURE` | `false` | Set to `true` behind HTTPS |
+| `SB_ALLOWED_ORIGINS` | `http://localhost:5173` | Origins allowed to make changes (the cross-site check) |
+| `SB_API_PORT` / `SB_WEB_PORT` | `8000` / `5173` | Development ports |
+| `SB_ENV` | `dev` | `dev` enables the API docs at `/api/docs`; `prod` hides them |
 
-- `feat` bumps MINOR
-- `fix` or `perf` bumps PATCH
-- `BREAKING CHANGE:` or `type!:` bumps MAJOR
-- other types alone do not release
+`.env` is never committed. `.env.test` is committed on purpose and contains only test values
+(the e2e password is `e2e-test-password`).
 
-It then updates the version files, commits `chore(release): vX.Y.Z [skip ci]`, tags
-`vX.Y.Z`, and publishes a GitHub Release with generated notes.
+## Commit messages and releases
 
-- Never create, move or delete `v*` tags by hand. Fix forward with a new release.
+**Commit messages** follow Conventional Commits:
+- The header is `type(scope): summary`: imperative, no more than 50 characters (72 is the hard limit), with no period.
+- An optional body explains what and why, wrapped at 72 characters.
+- The optional footer holds `BREAKING CHANGE:` or `Closes #n`.
+- AI attribution (`Co-Authored-By`, "Generated with Claude") is never allowed.
+
+The `commit-msg` hook in `.githooks/` enforces these rules. `just install` enables it (`just hooks` on its own).
+
+**Releases** follow SemVer and are fully automated. After CI passes on `main`, semantic-release reads
+the commits since the last `v*` tag. `feat` bumps MINOR, `fix` or `perf` bumps PATCH, and
+`BREAKING CHANGE:` or `type!:` bumps MAJOR; other types alone don't release. It then updates the
+version files, commits `chore(release): vX.Y.Z [skip ci]`, tags `vX.Y.Z` and publishes a
+[GitHub Release](https://github.com/mdyzma/ai-second-brain/releases) with generated notes.
+- Never create, move or delete `v*` tags by hand. Fix problems with a new release instead.
 - Recommended: protect `v*` tags in GitHub (Settings → Rules → Rulesets → Tag rules).
-- Preview locally: set `GITHUB_TOKEN` (e.g. `$env:GITHUB_TOKEN = gh auth token` in
-  PowerShell), then run `just release-dry-run`.
+- To preview locally, set `GITHUB_TOKEN` (e.g. `$env:GITHUB_TOKEN = gh auth token` in PowerShell), then run `just release-dry-run`.
+
+## Troubleshooting
+
+- **`just dev` stops with "run `just hash-password`":** the owner password isn't set yet. Run
+  `just hash-password` and paste the printed line into `.env`.
+- **The hash is set but login fails:** keep the single quotes around `SB_OWNER_PASSWORD_HASH`.
+  Without them, just's `.env` loader expands the `$` characters and breaks the hash.
+- **Slow database connections on Windows:** use `127.0.0.1`, not `localhost`. The container
+  listens on `127.0.0.1:5433` only, and `localhost` tries IPv6 first.
+- **Port 5432 is already in use:** that's fine, because the container uses 5433 so it can run
+  next to a locally installed PostgreSQL.
+- **"Docker is not reachable":** start Docker Desktop (Windows), Docker Desktop or OrbStack (macOS),
+  or the Docker service (Linux).
+- **The dbmate binary can't be downloaded (proxy or offline):** install dbmate with scoop/winget or
+  `brew install dbmate`, and set `DBMATE=dbmate` in `.env`.
+
+## Documentation
+
+- [Architecture overview](docs/architecture/README.md): the design, principles and the decisions at a glance
+- [System design](docs/architecture/system-design.md): requirements, data model, flows, privacy, deployment and phases
+- [Tech stack evaluation](docs/architecture/tech-stack-evaluation.md), including why the backend is Python and the UI is TypeScript
+- [Architecture decision records](docs/architecture/adr/)
+- [Design system](docs/architecture/design-system-audit.md): tokens, components and the accessibility bar
+- [Phase 1a spec](docs/superpowers/specs/2026-09-29-phase-1a-foundation-design.md) and
+  [implementation plan](docs/superpowers/plans/2026-09-29-phase-1a-foundation.md)
