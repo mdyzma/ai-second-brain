@@ -1,5 +1,5 @@
 import os
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Iterator
 from typing import Any
 
 import pytest
@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 from ai_second_brain.auth.passwords import hash_password
 from ai_second_brain.config import Settings
 from ai_second_brain.runtime import new_event_loop
+
+from .fakes.ollama import FakeOllama
 
 TEST_PASSWORD = "correct horse battery staple"
 TEST_HASH = hash_password(TEST_PASSWORD)
@@ -53,3 +55,17 @@ def make_settings() -> Callable[..., Settings]:
         return Settings(_env_file=None, **values)  # pyright: ignore[reportCallIssue]
 
     return _make
+
+
+@pytest.fixture
+def make_fake_ollama() -> Iterator[Callable[[], FakeOllama]]:
+    started: list[FakeOllama] = []
+
+    def _make() -> FakeOllama:
+        fake = FakeOllama().start()
+        started.append(fake)
+        return fake
+
+    yield _make
+    for fake in started:
+        fake.stop()
