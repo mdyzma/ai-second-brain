@@ -21,11 +21,12 @@
 
 **AI Second Brain** collects the things you know into one searchable memory: Obsidian notes, documents,
 invoices and contracts, email, git history, and the state of your home-lab machines. You can then ask it
-questions and it answers with sources. Private content is processed **only by models running on your
-own machines** (Ollama on your LAN). A cloud model is used only when you explicitly choose it, and
-only with material you marked as shareable.
+questions and it answers with sources. That is the goal; today only the platform exists. **Planned
+(phase 1b onward):** private content is processed only by models running on your own machines
+(Ollama on your LAN), and a cloud model is used only when you explicitly choose it, with material
+you marked as shareable. Nothing talks to any model yet.
 
-> **Status: v0.2.0, Phase 1a "foundation".** The platform is in place: a secure single-user
+> **Status: Phase 1a "foundation" (see the latest release badge above).** The platform is in place: a secure single-user
 > login, the web app shell, the API, the database, CI and automated releases. The knowledge
 > features arrive phase by phase; see the [roadmap](#roadmap). The screens show what each one
 > will do.
@@ -54,7 +55,7 @@ only with material you marked as shareable.
 | 🌗 **Light and dark themes** | Follows your system or your choice. Every colour comes from design tokens, a check keeps all text at WCAG AA contrast in both themes, and another check blocks hard-coded colours. |
 | 🗄️ **Database ready for vectors** | PostgreSQL 17 with the `pgvector` extension in Docker, versioned SQL migrations (dbmate), and a committed `db/schema.sql` that CI keeps honest. |
 | 🔌 **Typed API** | FastAPI with health/readiness endpoints and auth. The TypeScript client is generated from the API schema, and CI fails if the two drift apart. |
-| 🧪 **Tested end to end** | Python unit and integration tests against a real database, web unit tests, and Playwright browser tests of the login flow, on Linux and macOS in CI. |
+| 🧪 **Tested end to end** | Python unit and integration tests against a real database, web unit tests, and Playwright browser tests of the login flow. In CI, Linux runs the full suite, including the database tests; macOS runs the checks and the tests that need no database. |
 | 🚀 **Automated releases** | Versions and release notes come from the commit history (SemVer + semantic-release), with no manual tagging. |
 | 🖥️ **Works on your machines** | The same `just` commands on Windows (PowerShell), macOS (Apple Silicon) and Linux. |
 
@@ -197,17 +198,18 @@ ai-second-brain/
 ## How it works
 
 ```text
-Browser ──HTTPS──▶ Web app (React SPA) ──/api──▶ FastAPI ──▶ PostgreSQL 17 + pgvector
+Browser ──HTTP (localhost)──▶ Web app (React SPA) ──/api──▶ FastAPI ──▶ PostgreSQL 17 + pgvector
                                                   │
-                                                  └─ later: local models (Ollama on your LAN) for private data,
+                                                  └─ planned (phase 1b+): local models (Ollama on your LAN) for private data,
                                                      a cloud model only for content you marked shareable
 ```
 
+- **Plain HTTP for now.** Phase 1a runs on localhost over HTTP; TLS comes with deployment.
 - **One backend, one datastore.** A modular Python monolith. PostgreSQL holds relational data,
   vectors, jobs and sessions; there is no Redis and no separate vector or graph database
   ([why](docs/architecture/adr/0002-postgres-single-datastore.md)).
-- **Private by default.** A single gateway decides where any text may go, and private content
-  never leaves your LAN ([design](docs/architecture/system-design.md#5-privacy-architecture)).
+- **Private by default (planned, phase 1b onward).** A single privacy gateway will decide where any
+  text may go, and private content will never leave your LAN; no model is connected today ([design](docs/architecture/system-design.md#5-privacy-architecture)).
 - **The API contract drives the UI.** Pydantic models produce the OpenAPI schema, which produces
   the TypeScript types. A change on one side that isn't regenerated fails the check.
 - **Endpoints today:** `GET /api/health`, `GET /api/health/ready`, `POST /api/auth/login`,
@@ -254,6 +256,8 @@ version files, commits `chore(release): vX.Y.Z [skip ci]`, tags `vX.Y.Z` and pub
 
 - **`just dev` stops with "run `just hash-password`":** the owner password isn't set yet. Run
   `just hash-password` and paste the printed line into `.env`.
+- **Login silently returns to `/login`:** with `SB_COOKIE_SECURE=true` over plain http the browser
+  drops the session cookie. Keep it `false` for local http and use `true` only behind HTTPS.
 - **The hash is set but login fails:** keep the single quotes around `SB_OWNER_PASSWORD_HASH`.
   Without them, just's `.env` loader expands the `$` characters and breaks the hash.
 - **Slow database connections on Windows:** use `127.0.0.1`, not `localhost`. The container
