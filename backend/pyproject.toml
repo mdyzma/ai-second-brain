@@ -17,7 +17,7 @@ ai-second-brain = "ai_second_brain.interfaces.cli.main:app"
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28",
+    "httpx2>=2.13.1",
     "pyright>=1.1.400",
     "pytest>=8.3",
     "ruff>=0.15",

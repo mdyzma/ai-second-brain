@@ -1,17 +1,19 @@
 """FastAPI application factory."""
 
+import http
 import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from psycopg_pool import PoolTimeout
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ai_second_brain.auth.throttle import LoginThrottle
 from ai_second_brain.config import Settings, get_settings
@@ -34,6 +36,20 @@ async def _database_unavailable(request: Request, exc: Exception) -> JSONRespons
 
 async def _invalid_request(request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=422, content={"detail": "invalid_request"})
+
+
+async def _http_error(request: Request, exc: Exception) -> JSONResponse:
+    exc = cast(StarletteHTTPException, exc)
+    detail = exc.detail
+    try:
+        default_phrase = http.HTTPStatus(exc.status_code).phrase
+    except ValueError:
+        default_phrase = None
+    if default_phrase is not None and detail == default_phrase:
+        detail = default_phrase.lower().replace(" ", "_").replace("-", "_")
+    return JSONResponse(
+        status_code=exc.status_code, content={"detail": detail}, headers=exc.headers
+    )
 
 
 async def _log_requests(
@@ -64,7 +80,7 @@ def create_app(
         try:
             yield
         finally:
-            await pool.close()
+            await pool.close(timeout=0.1)
 
     docs_enabled = settings.env == "dev"
     app = FastAPI(
@@ -81,6 +97,7 @@ def create_app(
 
     app.add_exception_handler(PoolTimeout, _database_unavailable)
     app.add_exception_handler(psycopg.OperationalError, _database_unavailable)
+    app.add_exception_handler(StarletteHTTPException, _http_error)
     app.add_exception_handler(RequestValidationError, _invalid_request)
     app.middleware("http")(_log_requests)
 
