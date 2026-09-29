@@ -96,3 +96,21 @@ test("accepts legitimate mentions of claude", () => {
   ok("docs: document Claude Desktop MCP config\n");
   ok("feat: x\n\nThe claude CLI reads this file.\n");
 });
+
+const SCISSORS_LINE = `# ${"-".repeat(24)} >8 ${"-".repeat(24)}`;
+const VERBOSE_TAIL =
+  "# Do not modify or remove the line above.\n# Everything below it will be ignored.\n" +
+  "diff --git a/f b/f\n+Generated with Claude Code\n+Co-Authored-By: A <a@b.c>\n";
+
+test("loose scissors variants do not truncate the message", () => {
+  rejected("feat: x\n\n# --- >8 ---\nCo-Authored-By: A <a@b.c>\n", /attribution/i);
+});
+
+test("exact scissors line without the follow-up line does not truncate", () => {
+  rejected(`feat: x\n\n${SCISSORS_LINE}\nCo-Authored-By: A <a@b.c>\n`, /attribution/i);
+});
+
+test("exact verbose scissors block truncates, including with CRLF", () => {
+  ok(`feat: x\n\nbody\n${SCISSORS_LINE}\n${VERBOSE_TAIL}`);
+  ok(`feat: x\r\n\r\nbody\r\n${SCISSORS_LINE}\r\n${VERBOSE_TAIL.replace(/\n/g, "\r\n")}`);
+});

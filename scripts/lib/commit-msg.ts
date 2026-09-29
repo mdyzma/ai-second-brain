@@ -3,7 +3,7 @@ export type CommitCheck = { ok: boolean; errors: string[]; warnings: string[] };
 const TYPES = ["feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"];
 const HEADER = new RegExp(`^(${TYPES.join("|")})(\\([a-z0-9._/-]+\\))?!?: \\S`);
 const EXEMPT = /^(Merge |Revert "|fixup! |squash! |amend! )/;
-const SCISSORS = /^# -+ >8 -+\s*$/m;
+const SCISSORS = /^# -{24} >8 -{24}\n# Do not modify or remove the line above\.$/m;
 const ATTRIBUTION = [
   /^\s*co[\s\u2010-\u2015-]*authored[\s\u2010-\u2015-]*by\s*:/im,
   /\b(generated|made|created|written|authored)\s+(with|by)\s+\[?claude/i,
