@@ -20,6 +20,8 @@ import { Route as AppReviewRouteImport } from './routes/_app/review'
 import { Route as AppSearchRouteImport } from './routes/_app/search'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppSourcesRouteImport } from './routes/_app/sources'
+import { Route as AppAskIndexRouteImport } from './routes/_app/ask.index'
+import { Route as AppAskSessionIdRouteImport } from './routes/_app/ask.$sessionId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -75,11 +77,21 @@ const AppSourcesRoute = AppSourcesRouteImport.update({
   path: '/sources',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAskIndexRoute = AppAskIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppAskRoute,
+} as any)
+const AppAskSessionIdRoute = AppAskSessionIdRouteImport.update({
+  id: '/$sessionId',
+  path: '/$sessionId',
+  getParentRoute: () => AppAskRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/ask': typeof AppAskRoute
+  '/ask': typeof AppAskRouteWithChildren
   '/digest': typeof AppDigestRoute
   '/nodes': typeof AppNodesRoute
   '/projects': typeof AppProjectsRoute
@@ -87,11 +99,12 @@ export interface FileRoutesByFullPath {
   '/search': typeof AppSearchRoute
   '/settings': typeof AppSettingsRoute
   '/sources': typeof AppSourcesRoute
+  '/ask/$sessionId': typeof AppAskSessionIdRoute
+  '/ask/': typeof AppAskIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/ask': typeof AppAskRoute
   '/digest': typeof AppDigestRoute
   '/nodes': typeof AppNodesRoute
   '/projects': typeof AppProjectsRoute
@@ -99,13 +112,15 @@ export interface FileRoutesByTo {
   '/search': typeof AppSearchRoute
   '/settings': typeof AppSettingsRoute
   '/sources': typeof AppSourcesRoute
+  '/ask/$sessionId': typeof AppAskSessionIdRoute
+  '/ask': typeof AppAskIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_app': typeof AppRouteWithChildren
   '/login': typeof LoginRoute
-  '/_app/ask': typeof AppAskRoute
+  '/_app/ask': typeof AppAskRouteWithChildren
   '/_app/digest': typeof AppDigestRoute
   '/_app/nodes': typeof AppNodesRoute
   '/_app/projects': typeof AppProjectsRoute
@@ -113,6 +128,8 @@ export interface FileRoutesById {
   '/_app/search': typeof AppSearchRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/sources': typeof AppSourcesRoute
+  '/_app/ask/$sessionId': typeof AppAskSessionIdRoute
+  '/_app/ask/': typeof AppAskIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -127,11 +144,12 @@ export interface FileRouteTypes {
     | '/search'
     | '/settings'
     | '/sources'
+    | '/ask/$sessionId'
+    | '/ask/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/login'
-    | '/ask'
     | '/digest'
     | '/nodes'
     | '/projects'
@@ -139,6 +157,8 @@ export interface FileRouteTypes {
     | '/search'
     | '/settings'
     | '/sources'
+    | '/ask/$sessionId'
+    | '/ask'
   id:
     | '__root__'
     | '/'
@@ -152,6 +172,8 @@ export interface FileRouteTypes {
     | '/_app/search'
     | '/_app/settings'
     | '/_app/sources'
+    | '/_app/ask/$sessionId'
+    | '/_app/ask/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -239,11 +261,38 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSourcesRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/ask/': {
+      id: '/_app/ask/'
+      path: '/'
+      fullPath: '/ask/'
+      preLoaderRoute: typeof AppAskIndexRouteImport
+      parentRoute: typeof AppAskRoute
+    }
+    '/_app/ask/$sessionId': {
+      id: '/_app/ask/$sessionId'
+      path: '/$sessionId'
+      fullPath: '/ask/$sessionId'
+      preLoaderRoute: typeof AppAskSessionIdRouteImport
+      parentRoute: typeof AppAskRoute
+    }
   }
 }
 
+interface AppAskRouteChildren {
+  AppAskSessionIdRoute: typeof AppAskSessionIdRoute
+  AppAskIndexRoute: typeof AppAskIndexRoute
+}
+
+const AppAskRouteChildren: AppAskRouteChildren = {
+  AppAskSessionIdRoute: AppAskSessionIdRoute,
+  AppAskIndexRoute: AppAskIndexRoute,
+}
+
+const AppAskRouteWithChildren =
+  AppAskRoute._addFileChildren(AppAskRouteChildren)
+
 interface AppRouteChildren {
-  AppAskRoute: typeof AppAskRoute
+  AppAskRoute: typeof AppAskRouteWithChildren
   AppDigestRoute: typeof AppDigestRoute
   AppNodesRoute: typeof AppNodesRoute
   AppProjectsRoute: typeof AppProjectsRoute
@@ -254,7 +303,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
-  AppAskRoute: AppAskRoute,
+  AppAskRoute: AppAskRouteWithChildren,
   AppDigestRoute: AppDigestRoute,
   AppNodesRoute: AppNodesRoute,
   AppProjectsRoute: AppProjectsRoute,
