@@ -82,3 +82,7 @@ api-client-check: api-client
 # Hash the owner password; paste the printed line into .env
 hash-password:
     uv run --directory backend ai-second-brain hash-password
+
+# Ask the configured local model one question (checks SB_OLLAMA_ENDPOINTS; nothing is saved)
+chat-smoke:
+    uv run --directory backend ai-second-brain chat-smoke
