@@ -7,8 +7,12 @@
     "node": ">=24"
   },
   "devDependencies": {
+    "@semantic-release/exec": "^7.1.0",
+    "@semantic-release/git": "^11.0.1",
     "concurrently": "^10.0.5",
+    "conventional-changelog-conventionalcommits": "^9.3.1",
     "dbmate": "^2.36.0",
+    "semantic-release": "^25.0.9",
     "tsx": "^4.23.15"
   }
 }

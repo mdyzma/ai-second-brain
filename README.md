@@ -63,3 +63,21 @@ Conventional Commits: `type(scope): summary`. The header is imperative, ≤ 50 c
 72. The optional footer holds `BREAKING CHANGE:` / `Closes #n`. AI attribution
 (`Co-Authored-By`, "Generated with Claude") is never allowed. The `commit-msg` hook in
 `.githooks/` enforces this. `just install` enables it (`just hooks` on its own).
+
+## Releases
+
+Versions follow SemVer and are fully automated. After CI passes on `main`,
+semantic-release reads the Conventional Commits since the last `v*` tag:
+
+- `feat` bumps MINOR
+- `fix` or `perf` bumps PATCH
+- `BREAKING CHANGE:` or `type!:` bumps MAJOR
+- other types alone do not release
+
+It then updates the version files, commits `chore(release): vX.Y.Z [skip ci]`, tags
+`vX.Y.Z`, and publishes a GitHub Release with generated notes.
+
+- Never create, move or delete `v*` tags by hand. Fix forward with a new release.
+- Recommended: protect `v*` tags in GitHub (Settings → Rules → Rulesets → Tag rules).
+- Preview locally: set `GITHUB_TOKEN` (e.g. `$env:GITHUB_TOKEN = gh auth token` in
+  PowerShell), then run `just release-dry-run`.

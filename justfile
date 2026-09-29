@@ -23,6 +23,11 @@ hooks:
 # Unit tests for the TypeScript helper scripts
 test-scripts:
     pnpm exec tsx --test scripts/lib/commit-msg.test.ts
+    pnpm exec tsx --test scripts/lib/version.test.ts
+
+# Preview the next release locally (needs GITHUB_TOKEN; see README)
+release-dry-run:
+    pnpm exec semantic-release --dry-run --no-ci
 
 # First-time setup: dependencies, .env, database and migrations (Docker must be running)
 setup: install
