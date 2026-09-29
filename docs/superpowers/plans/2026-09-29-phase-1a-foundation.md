@@ -194,9 +194,9 @@ Expected: no output; `git status` shows only the files you changed or deleted. T
 ```dotenv
 # Copy to .env (just setup does this for you). Never commit .env.
 # Database shared by dbmate and the backend (dev container from infra/compose.yaml)
-DATABASE_URL=postgres://brain:brain@localhost:5433/ai_second_brain?sslmode=disable
+DATABASE_URL=postgres://brain:brain@127.0.0.1:5433/ai_second_brain?sslmode=disable
 # Test database used by pytest and e2e (created by `just db::test-prepare`)
-TEST_DATABASE_URL=postgres://brain:brain@localhost:5433/ai_second_brain_test?sslmode=disable
+TEST_DATABASE_URL=postgres://brain:brain@127.0.0.1:5433/ai_second_brain_test?sslmode=disable
 
 # Owner login. Run `just hash-password` and paste the printed line here.
 # KEEP THE SINGLE QUOTES: unquoted '$' characters are expanded by just's .env loader.
@@ -217,7 +217,7 @@ SB_ENV=dev
 ```dotenv
 # TEST-ONLY VALUES, committed on purpose. Not secrets.
 # The e2e owner password is: e2e-test-password
-TEST_DATABASE_URL=postgres://brain:brain@localhost:5433/ai_second_brain_test?sslmode=disable
+TEST_DATABASE_URL=postgres://brain:brain@127.0.0.1:5433/ai_second_brain_test?sslmode=disable
 SB_OWNER_PASSWORD_HASH='$argon2id$v=19$m=65536,t=3,p=4$lUbERLF2lShFt/g2zuyNHw$/2JZ1Uy+8w4nXWGCR1KY0IwYFD1CnGSOM7cAtbhtC/w'
 SB_API_PORT=8001
 SB_WEB_PORT=5174

@@ -90,7 +90,7 @@ A single root `.env` (git-ignored). just loads it with `set dotenv-load`, and th
 
 | Variable | Used by | Dev default in `.env.example` | Notes |
 |---|---|---|---|
-| `DATABASE_URL` | dbmate, backend | `postgres://brain:brain@localhost:5433/ai_second_brain?sslmode=disable` | Shared by both |
+| `DATABASE_URL` | dbmate, backend | `postgres://brain:brain@127.0.0.1:5433/ai_second_brain?sslmode=disable` | Shared by both |
 | `TEST_DATABASE_URL` | dbmate, pytest | `…/ai_second_brain_test?sslmode=disable` | Created by `just db::test-prepare` |
 | `SB_OWNER_PASSWORD_HASH` | backend | empty. `just setup` prints a hint to run `just hash-password` | argon2id encoded string |
 | `SB_SESSION_TTL_DAYS` | backend | `14` | Sliding expiry |
