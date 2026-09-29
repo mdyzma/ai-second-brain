@@ -21,7 +21,19 @@ def test_openapi_writes_file_with_lf_and_sorted_keys(tmp_path: Path) -> None:
     assert b"\r\n" not in raw
     schema = json.loads(raw)
     operation_ids = {op["operationId"] for p in schema["paths"].values() for op in p.values()}
-    assert operation_ids >= {"health", "ready", "login", "logout", "me"}
+    assert operation_ids >= {
+        "health",
+        "ready",
+        "login",
+        "logout",
+        "me",
+        "chatStatus",
+        "createSession",
+        "listSessions",
+        "getSession",
+        "deleteSession",
+        "askTurn",
+    }
 
 
 def test_openapi_is_deterministic(tmp_path: Path) -> None:

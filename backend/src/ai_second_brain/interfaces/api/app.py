@@ -18,9 +18,15 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ai_second_brain.auth.sessions import SessionStore
 from ai_second_brain.auth.throttle import LoginThrottle
+from ai_second_brain.chat.providers.base import ChatTimeouts
+from ai_second_brain.chat.providers.ollama import OllamaPool, create_http_client
+from ai_second_brain.chat.repository import PgChatRepository
+from ai_second_brain.chat.retrieval import NullRetriever, Retriever
+from ai_second_brain.chat.service import ChatService
+from ai_second_brain.chat.wiring import make_cloud_factory
 from ai_second_brain.config import Settings, get_settings
 from ai_second_brain.db import create_pool
-from ai_second_brain.interfaces.api.routes import auth, health
+from ai_second_brain.interfaces.api.routes import auth, chat, health
 
 logger = logging.getLogger("ai_second_brain.api")
 
@@ -77,15 +83,34 @@ def create_app(
     *,
     clock: Callable[[], datetime] = utc_now,
     throttle_clock: Callable[[], float] = time.monotonic,
+    retriever: Retriever | None = None,
+    chat_timeouts: ChatTimeouts | None = None,
+    sse_ping_interval: float = 15.0,
 ) -> FastAPI:
     settings = settings or get_settings()
+    timeouts = chat_timeouts or ChatTimeouts()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         pool = create_pool(settings.database_url)
         await pool.open(wait=False)
+        http_client = create_http_client()
         app.state.pool = pool
         app.state.sessions = SessionStore(pool, timedelta(days=settings.session_ttl_days), clock)
+        app.state.ollama = OllamaPool(
+            settings.ollama_endpoints,
+            http_client,
+            timeouts=timeouts,
+            max_tokens=settings.chat_max_tokens,
+            status_ttl=settings.chat_status_ttl_seconds,
+        )
+        app.state.chat_repo = PgChatRepository(pool)
+        app.state.chat = ChatService(
+            app.state.chat_repo,
+            retriever or NullRetriever(),
+            app.state.ollama,
+            make_cloud_factory(settings, timeouts),
+        )
         try:
             await app.state.sessions.purge_expired()
         except (PoolTimeout, psycopg.Error, OSError):
@@ -93,6 +118,7 @@ def create_app(
         try:
             yield
         finally:
+            await http_client.aclose()
             await pool.close(timeout=0.1)
 
     docs_enabled = settings.env == "dev"
@@ -108,6 +134,7 @@ def create_app(
     app.state.clock = clock
     app.state.throttle = LoginThrottle(clock=throttle_clock)
     app.state.login_lock = asyncio.Lock()
+    app.state.sse_ping_interval = sse_ping_interval
 
     app.add_exception_handler(PoolTimeout, _database_unavailable)
     app.add_exception_handler(psycopg.OperationalError, _database_unavailable)
@@ -117,6 +144,7 @@ def create_app(
 
     app.include_router(health.router, prefix="/api")
     app.include_router(auth.router, prefix="/api/auth")
+    app.include_router(chat.router, prefix="/api")
     return app
 
 
