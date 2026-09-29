@@ -1,0 +1,50 @@
+[project]
+name = "ai-second-brain"
+version = "0.2.0"
+description = "Private-by-default personal knowledge system: backend API, worker and admin CLI"
+requires-python = ">=3.12"
+dependencies = [
+    "argon2-cffi>=23.1",
+    "fastapi>=0.118",
+    "psycopg[binary,pool]>=3.2",
+    "pydantic-settings>=2.7",
+    "typer>=0.15",
+    "uvicorn[standard]>=0.54",
+]
+
+[project.scripts]
+ai-second-brain = "ai_second_brain.interfaces.cli.main:app"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28",
+    "pyright>=1.1.400",
+    "pytest>=8.3",
+    "ruff>=0.15",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "S", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers"]
+markers = ["integration: needs PostgreSQL at TEST_DATABASE_URL (run via `just test`)"]
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"

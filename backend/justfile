@@ -1,0 +1,24 @@
+set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
+
+# Install backend dependencies into backend/.venv
+sync:
+    uv sync
+
+# Lint, format check and type check
+check:
+    uv run ruff check .
+    uv run ruff format --check .
+    uv run pyright
+
+# All tests (integration tests need TEST_DATABASE_URL)
+test *args:
+    uv run pytest {{ args }}
+
+# Tests that need no database
+test-unit *args:
+    uv run pytest -m "not integration" {{ args }}
+
+# Format and auto-fix
+fmt:
+    uv run ruff format .
+    uv run ruff check --fix .
