@@ -1,5 +1,4 @@
 import logging
-import os
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -23,14 +22,6 @@ class FakeClock:
 
     def __call__(self) -> datetime:
         return self.now
-
-
-@pytest.fixture
-def db_url() -> str:
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.fail("TEST_DATABASE_URL is not set. Run tests with `just test` from the repo root.")
-    return url
 
 
 @pytest.fixture

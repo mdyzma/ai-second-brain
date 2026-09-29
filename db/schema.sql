@@ -27,6 +27,15 @@ CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 
 COMMENT ON EXTENSION vector IS 'vector data type and ivfflat and hnsw access methods';
 
+--
+-- Name: chat_mode; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.chat_mode AS ENUM (
+    'private',
+    'cloud'
+);
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -44,6 +53,37 @@ CREATE TABLE public.auth_sessions (
 );
 
 --
+-- Name: chat_sessions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.chat_sessions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    mode public.chat_mode NOT NULL,
+    title text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--
+-- Name: chat_turns; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.chat_turns (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    session_id uuid NOT NULL,
+    seq integer NOT NULL,
+    question text NOT NULL,
+    answer text NOT NULL,
+    sources jsonb DEFAULT '[]'::jsonb NOT NULL,
+    endpoint text NOT NULL,
+    model text NOT NULL,
+    degraded boolean DEFAULT false NOT NULL,
+    started_at timestamp with time zone NOT NULL,
+    finished_at timestamp with time zone NOT NULL,
+    CONSTRAINT chat_turns_seq_check CHECK ((seq >= 1))
+);
+
+--
 -- Name: auth_sessions auth_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -51,10 +91,44 @@ ALTER TABLE ONLY public.auth_sessions
     ADD CONSTRAINT auth_sessions_pkey PRIMARY KEY (id);
 
 --
+-- Name: chat_sessions chat_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chat_sessions
+    ADD CONSTRAINT chat_sessions_pkey PRIMARY KEY (id);
+
+--
+-- Name: chat_turns chat_turns_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chat_turns
+    ADD CONSTRAINT chat_turns_pkey PRIMARY KEY (id);
+
+--
+-- Name: chat_turns chat_turns_session_id_seq_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chat_turns
+    ADD CONSTRAINT chat_turns_session_id_seq_key UNIQUE (session_id, seq);
+
+--
 -- Name: auth_sessions_expires_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX auth_sessions_expires_idx ON public.auth_sessions USING btree (expires_at);
+
+--
+-- Name: chat_sessions_updated_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX chat_sessions_updated_idx ON public.chat_sessions USING btree (updated_at DESC);
+
+--
+-- Name: chat_turns chat_turns_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chat_turns
+    ADD CONSTRAINT chat_turns_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.chat_sessions(id) ON DELETE CASCADE;
 
 --
 -- PostgreSQL database dump complete
