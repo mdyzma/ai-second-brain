@@ -58,12 +58,14 @@ async def _log_requests(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
     start = time.perf_counter()
-    response = await call_next(request)
-    elapsed_ms = (time.perf_counter() - start) * 1000
-    logger.info(
-        "%s %s %s %.1fms", request.method, request.url.path, response.status_code, elapsed_ms
-    )
-    return response
+    status_code = 500  # stays 500 when the handler raises
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        logger.info("%s %s %s %.1fms", request.method, request.url.path, status_code, elapsed_ms)
 
 
 def create_app(

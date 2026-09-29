@@ -1,9 +1,13 @@
+import logging
 from collections.abc import Callable
 
+import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 from ai_second_brain.config import Settings
 from ai_second_brain.interfaces.api.app import create_app, openapi_schema
+from ai_second_brain.runtime import new_event_loop
 
 from ..conftest import make_client
 
@@ -66,3 +70,22 @@ def test_explicit_http_exception_detail_and_headers_pass_through(
     assert response.status_code == 429
     assert response.json() == {"detail": "too_many_attempts"}
     assert response.headers["Retry-After"] == "7"
+
+
+def test_unhandled_error_is_still_logged_with_status_500(
+    make_settings: Callable[..., Settings], caplog: pytest.LogCaptureFixture
+) -> None:
+    app = create_app(make_settings())
+
+    @app.get("/api/boom")
+    async def boom() -> None:
+        raise RuntimeError("secret-detail")
+
+    caplog.set_level(logging.INFO, logger="ai_second_brain.api")
+    with TestClient(
+        app, raise_server_exceptions=False, backend_options={"loop_factory": new_event_loop}
+    ) as client:
+        response = client.get("/api/boom")
+    assert response.status_code == 500
+    assert "GET /api/boom 500" in caplog.text
+    assert "secret-detail" not in caplog.text

@@ -1,12 +1,14 @@
 """Admin CLI: `ai-second-brain serve | openapi | hash-password`."""
 
+import copy
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 import uvicorn
 from pydantic import ValidationError
+from uvicorn.config import LOGGING_CONFIG
 
 from ai_second_brain.auth.passwords import hash_password
 from ai_second_brain.config import get_settings
@@ -15,6 +17,17 @@ from ai_second_brain.interfaces.api.app import openapi_schema
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="Second Brain admin CLI.")
 
 SRC_DIR = Path(__file__).resolve().parents[2]
+
+
+def build_log_config() -> dict[str, Any]:
+    """uvicorn's default logging plus the app's own loggers at INFO on stderr."""
+    config = copy.deepcopy(LOGGING_CONFIG)
+    config["loggers"]["ai_second_brain"] = {
+        "handlers": ["default"],
+        "level": "INFO",
+        "propagate": False,
+    }
+    return config
 
 
 @app.command()
@@ -37,6 +50,7 @@ def serve(
         reload_dirs=[str(SRC_DIR)] if reload else None,
         loop="ai_second_brain.runtime:new_event_loop",
         access_log=False,
+        log_config=build_log_config(),
     )
 
 
