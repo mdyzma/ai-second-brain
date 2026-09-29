@@ -2,14 +2,22 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from ai_second_brain.auth.passwords import hash_password
 from ai_second_brain.config import Settings
+from ai_second_brain.runtime import new_event_loop
 
 TEST_PASSWORD = "correct horse battery staple"
 TEST_HASH = hash_password(TEST_PASSWORD)
 SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
 UNUSED_DB = "postgres://brain:brain@127.0.0.1:1/unused?connect_timeout=1"
+
+
+def make_client(app: FastAPI) -> TestClient:
+    """TestClient on a selector event loop (required by psycopg async on Windows)."""
+    return TestClient(app, backend_options={"loop_factory": new_event_loop})
 
 
 @pytest.fixture
