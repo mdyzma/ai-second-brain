@@ -22,3 +22,7 @@ test-unit *args:
 fmt:
     uv run ruff format .
     uv run ruff check --fix .
+
+# Run the API (pass --reload for development)
+serve *args:
+    uv run ai-second-brain serve {{ args }}

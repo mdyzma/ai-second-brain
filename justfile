@@ -12,3 +12,7 @@ default:
 install:
     uv sync --directory backend
     pnpm install
+
+# Hash the owner password; paste the printed line into .env
+hash-password:
+    uv run --directory backend ai-second-brain hash-password
