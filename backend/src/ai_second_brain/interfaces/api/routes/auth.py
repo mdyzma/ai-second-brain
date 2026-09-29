@@ -1,6 +1,10 @@
+import logging
 from typing import Any
 
+import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
+from psycopg_pool import PoolTimeout
 from starlette.concurrency import run_in_threadpool
 
 from ai_second_brain.auth.passwords import verify_password
@@ -16,6 +20,7 @@ from ai_second_brain.interfaces.api.deps import (
 )
 from ai_second_brain.interfaces.api.schemas import ErrorResponse, LoginRequest, MeResponse
 
+logger = logging.getLogger("ai_second_brain.api")
 router = APIRouter(tags=["auth"])
 
 ERRORS: dict[int | str, dict[str, Any]] = {
@@ -61,16 +66,27 @@ async def login(body: LoginRequest, request: Request, response: Response) -> Non
 @router.post(
     "/logout",
     operation_id="logout",
+    response_model=None,
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     dependencies=[Depends(require_same_origin)],
     responses=ERRORS,
 )
-async def logout(request: Request, response: Response) -> None:
+async def logout(request: Request, response: Response) -> Response | None:
+    settings = get_settings(request)
     token = request.cookies.get(SESSION_COOKIE)
     if token:
-        await get_store(request).revoke(token)
-    clear_session_cookie(response, get_settings(request))
+        try:
+            await get_store(request).revoke(token)
+        except (PoolTimeout, psycopg.OperationalError):
+            # The session row may survive, but the browser must still drop its cookie.
+            # A handler-built 503 would lose headers set on `response`, so build it here.
+            logger.warning("logout: session not revoked, database unavailable")
+            failure = JSONResponse(status_code=503, content={"detail": "database_unavailable"})
+            clear_session_cookie(failure, settings)
+            return failure
+    clear_session_cookie(response, settings)
+    return None
 
 
 @router.get("/me", operation_id="me", response_model=MeResponse, responses=ERRORS)

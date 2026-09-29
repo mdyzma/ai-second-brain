@@ -231,3 +231,18 @@ def test_concurrent_wrong_passwords_cannot_exceed_throttle(client: TestClient) -
     assert statuses.count(401) <= 5
     assert statuses.count(401) + statuses.count(429) == 10
     assert all(body == {"detail": "too_many_attempts"} for status, body in results if status == 429)
+
+
+def test_logout_clears_cookie_even_when_database_down(
+    make_settings: Callable[..., Settings],
+) -> None:
+    with make_client(create_app(make_settings())) as dead:  # default settings point at port 1
+        response = dead.post(
+            "/api/auth/logout", headers={**SAME_ORIGIN, "Cookie": "sb_session=some-token"}
+        )
+    assert response.status_code == 503
+    assert response.json() == {"detail": "database_unavailable"}
+    cookie = response.headers["set-cookie"].lower()
+    assert "sb_session=" in cookie
+    assert "max-age=0" in cookie
+    assert "path=/api" in cookie
