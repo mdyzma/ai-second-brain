@@ -3,17 +3,21 @@ export type CommitCheck = { ok: boolean; errors: string[]; warnings: string[] };
 const TYPES = ["feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"];
 const HEADER = new RegExp(`^(${TYPES.join("|")})(\\([a-z0-9._/-]+\\))?!?: \\S`);
 const EXEMPT = /^(Merge |Revert "|fixup! |squash! |amend! )/;
+const SCISSORS = /^# -+ >8 -+\s*$/m;
 const ATTRIBUTION = [
-  /^\s*co-authored-by:/im,
-  /generated with \[?claude/i,
+  /^\s*co[\s\u2010-\u2015-]*authored[\s\u2010-\u2015-]*by\s*:/im,
+  /\b(generated|made|created|written|authored)\s+(with|by)\s+\[?claude/i,
+  /claude\.com\/claude-code/i,
+  /claude\.ai\/code/i,
   /noreply@anthropic\.com/i,
   /\u{1F916}/u,
 ];
 
 /** Validate a commit message: no AI attribution, Conventional Commits header. */
 export function checkCommitMessage(raw: string): CommitCheck {
-  const lines = raw
-    .replace(/\r\n/g, "\n")
+  const normalized = raw.replace(/\r\n/g, "\n");
+  const scissors = normalized.search(SCISSORS);
+  const lines = (scissors === -1 ? normalized : normalized.slice(0, scissors))
     .split("\n")
     .filter((line) => !line.startsWith("#"));
   const message = lines.join("\n").trim();

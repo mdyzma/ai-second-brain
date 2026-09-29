@@ -58,3 +58,41 @@ test("CRLF messages are handled", () => {
   ok("feat: x\r\n\r\nbody\r\n");
   rejected("feat: x\r\n\r\nCo-Authored-By: A <a@b.c>\r\n", /attribution/i);
 });
+
+test("ignores everything after the git scissors line (commit -v)", () => {
+  ok(
+    "feat: x\n\nbody\n# ------------------------ >8 ------------------------\n" +
+      "# Do not modify or remove the line above.\ndiff --git a/f b/f\n+Generated with Claude Code\n+Co-Authored-By: A <a@b.c>\n",
+  );
+});
+
+test("rejects Co-authored-by with whitespace before the colon or odd casing", () => {
+  rejected("feat: x\n\nCo-authored-by : X <x@y.z>\n", /attribution/i);
+  rejected("feat: x\n\n  CO-AUTHORED-BY:X\n", /attribution/i);
+});
+
+test("rejects co-authored-by with hyphen-like or space separators", () => {
+  rejected("feat: x\n\nCo authored by: X\n", /attribution/i);
+  rejected("feat: x\n\nCo\u2010authored\u2013by: X\n", /attribution/i);
+  rejected("feat: x\n\nCoauthoredby: X\n", /attribution/i);
+});
+
+test("rejects each broadened attribution pattern on its own", () => {
+  for (const line of [
+    "Made with Claude",
+    "Created by Claude Code",
+    "Written with [Claude](https://x.y)",
+    "Authored by claude",
+    "see https://claude.com/claude-code",
+    "see claude.ai/code",
+    "noreply@anthropic.com",
+    "\u{1F916}",
+  ]) {
+    rejected(`feat: x\n\n${line}\n`, /attribution/i);
+  }
+});
+
+test("accepts legitimate mentions of claude", () => {
+  ok("docs: document Claude Desktop MCP config\n");
+  ok("feat: x\n\nThe claude CLI reads this file.\n");
+});
