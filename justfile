@@ -3,6 +3,7 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 
 mod backend
 mod db
+mod web
 
 # List all recipes
 default:

@@ -1,0 +1,29 @@
+set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
+
+# Vite dev server (proxies /api to the backend)
+dev:
+    pnpm exec vite
+
+# Production build into web/dist
+build:
+    pnpm exec vite build
+
+# Lint, types, contrast and hardcoded-color checks
+check:
+    pnpm exec biome ci .
+    pnpm exec tsr generate
+    pnpm exec tsc --noEmit
+    pnpm exec tsx scripts/check-contrast.ts
+    pnpm exec tsx scripts/check-colors.ts
+
+# Unit tests
+test *args:
+    pnpm exec vitest run {{ args }}
+
+# End-to-end tests (starts API + Vite against the test database)
+e2e *args:
+    pnpm exec playwright test {{ args }}
+
+# Format and auto-fix
+fmt:
+    pnpm exec biome check --write .
