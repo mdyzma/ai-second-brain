@@ -4547,9 +4547,9 @@ git commit -m "ci(release): automate SemVer releases" -m "Add semantic-release: 
 
 Pushing a tag and pushing to `main` are outward actions. The controller confirms with the owner before running. **Push the tag before `main`:** if `main` reaches GitHub with the release job but without `v0.1.0`, semantic-release would publish `v1.0.0`.
 
+**Already done (owner-approved, after Task 8):** `v0.1.0` (annotated, on `14a68fb`) was pushed to origin. Only run:
+
 ```bash
-git tag -a v0.1.0 14a68fb -m "v0.1.0: MVP baseline before the Phase 1a rebuild"
-git push origin v0.1.0
 git push origin main
 ```
 
