@@ -60,7 +60,7 @@ The API, UI, MCP, hardware and search run in TS. A Python worker consumes `inges
 
 ## Decision
 
-Option A. Python 3.13 backend managed by uv. **TypeScript in strict mode** for all web code (no JavaScript files, `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`). The API contract is generated from Pydantic via OpenAPI. Embeddings are served through **Ollama's embed endpoint** by default, which keeps the backend light and leaves the language choice reversible. sentence-transformers is used only in the evaluation harness.
+Option A. Python 3.12 backend managed by uv. **TypeScript in strict mode** for all web code (no JavaScript files, `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`). The API contract is generated from Pydantic via OpenAPI. Embeddings are served through **Ollama's embed endpoint** by default, which keeps the backend light and leaves the language choice reversible. sentence-transformers is used only in the evaluation harness.
 
 ## Consequences
 

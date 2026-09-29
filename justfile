@@ -1,5 +1,6 @@
 # Second Brain - Command Runner
 set dotenv-load
+set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 
 default:
     @just --list

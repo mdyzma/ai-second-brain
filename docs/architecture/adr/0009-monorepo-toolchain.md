@@ -11,7 +11,7 @@ The stack spans Python (backend), TypeScript (web), SQL (migrations) and infra (
 ## Decision
 
 - **One repository**: `backend/`, `web/`, `db/`, `infra/`, `docs/`, plus a root `justfile`.
-- **Python:** uv project in `backend/` (`pyproject.toml`, `uv.lock`, `.python-version` = 3.13). Dev tools as uv dependency groups: ruff (lint + format), pyright (types), pytest, import-linter. Everything runs as `uv run …`.
+- **Python:** uv project in `backend/` (`pyproject.toml`, `uv.lock`, `.python-version` = 3.12). Dev tools as uv dependency groups: ruff (lint + format), pyright (types), pytest, import-linter. Everything runs as `uv run …`.
 - **Node:** pnpm in `web/`, versions pinned (`packageManager` field, `.nvmrc`).
 - **Database:** dbmate for migrations (see ADR-0004), invoked via just.
 - **just is the only documented interface.** Nobody needs to remember `uv`/`pnpm`/`dbmate` flags. Just modules (`mod backend`, `mod web`, `mod db`) keep the root file short.
@@ -20,7 +20,7 @@ The stack spans Python (backend), TypeScript (web), SQL (migrations) and infra (
 
 ```just
 set dotenv-load
-set windows-shell := ["pwsh", "-NoLogo", "-Command"]   # owner develops on Windows
+set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]   # owner develops on Windows (PowerShell 5.1; no sh)
 
 mod backend 'backend/justfile'
 mod web 'web/justfile'

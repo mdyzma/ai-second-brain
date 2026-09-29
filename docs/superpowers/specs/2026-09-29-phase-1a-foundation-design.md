@@ -32,9 +32,9 @@ second-brain/
 ├── .gitattributes              # * text=auto eol=lf
 ├── backend/
 │   ├── justfile
-│   ├── pyproject.toml          # uv project "second-brain", requires-python >=3.13
+│   ├── pyproject.toml          # uv project "second-brain", requires-python >=3.12
 │   ├── uv.lock
-│   ├── .python-version         # 3.13
+│   ├── .python-version         # 3.12
 │   ├── src/second_brain/
 │   │   ├── __init__.py
 │   │   ├── config.py           # Settings (pydantic-settings)
@@ -215,9 +215,9 @@ The root `justfile` uses `set dotenv-load`, `set windows-shell := ["powershell.e
 
 ## 9. Prerequisites and environment
 
-- **Prerequisites** (documented in the README; `just setup` fails early with a clear message when one is missing): uv, just, Node ≥ 24 with pnpm (via corepack), and Docker with a running daemon. Python itself is provisioned by uv (3.13). dbmate comes from the pnpm workspace; no global install.
+- **Prerequisites** (documented in the README; `just setup` fails early with a clear message when one is missing): uv, just, Node ≥ 24 with pnpm (via corepack), and Docker with a running daemon. Python itself is provisioned by uv (3.12). dbmate comes from the pnpm workspace; no global install.
 - **Pins:**
-  - `.python-version` 3.13.
+  - `.python-version` 3.12.
   - `.nvmrc` 24, with `engines.node >=24`, so the local Node 25 is accepted.
   - The `packageManager` field pins the pnpm version installed at scaffold time.
   - The CI Node version is 24.

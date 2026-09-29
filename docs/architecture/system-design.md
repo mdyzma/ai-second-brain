@@ -121,7 +121,7 @@ An import-linter contract (`import-linter` in CI) enforces that only `llm` impor
 ```
 second-brain/
 ├── justfile                  # the one entry point: just setup | dev | check | test | db-* | build | deploy
-├── backend/                  # uv project (pyproject.toml + uv.lock), Python 3.13
+├── backend/                  # uv project (pyproject.toml + uv.lock), Python 3.12
 │   ├── src/second_brain/
 │   │   ├── sources/ knowledge/ lifecycle/ search/ llm/ conversation/ hardware/ jobs/
 │   │   └── interfaces/
