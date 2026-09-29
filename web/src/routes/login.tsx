@@ -1,8 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { Card } from "@/design-system/ui/card";
+import { completeLogin } from "@/features/auth/complete-login";
 import { LoginForm } from "@/features/auth/LoginForm";
-import { safeRedirect, sessionQueryKey, sessionQueryOptions } from "@/features/auth/session";
+import { safeRedirect, sessionQueryOptions } from "@/features/auth/session";
 
 type LoginSearch = { redirect?: string };
 
@@ -24,7 +25,7 @@ function LoginPage() {
   const router = useRouter();
 
   async function handleSuccess() {
-    await queryClient.invalidateQueries({ queryKey: sessionQueryKey });
+    await completeLogin(queryClient);
     await router.navigate({ href: safeRedirect(target) });
   }
 

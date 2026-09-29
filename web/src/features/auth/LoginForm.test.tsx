@@ -53,6 +53,23 @@ describe("LoginForm", () => {
     expect(await screen.findByRole("button", { name: "Sign in" })).toBeEnabled();
   });
 
+  it("stays pending until onSuccess has completed", async () => {
+    let finish: () => void = () => {};
+    const onSuccess = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    render(<LoginForm onSuccess={onSuccess} submit={async () => ({ ok: true })} />);
+    await user.type(screen.getByLabelText("Password"), "pw");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByRole("button", { name: "Signing in…" })).toBeDisabled();
+    finish();
+    expect(await screen.findByRole("button", { name: "Sign in" })).toBeEnabled();
+  });
+
   it("password field is labelled and uses current-password autocomplete", () => {
     render(<LoginForm onSuccess={vi.fn()} />);
     const input = screen.getByLabelText("Password");

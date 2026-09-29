@@ -33,13 +33,16 @@ export function LoginForm({ onSuccess, submit = login }: LoginFormProps) {
     if (pending) return;
     setPending(true);
     setError(null);
-    const result = await submit(password);
-    setPending(false);
-    if (result.ok) {
-      await onSuccess();
-      return;
+    try {
+      const result = await submit(password);
+      if (result.ok) {
+        await onSuccess();
+        return;
+      }
+      setError(loginErrorMessage(result));
+    } finally {
+      setPending(false);
     }
-    setError(loginErrorMessage(result));
   }
 
   return (
