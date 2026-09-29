@@ -10,6 +10,11 @@ export function setUnauthorizedHandler(handler: () => void): void {
   onUnauthorized = handler;
 }
 
+/** For requests made outside openapi-fetch (the chat stream): report an ended session. */
+export function notifyUnauthorized(): void {
+  onUnauthorized?.();
+}
+
 export const unauthorizedMiddleware: Middleware = {
   onResponse({ request, response }) {
     const path = new URL(request.url).pathname;
