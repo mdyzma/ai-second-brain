@@ -25,15 +25,24 @@ def system_prompt(mode: ChatMode) -> str:
     return PRIVATE_SYSTEM if mode is ChatMode.PRIVATE else CLOUD_SYSTEM
 
 
+def _escape_html(text: str) -> str:
+    """Escape angle brackets in untrusted note text."""
+    return text.replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _render_sources(sources: Sequence[Source]) -> str:
     if not sources:
         return "(no matching sources)"
     blocks = []
     for source in sources:
-        title = f"[{source.n}] {source.path}"
-        if source.heading:
-            title += f" — {source.heading}"
-        snippet = source.snippet.replace("</sources>", "&lt;/sources&gt;")
+        # Escape all untrusted text from notes
+        path = _escape_html(source.path)
+        heading = _escape_html(source.heading) if source.heading else None
+        snippet = _escape_html(source.snippet)
+
+        title = f"[{source.n}] {path}"
+        if heading:
+            title += f" — {heading}"
         blocks.append(f"{title}\n{snippet}")
     return "\n\n".join(blocks)
 
