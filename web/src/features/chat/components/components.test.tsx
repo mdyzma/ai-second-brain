@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatStatus, Source } from "../types";
-import { AnswerBlock, linkCitations, safeUrl } from "./AnswerBlock";
+import { AnswerBlock, safeUrl } from "./AnswerBlock";
 import { ChatComposer } from "./ChatComposer";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { SourceList } from "./SourceList";
@@ -133,10 +133,38 @@ describe("AnswerBlock", () => {
     expect(screen.getByTestId("answer")).toHaveAttribute("aria-busy", "true");
   });
 
-  it("helpers", () => {
-    expect(linkCitations("see [1] and [2](x)", 3, "p")).toBe(
-      "see [\\[1\\]](#p-source-1) and [2](x)",
+  it("links citations only in normal text", () => {
+    render(
+      <AnswerBlock
+        text={"see [1] and [2](x) and [9]\n\nuse `arr[1]` here\n\n```\nx[1]\n```"}
+        state="done"
+        sourceCount={3}
+        anchorPrefix="p"
+      />,
     );
+    const links = screen.getAllByRole("link");
+    expect(links.map((l) => l.textContent)).toEqual(["[1]"]);
+    expect(links[0]).toHaveAttribute("href", "#p-source-1");
+    expect(screen.getByText("arr[1]").tagName).toBe("CODE");
+    expect(screen.getByText("x[1]").tagName).toBe("CODE");
+    expect(screen.getByText(/and \[9\]/)).toBeInTheDocument();
+  });
+
+  it("never renders images or their remote sources", () => {
+    const { container } = render(
+      <AnswerBlock
+        text={"![secret](https://attacker.example/x.png?q=1) done"}
+        state="done"
+        sourceCount={0}
+        anchorPrefix="t"
+      />,
+    );
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.innerHTML).not.toContain("attacker.example");
+    expect(container).toHaveTextContent("secret");
+  });
+
+  it("helpers", () => {
     expect(safeUrl("javascript:alert(1)")).toBe("");
     expect(safeUrl("#p-source-1")).toBe("#p-source-1");
     expect(safeUrl("https://a.example/x")).toBe("https://a.example/x");
