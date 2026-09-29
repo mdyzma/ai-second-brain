@@ -49,7 +49,7 @@ function pairsFor(vars: Vars): Array<[string, string, number]> {
       pairs.push([name, "--sb-bg", TEXT], [name, "--sb-surface", TEXT]);
     }
     if (name.endsWith("-border") && name !== "--sb-border" && name !== "--sb-border-input") {
-      pairs.push([name, "--sb-bg", NON_TEXT]);
+      pairs.push([name, "--sb-bg", NON_TEXT], [name, "--sb-surface", NON_TEXT]);
     }
   }
   return pairs;

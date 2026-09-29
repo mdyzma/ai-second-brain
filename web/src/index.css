@@ -15,7 +15,9 @@
     *,
     *::before,
     *::after {
+      /* biome-ignore lint/complexity/noImportantStyles: reduced-motion must override component transitions */
       transition-duration: 0.01ms !important;
+      /* biome-ignore lint/complexity/noImportantStyles: reduced-motion must override component transitions */
       animation-duration: 0.01ms !important;
     }
   }

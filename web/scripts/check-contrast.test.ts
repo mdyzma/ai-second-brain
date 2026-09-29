@@ -41,4 +41,17 @@ describe("checkTokens", () => {
     const css = `:root { --sb-bg: oklch(0.99 0 0); --sb-text: var(--sb-missing); }`;
     expect(checkTokens(css).failures.length).toBeGreaterThan(0);
   });
+
+  it("reports a border that passes on bg but fails on surface", () => {
+    const css = `:root { --sb-bg: oklch(1 0 0); --sb-surface: oklch(0.6 0 0);
+      --sb-surface-raised: oklch(1 0 0); --sb-text: oklch(0 0 0); --sb-text-muted: oklch(0 0 0);
+      --sb-accent: oklch(0 0 0); --sb-accent-fg: oklch(1 0 0);
+      --sb-border-input: oklch(0 0 0); --sb-focus-ring: oklch(0 0 0);
+      --sb-x-border: oklch(0.6 0 0); }`;
+    const { failures } = checkTokens(css);
+    expect(
+      failures.some((f) => f.fg === "--sb-x-border" && f.bg === "--sb-surface" && f.min === 3),
+    ).toBe(true);
+    expect(failures.some((f) => f.fg === "--sb-x-border" && f.bg === "--sb-bg")).toBe(false);
+  });
 });
