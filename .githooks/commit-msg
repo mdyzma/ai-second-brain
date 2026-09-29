@@ -1,0 +1,3 @@
+#!/bin/sh
+# Rejects AI attribution and non-Conventional-Commits headers. Enabled by `just install` / `just hooks`.
+exec pnpm exec tsx scripts/check-commit-msg.ts "$1"

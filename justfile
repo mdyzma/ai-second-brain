@@ -13,6 +13,7 @@ default:
 install:
     uv sync --directory backend
     pnpm install
+    git config core.hooksPath .githooks
 
 # Hash the owner password; paste the printed line into .env
 hash-password:
@@ -26,3 +27,11 @@ api-client:
 # Fail if the committed API client differs from the backend
 api-client-check: api-client
     git diff --exit-code -- web/src/api
+
+# Enable the repo's git hooks (commit-msg guard)
+hooks:
+    git config core.hooksPath .githooks
+
+# Unit tests for the TypeScript helper scripts
+test-scripts:
+    pnpm exec tsx --test scripts/lib/commit-msg.test.ts

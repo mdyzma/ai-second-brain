@@ -129,3 +129,11 @@ The agent will use the MCP tool to run a vector search:
 * **CPU**: Set the VM CPU type to **"Host"**. This allows the embedding models to use **AVX2 instructions**, making vector generation 3x faster.
 * **Storage**: Ensure the Postgres data partition is on an **SSD**. Vector indexing (HNSW) is I/O intensive.
 * **Memory**: Allocate at least **4GB RAM**. Postgres 18 uses more memory for parallel workers, which speeds up index building.
+
+## Commit messages
+
+Conventional Commits: `type(scope): summary`. The header is imperative, ≤ 50 characters
+(72 is the hard limit) and has no period. An optional body explains what and why, wrapped at
+72. The optional footer holds `BREAKING CHANGE:` / `Closes #n`. AI attribution
+(`Co-Authored-By`, "Generated with Claude") is never allowed. The `commit-msg` hook in
+`.githooks/` enforces this. `just install` enables it (`just hooks` on its own).
