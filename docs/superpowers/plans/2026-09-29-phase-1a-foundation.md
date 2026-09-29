@@ -69,24 +69,24 @@ scripts/schema-check.ts      # pg_dump in container → compare/write db/schema.
 infra/compose.yaml
 db/justfile  db/migrations/20260929000000_init.sql  db/schema.sql
 backend/justfile backend/pyproject.toml backend/uv.lock backend/.python-version
-backend/src/second_brain/__init__.py
-backend/src/second_brain/config.py           # Settings, get_settings, HASH_HINT
-backend/src/second_brain/runtime.py          # selector event-loop factory (Windows + psycopg)
-backend/src/second_brain/db.py               # create_pool, ping
-backend/src/second_brain/auth/__init__.py
-backend/src/second_brain/auth/passwords.py   # hash_password, verify_password
-backend/src/second_brain/auth/throttle.py    # LoginThrottle
-backend/src/second_brain/auth/sessions.py    # Session, SessionStore, token_id, utc_now
-backend/src/second_brain/interfaces/__init__.py
-backend/src/second_brain/interfaces/api/__init__.py
-backend/src/second_brain/interfaces/api/app.py        # create_app, openapi_schema
-backend/src/second_brain/interfaces/api/schemas.py    # Pydantic API models
-backend/src/second_brain/interfaces/api/deps.py       # CSRF, session deps, cookie helpers
-backend/src/second_brain/interfaces/api/routes/__init__.py
-backend/src/second_brain/interfaces/api/routes/health.py
-backend/src/second_brain/interfaces/api/routes/auth.py
-backend/src/second_brain/interfaces/cli/__init__.py
-backend/src/second_brain/interfaces/cli/main.py       # Typer: serve, openapi, hash-password
+backend/src/ai_second_brain/__init__.py
+backend/src/ai_second_brain/config.py           # Settings, get_settings, HASH_HINT
+backend/src/ai_second_brain/runtime.py          # selector event-loop factory (Windows + psycopg)
+backend/src/ai_second_brain/db.py               # create_pool, ping
+backend/src/ai_second_brain/auth/__init__.py
+backend/src/ai_second_brain/auth/passwords.py   # hash_password, verify_password
+backend/src/ai_second_brain/auth/throttle.py    # LoginThrottle
+backend/src/ai_second_brain/auth/sessions.py    # Session, SessionStore, token_id, utc_now
+backend/src/ai_second_brain/interfaces/__init__.py
+backend/src/ai_second_brain/interfaces/api/__init__.py
+backend/src/ai_second_brain/interfaces/api/app.py        # create_app, openapi_schema
+backend/src/ai_second_brain/interfaces/api/schemas.py    # Pydantic API models
+backend/src/ai_second_brain/interfaces/api/deps.py       # CSRF, session deps, cookie helpers
+backend/src/ai_second_brain/interfaces/api/routes/__init__.py
+backend/src/ai_second_brain/interfaces/api/routes/health.py
+backend/src/ai_second_brain/interfaces/api/routes/auth.py
+backend/src/ai_second_brain/interfaces/cli/__init__.py
+backend/src/ai_second_brain/interfaces/cli/main.py       # Typer: serve, openapi, hash-password
 backend/tests/conftest.py
 backend/tests/unit/{test_config.py,test_runtime.py,test_passwords.py,test_throttle.py,test_csrf.py,test_health_api.py,test_cli.py}
 backend/tests/integration/test_auth_api.py
@@ -193,9 +193,9 @@ Expected: no output; `git status` shows only the files you changed or deleted. T
 ```dotenv
 # Copy to .env (just setup does this for you). Never commit .env.
 # Database shared by dbmate and the backend (dev container from infra/compose.yaml)
-DATABASE_URL=postgres://brain:brain@localhost:5432/second_brain?sslmode=disable
+DATABASE_URL=postgres://brain:brain@localhost:5432/ai_second_brain?sslmode=disable
 # Test database used by pytest and e2e (created by `just db::test-prepare`)
-TEST_DATABASE_URL=postgres://brain:brain@localhost:5432/second_brain_test?sslmode=disable
+TEST_DATABASE_URL=postgres://brain:brain@localhost:5432/ai_second_brain_test?sslmode=disable
 
 # Owner login. Run `just hash-password` and paste the printed line here.
 # KEEP THE SINGLE QUOTES: unquoted '$' characters are expanded by just's .env loader.
@@ -216,7 +216,7 @@ SB_ENV=dev
 ```dotenv
 # TEST-ONLY VALUES, committed on purpose. Not secrets.
 # The e2e owner password is: e2e-test-password
-TEST_DATABASE_URL=postgres://brain:brain@localhost:5432/second_brain_test?sslmode=disable
+TEST_DATABASE_URL=postgres://brain:brain@localhost:5432/ai_second_brain_test?sslmode=disable
 SB_OWNER_PASSWORD_HASH='$argon2id$v=19$m=65536,t=3,p=4$lUbERLF2lShFt/g2zuyNHw$/2JZ1Uy+8w4nXWGCR1KY0IwYFD1CnGSOM7cAtbhtC/w'
 SB_API_PORT=8001
 SB_WEB_PORT=5174
@@ -228,7 +228,7 @@ SB_WEB_PORT=5174
 
 ```json
 {
-  "name": "second-brain-workspace",
+  "name": "ai-second-brain-workspace",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@12.6.0",
@@ -359,12 +359,12 @@ git commit -m "chore: remove MVP and add root workspace tooling"
 
 **Interfaces:**
 - Consumes: `scripts/lib/docker.ts` (Task 1).
-- Produces: recipes `db::up`, `db::down`, `db::migrate`, `db::status`, `db::rollback`, `db::new NAME`, `db::test-prepare`, `db::reset`, `db::dump`, `db::schema-check`. Table `auth_sessions(id bytea pk, created_at, last_seen_at, expires_at timestamptz, user_agent text)`. Compose service name `postgres`, user/password `brain`, db `second_brain`.
+- Produces: recipes `db::up`, `db::down`, `db::migrate`, `db::status`, `db::rollback`, `db::new NAME`, `db::test-prepare`, `db::reset`, `db::dump`, `db::schema-check`. Table `auth_sessions(id bytea pk, created_at, last_seen_at, expires_at timestamptz, user_agent text)`. Compose service name `postgres`, user/password `brain`, db `ai_second_brain`.
 
 - [ ] **Step 1: Write `infra/compose.yaml`**
 
 ```yaml
-name: second-brain
+name: ai-second-brain
 
 services:
   postgres:
@@ -372,13 +372,13 @@ services:
     environment:
       POSTGRES_USER: brain
       POSTGRES_PASSWORD: brain
-      POSTGRES_DB: second_brain
+      POSTGRES_DB: ai_second_brain
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U brain -d second_brain"]
+      test: ["CMD-SHELL", "pg_isready -U brain -d ai_second_brain"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -448,7 +448,7 @@ export function normalize(dump: string): string {
 }
 
 const ready = dockerAvailable()
-  ? compose(["exec", "-T", "postgres", "pg_isready", "-U", "brain", "-d", "second_brain"])
+  ? compose(["exec", "-T", "postgres", "pg_isready", "-U", "brain", "-d", "ai_second_brain"])
   : undefined;
 if (ready === undefined || ready.status !== 0) {
   console.log("schema-check: SKIPPED (no database)");
@@ -457,7 +457,7 @@ if (ready === undefined || ready.status !== 0) {
 
 const dump = compose([
   "exec", "-T", "postgres", "pg_dump", "--schema-only", "--no-owner", "--no-privileges",
-  "--exclude-table=public.schema_migrations", "-U", "brain", "second_brain",
+  "--exclude-table=public.schema_migrations", "-U", "brain", "ai_second_brain",
 ]);
 if (dump.status !== 0) {
   console.error(dump.stderr);
@@ -554,7 +554,7 @@ Expected: `Postgres is up (127.0.0.1:5432).` With Docker stopped, you get the pe
 Run: `just db::migrate`
 Expected: `Applying: 20260929000000_init.sql`.
 Run: `just db::test-prepare`
-Expected: it creates `second_brain_test` and applies the migration.
+Expected: it creates `ai_second_brain_test` and applies the migration.
 Run: `just db::status`
 Expected: `[X] 20260929000000_init.sql`, `Applied: 1`, `Pending: 0`.
 Run: `just db::schema-check`
@@ -574,13 +574,13 @@ git commit -m "feat(db): add pgvector compose service, init migration and dbmate
 ### Task 3: Backend project and configuration
 
 **Files:**
-- Create: `backend/pyproject.toml`, `backend/.python-version`, `backend/justfile`, `backend/src/second_brain/__init__.py`, `backend/src/second_brain/config.py`, `backend/src/second_brain/runtime.py`, `backend/tests/conftest.py`, `backend/tests/unit/test_config.py`, `backend/tests/unit/test_runtime.py`
+- Create: `backend/pyproject.toml`, `backend/.python-version`, `backend/justfile`, `backend/src/ai_second_brain/__init__.py`, `backend/src/ai_second_brain/config.py`, `backend/src/ai_second_brain/runtime.py`, `backend/tests/conftest.py`, `backend/tests/unit/test_config.py`, `backend/tests/unit/test_runtime.py`
 - Modify: root `justfile` (`mod backend`, `install` gains `uv sync`)
 
 **Interfaces:**
 - Produces:
-  - `second_brain.config`: `Settings` (fields `database_url` alias `DATABASE_URL`, `owner_password_hash`, `session_ttl_days`, `cookie_secure`, `allowed_origins`, `api_port`, `env`; property `allowed_origin_set: frozenset[str]`), `get_settings() -> Settings`, `HASH_HINT: str`, `REPO_ROOT: Path`, `ENV_FILE: Path`.
-  - `second_brain.runtime`: `new_event_loop() -> asyncio.AbstractEventLoop`.
+  - `ai_second_brain.config`: `Settings` (fields `database_url` alias `DATABASE_URL`, `owner_password_hash`, `session_ttl_days`, `cookie_secure`, `allowed_origins`, `api_port`, `env`; property `allowed_origin_set: frozenset[str]`), `get_settings() -> Settings`, `HASH_HINT: str`, `REPO_ROOT: Path`, `ENV_FILE: Path`.
+  - `ai_second_brain.runtime`: `new_event_loop() -> asyncio.AbstractEventLoop`.
   - Test fixtures in `conftest.py`: `make_settings(**overrides) -> Settings`, `TEST_PASSWORD`, `TEST_HASH`, `SAME_ORIGIN` headers.
 
 - [ ] **Step 1: Create the uv project files**
@@ -595,14 +595,14 @@ git commit -m "feat(db): add pgvector compose service, init migration and dbmate
 
 ```toml
 [project]
-name = "second-brain"
+name = "ai-second-brain"
 version = "0.2.0"
 description = "Private-by-default personal knowledge system: backend API, worker and admin CLI"
 requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]
-second-brain = "second_brain.interfaces.cli.main:app"
+ai-second-brain = "ai_second_brain.interfaces.cli.main:app"
 
 [dependency-groups]
 dev = []
@@ -634,7 +634,7 @@ requires = ["uv_build>=0.12,<0.13"]
 build-backend = "uv_build"
 ```
 
-- [ ] **Step 2: Write `backend/src/second_brain/__init__.py`** (uv builds the package during `uv add`, so the module must exist first)
+- [ ] **Step 2: Write `backend/src/ai_second_brain/__init__.py`** (uv builds the package during `uv add`, so the module must exist first)
 
 ```python
 """Second Brain backend."""
@@ -659,8 +659,8 @@ from typing import Any
 
 import pytest
 
-from second_brain.auth.passwords import hash_password
-from second_brain.config import Settings
+from ai_second_brain.auth.passwords import hash_password
+from ai_second_brain.config import Settings
 
 TEST_PASSWORD = "correct horse battery staple"
 TEST_HASH = hash_password(TEST_PASSWORD)
@@ -682,15 +682,15 @@ def make_settings() -> Callable[..., Settings]:
     return _make
 ```
 
-`conftest.py` imports `second_brain.auth.passwords`, which Task 4 creates. Create the minimal module now so the imports resolve. Task 4 replaces it with the real, tested implementation:
+`conftest.py` imports `ai_second_brain.auth.passwords`, which Task 4 creates. Create the minimal module now so the imports resolve. Task 4 replaces it with the real, tested implementation:
 
-`backend/src/second_brain/auth/__init__.py`:
+`backend/src/ai_second_brain/auth/__init__.py`:
 
 ```python
 """Authentication: password hashing, login throttling, sessions."""
 ```
 
-`backend/src/second_brain/auth/passwords.py`:
+`backend/src/ai_second_brain/auth/passwords.py`:
 
 ```python
 from argon2 import PasswordHasher
@@ -711,7 +711,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from second_brain.config import ENV_FILE, REPO_ROOT, Settings
+from ai_second_brain.config import ENV_FILE, REPO_ROOT, Settings
 
 from ..conftest import TEST_HASH
 
@@ -790,9 +790,9 @@ Also create empty `backend/tests/__init__.py` and `backend/tests/unit/__init__.p
 - [ ] **Step 5: Run the tests to verify they fail**
 
 Run: `uv run --directory backend pytest tests/unit/test_config.py -q`
-Expected: FAIL with `ModuleNotFoundError: No module named 'second_brain.config'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'ai_second_brain.config'`.
 
-- [ ] **Step 6: Write `backend/src/second_brain/config.py`**
+- [ ] **Step 6: Write `backend/src/ai_second_brain/config.py`**
 
 ```python
 """Settings from the environment and the repository-root .env file."""
@@ -862,7 +862,7 @@ Expected: `8 passed` (the parametrized hash test counts 3).
 ```python
 import asyncio
 
-from second_brain.runtime import new_event_loop
+from ai_second_brain.runtime import new_event_loop
 
 
 def test_new_event_loop_is_a_selector_loop() -> None:
@@ -874,12 +874,12 @@ def test_new_event_loop_is_a_selector_loop() -> None:
 ```
 
 Run: `uv run --directory backend pytest tests/unit/test_runtime.py -q`
-Expected: FAIL, `No module named 'second_brain.runtime'`.
+Expected: FAIL, `No module named 'ai_second_brain.runtime'`.
 
-- [ ] **Step 9: Write `backend/src/second_brain/runtime.py`**
+- [ ] **Step 9: Write `backend/src/ai_second_brain/runtime.py`**
 
 ```python
-"""Event loop factory for uvicorn (`loop="second_brain.runtime:new_event_loop"`).
+"""Event loop factory for uvicorn (`loop="ai_second_brain.runtime:new_event_loop"`).
 
 psycopg's async mode needs a selector event loop. On Windows, asyncio and uvicorn otherwise
 use the Proactor loop. macOS and Linux already default to selector loops.
@@ -955,8 +955,8 @@ git commit -m "feat(backend): add uv project, settings and selector loop factory
 ### Task 4: Password hashing and login throttle
 
 **Files:**
-- Modify: `backend/src/second_brain/auth/passwords.py`
-- Create: `backend/src/second_brain/auth/throttle.py`, `backend/tests/unit/test_passwords.py`, `backend/tests/unit/test_throttle.py`
+- Modify: `backend/src/ai_second_brain/auth/passwords.py`
+- Create: `backend/src/ai_second_brain/auth/throttle.py`, `backend/tests/unit/test_passwords.py`, `backend/tests/unit/test_throttle.py`
 
 **Interfaces:**
 - Produces:
@@ -970,7 +970,7 @@ git commit -m "feat(backend): add uv project, settings and selector loop factory
 ```python
 import pytest
 
-from second_brain.auth.passwords import hash_password, verify_password
+from ai_second_brain.auth.passwords import hash_password, verify_password
 
 POLISH = "zażółć gęślą jaźń 🔑 "  # trailing space is part of the password
 
@@ -1004,7 +1004,7 @@ def test_hashes_are_salted() -> None:
 `backend/tests/unit/test_throttle.py`:
 
 ```python
-from second_brain.auth.throttle import LoginThrottle
+from ai_second_brain.auth.throttle import LoginThrottle
 
 
 class FakeClock:
@@ -1056,11 +1056,11 @@ def test_success_resets() -> None:
 - [ ] **Step 2: Run to verify they fail**
 
 Run: `uv run --directory backend pytest tests/unit/test_passwords.py tests/unit/test_throttle.py -q`
-Expected: FAIL. `verify_password` and `second_brain.auth.throttle` can't be imported.
+Expected: FAIL. `verify_password` and `ai_second_brain.auth.throttle` can't be imported.
 
 - [ ] **Step 3: Implement**
 
-`backend/src/second_brain/auth/passwords.py`:
+`backend/src/ai_second_brain/auth/passwords.py`:
 
 ```python
 """Argon2id password hashing for the single owner account."""
@@ -1083,7 +1083,7 @@ def verify_password(password_hash: str, plain: str) -> bool:
         return False
 ```
 
-`backend/src/second_brain/auth/throttle.py`:
+`backend/src/ai_second_brain/auth/throttle.py`:
 
 ```python
 """In-process login throttle.
@@ -1149,7 +1149,7 @@ git commit -m "feat(auth): add argon2 password verification and login throttle"
 ### Task 5: Database pool, app factory and health endpoints
 
 **Files:**
-- Create: `backend/src/second_brain/db.py`, `backend/src/second_brain/interfaces/__init__.py`, `backend/src/second_brain/interfaces/api/__init__.py`, `backend/src/second_brain/interfaces/api/schemas.py`, `backend/src/second_brain/interfaces/api/app.py`, `backend/src/second_brain/interfaces/api/routes/__init__.py`, `backend/src/second_brain/interfaces/api/routes/health.py`, `backend/tests/unit/test_health_api.py`
+- Create: `backend/src/ai_second_brain/db.py`, `backend/src/ai_second_brain/interfaces/__init__.py`, `backend/src/ai_second_brain/interfaces/api/__init__.py`, `backend/src/ai_second_brain/interfaces/api/schemas.py`, `backend/src/ai_second_brain/interfaces/api/app.py`, `backend/src/ai_second_brain/interfaces/api/routes/__init__.py`, `backend/src/ai_second_brain/interfaces/api/routes/health.py`, `backend/tests/unit/test_health_api.py`
 
 **Interfaces:**
 - Consumes: `Settings` (Task 3).
@@ -1158,7 +1158,7 @@ git commit -m "feat(auth): add argon2 password verification and login throttle"
   - `app.create_app(settings: Settings | None = None, *, clock: Callable[[], datetime] = utc_now, throttle_clock: Callable[[], float] = time.monotonic) -> FastAPI` and `app.openapi_schema() -> dict[str, Any]`.
   - `app.state` holds `settings`, `pool`, `sessions` (Task 6 wires this) and `throttle`.
   - `schemas` defines `HealthResponse`, `ReadyResponse`, `ErrorResponse`, `LoginRequest` and `MeResponse`.
-  - Logger name: `second_brain.api`.
+  - Logger name: `ai_second_brain.api`.
   - Test helper `make_client(app) -> TestClient` in `tests/conftest.py` (selector loop). All later API tests use it instead of a bare `TestClient`.
 
 > Task 6 adds `SessionStore`. To keep this task self-contained, `create_app` here does not construct sessions yet. Task 6 adds that code to the lifespan.
@@ -1171,7 +1171,7 @@ psycopg's async mode cannot run on Windows' default Proactor loop, and `TestClie
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from second_brain.runtime import new_event_loop
+from ai_second_brain.runtime import new_event_loop
 
 
 def make_client(app: FastAPI) -> TestClient:
@@ -1186,8 +1186,8 @@ These need **no** database. They point the app at a closed port to exercise the 
 ```python
 from collections.abc import Callable
 
-from second_brain.config import Settings
-from second_brain.interfaces.api.app import create_app, openapi_schema
+from ai_second_brain.config import Settings
+from ai_second_brain.interfaces.api.app import create_app, openapi_schema
 
 from ..conftest import make_client
 
@@ -1234,7 +1234,7 @@ def test_openapi_schema_has_stable_operation_ids() -> None:
 - [ ] **Step 3: Run to verify they fail**
 
 Run: `uv run --directory backend pytest tests/unit/test_health_api.py -q`
-Expected: FAIL, `No module named 'second_brain.interfaces'`.
+Expected: FAIL, `No module named 'ai_second_brain.interfaces'`.
 
 - [ ] **Step 4: Implement `db.py`**
 
@@ -1306,8 +1306,8 @@ class MeResponse(BaseModel):
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from second_brain.db import ping
-from second_brain.interfaces.api.schemas import HealthResponse, ReadyResponse
+from ai_second_brain.db import ping
+from ai_second_brain.interfaces.api.schemas import HealthResponse, ReadyResponse
 
 router = APIRouter(tags=["health"])
 
@@ -1349,12 +1349,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from psycopg_pool import PoolTimeout
 
-from second_brain.auth.throttle import LoginThrottle
-from second_brain.config import Settings, get_settings
-from second_brain.db import create_pool
-from second_brain.interfaces.api.routes import health
+from ai_second_brain.auth.throttle import LoginThrottle
+from ai_second_brain.config import Settings, get_settings
+from ai_second_brain.db import create_pool
+from ai_second_brain.interfaces.api.routes import health
 
-logger = logging.getLogger("second_brain.api")
+logger = logging.getLogger("ai_second_brain.api")
 
 PLACEHOLDER_HASH = "$argon2id$v=19$m=65536,t=3,p=4$placeholder$placeholder"
 
@@ -1455,8 +1455,8 @@ git commit -m "feat(api): add app factory, db pool and health endpoints"
 ### Task 6: Sessions, CSRF guard and auth endpoints
 
 **Files:**
-- Create: `backend/src/second_brain/auth/sessions.py`, `backend/src/second_brain/interfaces/api/deps.py`, `backend/src/second_brain/interfaces/api/routes/auth.py`, `backend/tests/unit/test_csrf.py`, `backend/tests/integration/__init__.py`, `backend/tests/integration/test_auth_api.py`
-- Modify: `backend/src/second_brain/interfaces/api/app.py` (sessions in lifespan, include the auth router)
+- Create: `backend/src/ai_second_brain/auth/sessions.py`, `backend/src/ai_second_brain/interfaces/api/deps.py`, `backend/src/ai_second_brain/interfaces/api/routes/auth.py`, `backend/tests/unit/test_csrf.py`, `backend/tests/integration/__init__.py`, `backend/tests/integration/test_auth_api.py`
+- Modify: `backend/src/ai_second_brain/interfaces/api/app.py` (sessions in lifespan, include the auth router)
 
 **Interfaces:**
 - Consumes: `create_pool`, `LoginThrottle`, `verify_password`, `Settings`, `utc_now` (Tasks 3–5).
@@ -1471,7 +1471,7 @@ git commit -m "feat(api): add app factory, db pool and health endpoints"
 ```python
 import pytest
 
-from second_brain.interfaces.api.deps import is_same_origin
+from ai_second_brain.interfaces.api.deps import is_same_origin
 
 ALLOWED = frozenset({"http://localhost:5173"})
 
@@ -1512,9 +1512,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from second_brain.auth.sessions import token_id
-from second_brain.config import Settings
-from second_brain.interfaces.api.app import create_app
+from ai_second_brain.auth.sessions import token_id
+from ai_second_brain.config import Settings
+from ai_second_brain.interfaces.api.app import create_app
 
 from ..conftest import SAME_ORIGIN, TEST_PASSWORD, make_client
 
@@ -1729,7 +1729,7 @@ def test_login_and_me_are_503_when_database_down(
 - [ ] **Step 3: Run to verify they fail**
 
 Run (Docker up; `just db::test-prepare` done in Task 2): `just backend::test tests/unit/test_csrf.py tests/integration -q`
-Expected: FAIL. `test_csrf.py` can't import `second_brain.interfaces.api.deps`, and the integration tests can't import `second_brain.auth.sessions`.
+Expected: FAIL. `test_csrf.py` can't import `ai_second_brain.interfaces.api.deps`, and the integration tests can't import `ai_second_brain.auth.sessions`.
 
 - [ ] **Step 4: Implement `auth/sessions.py`**
 
@@ -1826,8 +1826,8 @@ class SessionStore:
 
 from fastapi import Depends, HTTPException, Request, Response, status
 
-from second_brain.auth.sessions import Session, SessionStore
-from second_brain.config import Settings
+from ai_second_brain.auth.sessions import Session, SessionStore
+from ai_second_brain.config import Settings
 
 SESSION_COOKIE = "sb_session"
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -1906,9 +1906,9 @@ async def require_session(session: Session | None = Depends(optional_session)) -
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from starlette.concurrency import run_in_threadpool
 
-from second_brain.auth.passwords import verify_password
-from second_brain.auth.sessions import Session
-from second_brain.interfaces.api.deps import (
+from ai_second_brain.auth.passwords import verify_password
+from ai_second_brain.auth.sessions import Session
+from ai_second_brain.interfaces.api.deps import (
     SESSION_COOKIE,
     clear_session_cookie,
     get_settings,
@@ -1917,7 +1917,7 @@ from second_brain.interfaces.api.deps import (
     require_session,
     set_session_cookie,
 )
-from second_brain.interfaces.api.schemas import ErrorResponse, LoginRequest, MeResponse
+from ai_second_brain.interfaces.api.schemas import ErrorResponse, LoginRequest, MeResponse
 
 router = APIRouter(tags=["auth"])
 
@@ -1981,8 +1981,8 @@ async def me(session: Session = Depends(require_session)) -> MeResponse:  # noqa
 Change `from datetime import UTC, datetime` to `from datetime import UTC, datetime, timedelta`, and add:
 
 ```python
-from second_brain.auth.sessions import SessionStore
-from second_brain.interfaces.api.routes import auth  # next to the existing `health` import
+from ai_second_brain.auth.sessions import SessionStore
+from ai_second_brain.interfaces.api.routes import auth  # next to the existing `health` import
 ```
 
 Replace the `lifespan` body with:
@@ -2032,12 +2032,12 @@ git commit -m "feat(auth): add sessions, same-origin guard and login/logout/me e
 ### Task 7: Admin CLI (serve, openapi, hash-password)
 
 **Files:**
-- Create: `backend/src/second_brain/interfaces/cli/__init__.py`, `backend/src/second_brain/interfaces/cli/main.py`, `backend/tests/unit/test_cli.py`
+- Create: `backend/src/ai_second_brain/interfaces/cli/__init__.py`, `backend/src/ai_second_brain/interfaces/cli/main.py`, `backend/tests/unit/test_cli.py`
 - Modify: `backend/justfile` (add `serve`); root `justfile` (add `hash-password`)
 
 **Interfaces:**
 - Consumes: `openapi_schema()`, `get_settings()`, `hash_password`, `HASH_HINT`.
-- Produces: the console script `second-brain` with `serve [--reload] [--port N]`, `openapi [--output PATH]` and `hash-password`. Output of `hash-password` is exactly one line: `SB_OWNER_PASSWORD_HASH='<hash>'`.
+- Produces: the console script `ai-second-brain` with `serve [--reload] [--port N]`, `openapi [--output PATH]` and `hash-password`. Output of `hash-password` is exactly one line: `SB_OWNER_PASSWORD_HASH='<hash>'`.
 
 - [ ] **Step 1: Write the failing tests `backend/tests/unit/test_cli.py`**
 
@@ -2047,8 +2047,8 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from second_brain.auth.passwords import verify_password
-from second_brain.interfaces.cli.main import app
+from ai_second_brain.auth.passwords import verify_password
+from ai_second_brain.interfaces.cli.main import app
 
 runner = CliRunner()
 
@@ -2098,7 +2098,7 @@ Expected: FAIL (import error).
 - [ ] **Step 2: Implement `interfaces/cli/main.py`** (and an empty `interfaces/cli/__init__.py`)
 
 ```python
-"""Admin CLI: `second-brain serve | openapi | hash-password`."""
+"""Admin CLI: `ai-second-brain serve | openapi | hash-password`."""
 
 import json
 from pathlib import Path
@@ -2108,9 +2108,9 @@ import typer
 import uvicorn
 from pydantic import ValidationError
 
-from second_brain.auth.passwords import hash_password
-from second_brain.config import get_settings
-from second_brain.interfaces.api.app import openapi_schema
+from ai_second_brain.auth.passwords import hash_password
+from ai_second_brain.config import get_settings
+from ai_second_brain.interfaces.api.app import openapi_schema
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="Second Brain admin CLI.")
 
@@ -2129,13 +2129,13 @@ def serve(
         typer.echo(f"Configuration error:\n{error}", err=True)
         raise typer.Exit(code=1) from error
     uvicorn.run(
-        "second_brain.interfaces.api.app:create_app",
+        "ai_second_brain.interfaces.api.app:create_app",
         factory=True,
         host="127.0.0.1",
         port=port or settings.api_port,
         reload=reload,
         reload_dirs=[str(SRC_DIR)] if reload else None,
-        loop="second_brain.runtime:new_event_loop",
+        loop="ai_second_brain.runtime:new_event_loop",
         access_log=False,
     )
 
@@ -2174,7 +2174,7 @@ Expected: all pass. If click's mismatch message text differs in the installed ve
 ```just
 # Run the API (pass --reload for development)
 serve *args:
-    uv run second-brain serve {{ args }}
+    uv run ai-second-brain serve {{ args }}
 ```
 
 Root `justfile`:
@@ -2182,7 +2182,7 @@ Root `justfile`:
 ```just
 # Hash the owner password; paste the printed line into .env
 hash-password:
-    uv run --directory backend second-brain hash-password
+    uv run --directory backend ai-second-brain hash-password
 ```
 
 - [ ] **Step 5: Manual smoke test (Windows event loop)**
@@ -2218,7 +2218,7 @@ git commit -m "feat(cli): add serve, openapi and hash-password commands"
 
 ```json
 {
-  "name": "@second-brain/web",
+  "name": "@ai-second-brain/web",
   "private": true,
   "type": "module",
   "engines": {
@@ -2880,7 +2880,7 @@ git commit -m "feat(web): scaffold Vite app with design tokens and contrast/colo
 - Modify: root `justfile` (`api-client`, `api-client-check`)
 
 **Interfaces:**
-- Consumes: the `second-brain openapi --output` command (Task 7).
+- Consumes: the `ai-second-brain openapi --output` command (Task 7).
 - Produces:
   - `api` (openapi-fetch client typed with `paths`), `setUnauthorizedHandler(handler: () => void): void`, `unauthorizedMiddleware: Middleware`.
   - `SessionInfo`, `sessionQueryKey`, `fetchSession(): Promise<SessionInfo | null>`, `sessionQueryOptions`.
@@ -2891,7 +2891,7 @@ git commit -m "feat(web): scaffold Vite app with design tokens and contrast/colo
 ```just
 # Regenerate the TypeScript API client from the backend OpenAPI schema
 api-client:
-    uv run --directory backend second-brain openapi --output ../web/src/api/openapi.json
+    uv run --directory backend ai-second-brain openapi --output ../web/src/api/openapi.json
     pnpm --dir web exec openapi-typescript src/api/openapi.json --output src/api/schema.d.ts
 
 # Fail if the committed API client differs from the backend
@@ -3912,7 +3912,7 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
     {
-      command: `uv run --directory ../backend second-brain serve --port ${apiPort}`,
+      command: `uv run --directory ../backend ai-second-brain serve --port ${apiPort}`,
       url: `http://127.0.0.1:${apiPort}/api/health`,
       env: serverEnv,
       reuseExistingServer: false,
@@ -4049,7 +4049,7 @@ fmt:
 
 # Regenerate the TypeScript API client from the backend OpenAPI schema
 api-client:
-    uv run --directory backend second-brain openapi --output ../web/src/api/openapi.json
+    uv run --directory backend ai-second-brain openapi --output ../web/src/api/openapi.json
     pnpm --dir web exec openapi-typescript src/api/openapi.json --output src/api/schema.d.ts
 
 # Fail if the committed API client differs from the backend
@@ -4058,7 +4058,7 @@ api-client-check: api-client
 
 # Hash the owner password; paste the printed line into .env
 hash-password:
-    uv run --directory backend second-brain hash-password
+    uv run --directory backend ai-second-brain hash-password
 ```
 
 - [ ] **Step 5: Rewrite `README.md`**

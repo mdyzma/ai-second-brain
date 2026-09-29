@@ -29,7 +29,7 @@ Instead of a chat-first UI, the primary surface is a daily note written into the
 *Why interesting:* meets the user where they already are (Obsidian), and turns the invisible sleep cycle into something felt.
 
 ### Idea 2: "Resume project" command
-`second-brain resume <project>` → last decisions (ADRs), last commits, open TODOs from notes, related emails, which machine it runs on and its current state, offer to wake it. This is JTBD #1 as one command and exercises every subsystem.
+`ai-second-brain resume <project>` → last decisions (ADRs), last commits, open TODOs from notes, related emails, which machine it runs on and its current state, offer to wake it. This is JTBD #1 as one command and exercises every subsystem.
 
 ### Idea 3: The nightly shift
 The sleep cycle wakes the RTX 5090, runs big-model consolidation, then suspends it. Hardware orchestration stops being a demo and becomes the reason consolidation quality is high. (Adopted into [ADR-0005](adr/0005-local-inference-topology.md).)
@@ -52,7 +52,7 @@ Ship ingestion + digest + `resume` + search results (sources only, no generation
 Ingest everything, answer confidently without sources, silently hide old stuff, send data to the cloud, need babysitting. Reversed: **ingest selectively, always cite, forget only with consent, local by default, self-report failures.** These are the product principles.
 
 ### Idea 9: Capture from anywhere
-`second-brain note "…"` from any terminal, a share-sheet shortcut on the Mac, an email alias to an IMAP folder → all land as `Inbox/` sources. Capture friction, not retrieval, is what kills most second brains.
+`ai-second-brain note "…"` from any terminal, a share-sheet shortcut on the Mac, an email alias to an IMAP folder → all land as `Inbox/` sources. Capture friction, not retrieval, is what kills most second brains.
 
 ### Idea 10: Ask the brain about the brain
 "What did I learn about pgvector this year?" as a *timeline* view (entity → sources by date). The graph earns its keep when it answers time-shaped questions that plain vector search can't.

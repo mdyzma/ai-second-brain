@@ -10,7 +10,7 @@ Background work: index revisions (seconds, frequent), nightly sleep cycle (minut
 
 ## Decision
 
-Use **procrastinate** (PostgreSQL-based task queue for Python, psycopg 3, sync and async tasks, periodic/cron tasks, queueing locks) run as `second-brain worker`. Jobs are enqueued in the same transaction as the data they refer to.
+Use **procrastinate** (PostgreSQL-based task queue for Python, psycopg 3, sync and async tasks, periodic/cron tasks, queueing locks) run as `ai-second-brain worker`. Jobs are enqueued in the same transaction as the data they refer to.
 
 ## Options Considered
 

@@ -44,7 +44,7 @@ This is the target architecture for building Second Brain as a **greenfield** sy
 
 ## Relation to earlier specs
 
-- [Assessment](../superpowers/specs/2026-09-29-second-brain-assessment.md): its findings on privacy, durability, lifecycle and hardware still stand. Its advice to *keep Poetry, `src/second_brain` and the existing layout* is **superseded** by the greenfield decision and ADR-0009.
+- [Assessment](../superpowers/specs/2026-09-29-second-brain-assessment.md): its findings on privacy, durability, lifecycle and hardware still stand. Its advice to *keep Poetry, `src/ai_second_brain` and the existing layout* is **superseded** by the greenfield decision and ADR-0009.
 - [Private chat routing spec](../superpowers/specs/2026-09-29-private-chat-routing-design.md): its routing rules (§4 privacy/session rules, §6 provider contract, §8 egress-observing tests) carry over unchanged. Its CLI user contract (§3) and the component layout (§5) need a short revision targeting the API + web UI (phase 1b).
 
 ## Maintaining these docs

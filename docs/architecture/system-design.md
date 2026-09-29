@@ -39,7 +39,7 @@ This document answers "what is the right architecture for the vision in the prom
 ### 1.3 Constraints and assumptions
 
 - One trusted user, one trusted flat L2 LAN (`192.168.88.0/24`). No multi-tenancy.
-- **Greenfield.** The Phase 1 MVP (`src/second_brain`, Poetry, Click CLI) was a first attempt and is discarded. It is not a constraint or a template. Its only reusable asset is the Obsidian vault it indexed, which is re-ingested from source.
+- **Greenfield.** The Phase 1 MVP (`src/ai_second_brain`, Poetry, Click CLI) was a first attempt and is discarded. It is not a constraint or a template. Its only reusable asset is the Obsidian vault it indexed, which is re-ingested from source.
 - **Toolchain (owner decision):** **uv** manages Python versions and dependencies; **just** is the single command runner across the whole stack (Python, Node, database, infra); **Node + React** is the primary UI; **PostgreSQL** is the primary storage. See [ADR-0009](adr/0009-monorepo-toolchain.md) and [ADR-0010](adr/0010-web-ui-stack.md).
 - Proxmox host has no GPU (assumption — verify). The RTX 5090 workstation is the only strong inference host and is **not always on**.
 - PostgreSQL version is inconsistent across docs (16 / 17 / 18). Compose uses 17; production is unverified. Pin one in [ADR-0002](adr/0002-postgres-single-datastore.md).
@@ -119,10 +119,10 @@ An import-linter contract (`import-linter` in CI) enforces that only `llm` impor
 ### 2.2 Repository layout
 
 ```
-second-brain/
+ai-second-brain/
 ├── justfile                  # the one entry point: just setup | dev | check | test | db-* | build | deploy
 ├── backend/                  # uv project (pyproject.toml + uv.lock), Python 3.12
-│   ├── src/second_brain/
+│   ├── src/ai_second_brain/
 │   │   ├── sources/ knowledge/ lifecycle/ search/ llm/ conversation/ hardware/ jobs/
 │   │   └── interfaces/
 │   │       ├── api/          # FastAPI app, routers, schemas (Pydantic = API contract)
@@ -302,7 +302,7 @@ The prompt puts content, one vector, status, counters and three nullable FKs (`p
 
 ### 3.3 Starting from scratch (no V1 migration)
 
-The V1 tables (`agent_memories`, `short_term_memory`) are not migrated. Their content was derived from the Obsidian vault, so the new ingestion pipeline re-creates it with proper source identity, revisions and the chosen embedding model. Steps: create a fresh database `second_brain` with dbmate migrations → run the initial vault scan → verify counts in `doctor` → drop the old database once satisfied. Schema changes from here on go only through `db/migrations/` ([ADR-0004](adr/0004-data-access-and-migrations.md)).
+The V1 tables (`agent_memories`, `short_term_memory`) are not migrated. Their content was derived from the Obsidian vault, so the new ingestion pipeline re-creates it with proper source identity, revisions and the chosen embedding model. Steps: create a fresh database `ai_second_brain` with dbmate migrations → run the initial vault scan → verify counts in `doctor` → drop the old database once satisfied. Schema changes from here on go only through `db/migrations/` ([ADR-0004](adr/0004-data-access-and-migrations.md)).
 
 ---
 
@@ -550,10 +550,10 @@ Each call: `asyncssh` connection with 5 s connect / 15 s command deadline, one r
 |---|---|---|---|
 | PostgreSQL 17 + pgvector ≥ 0.8 | Proxmox LXC `brain-db` | Only datastore | systemd |
 | Caddy | Proxmox LXC `brain-app` | LAN TLS (internal CA), serves `web/dist`, proxies `/api` | systemd |
-| `second-brain api` (uvicorn) | `brain-app`, bound to 127.0.0.1 | FastAPI + SSE | systemd |
-| `second-brain worker` | `brain-app` | procrastinate worker: indexing, sleep cycle, reconcile, hardware polls | systemd |
-| `second-brain sync obsidian` | Wherever the vault lives (Syncthing'd copy on `brain-app`, or the Mac) | File events → enqueue | systemd / launchd |
-| `second-brain mcp` *(phase 8)* | Client machine | stdio MCP server spawned by the client | client |
+| `ai-second-brain api` (uvicorn) | `brain-app`, bound to 127.0.0.1 | FastAPI + SSE | systemd |
+| `ai-second-brain worker` | `brain-app` | procrastinate worker: indexing, sleep cycle, reconcile, hardware polls | systemd |
+| `ai-second-brain sync obsidian` | Wherever the vault lives (Syncthing'd copy on `brain-app`, or the Mac) | File events → enqueue | systemd / launchd |
+| `ai-second-brain mcp` *(phase 8)* | Client machine | stdio MCP server spawned by the client | client |
 | Ollama | Workstation (GPU), Proxmox LXC (CPU), optional Mac | Private tier | systemd / app |
 
 **Node is a build-time dependency only.** `just build` produces static assets in `web/dist`, and Caddy serves them. Production runs no Node process, which keeps the runtime surface to Python + Postgres + Caddy.
@@ -562,7 +562,7 @@ Each call: `asyncssh` connection with 5 s connect / 15 s command deadline, one r
 
 Vault access: the simplest robust option is to Syncthing the Obsidian vault to `brain-app` read-only and run the watcher + reconciler there. Watching a vault over SMB/NFS from another host loses events.
 
-Observability sized for one person: structured JSON logs (no content), a `second-brain doctor` command that checks DB, migrations, embedding space, Ollama hosts, SSH reachability and job backlog, and the morning digest as the "dashboard". Backups: nightly encrypted `pg_dump` to the NAS / off-site; quarterly restore test.
+Observability sized for one person: structured JSON logs (no content), a `ai-second-brain doctor` command that checks DB, migrations, embedding space, Ollama hosts, SSH reachability and job backlog, and the morning digest as the "dashboard". Backups: nightly encrypted `pg_dump` to the NAS / off-site; quarterly restore test.
 
 ---
 

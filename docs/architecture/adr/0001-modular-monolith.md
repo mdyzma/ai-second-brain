@@ -10,7 +10,7 @@ The Phase 1 MVP was a first attempt and is discarded, so this is a greenfield bu
 
 ## Decision
 
-Build the backend as a single deployable Python package (`backend/src/second_brain`) with bounded modules (`sources`, `knowledge`, `lifecycle`, `search`, `llm`, `conversation`, `hardware`, `jobs`, `interfaces`). Run it as several process roles (API, worker, MCP, admin CLI) from one codebase. The React SPA is a separate app in the same repo that talks only to the HTTP API. Module boundaries are enforced with `import-linter` contracts in `just check`.
+Build the backend as a single deployable Python package (`backend/src/ai_second_brain`) with bounded modules (`sources`, `knowledge`, `lifecycle`, `search`, `llm`, `conversation`, `hardware`, `jobs`, `interfaces`). Run it as several process roles (API, worker, MCP, admin CLI) from one codebase. The React SPA is a separate app in the same repo that talks only to the HTTP API. Module boundaries are enforced with `import-linter` contracts in `just check`.
 
 ## Options Considered
 

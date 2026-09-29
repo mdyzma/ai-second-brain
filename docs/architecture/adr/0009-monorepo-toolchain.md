@@ -42,7 +42,7 @@ check: backend::check web::check api-client-check
 test:  backend::test web::test
 build: api-client web::build
 api-client:                  # OpenAPI → web/src/api
-    uv --directory backend run second-brain openapi > web/src/api/openapi.json
+    uv --directory backend run ai-second-brain openapi > web/src/api/openapi.json
     pnpm --dir web exec openapi-typescript src/api/openapi.json -o src/api/schema.d.ts
 api-client-check: api-client
     git diff --exit-code web/src/api

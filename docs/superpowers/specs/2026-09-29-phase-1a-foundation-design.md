@@ -23,7 +23,7 @@ Replace the discarded MVP with the greenfield monorepo on which every later phas
 ## 3. Repository layout after 1a
 
 ```
-second-brain/
+ai-second-brain/
 ├── justfile                    # root recipes; imports modules below
 ├── package.json                # private pnpm workspace root: dbmate, concurrently, tsx
 ├── pnpm-workspace.yaml         # packages: [web]
@@ -35,10 +35,10 @@ second-brain/
 │   └── schema-check.ts
 ├── backend/
 │   ├── justfile
-│   ├── pyproject.toml          # uv project "second-brain", requires-python >=3.12
+│   ├── pyproject.toml          # uv project "ai-second-brain", requires-python >=3.12
 │   ├── uv.lock
 │   ├── .python-version         # 3.12
-│   ├── src/second_brain/
+│   ├── src/ai_second_brain/
 │   │   ├── __init__.py
 │   │   ├── config.py           # Settings (pydantic-settings)
 │   │   ├── db.py               # async pool lifecycle + readiness check
@@ -90,8 +90,8 @@ A single root `.env` (git-ignored). just loads it with `set dotenv-load`, and th
 
 | Variable | Used by | Dev default in `.env.example` | Notes |
 |---|---|---|---|
-| `DATABASE_URL` | dbmate, backend | `postgres://brain:brain@localhost:5432/second_brain?sslmode=disable` | Shared by both |
-| `TEST_DATABASE_URL` | dbmate, pytest | `…/second_brain_test?sslmode=disable` | Created by `just db::test-prepare` |
+| `DATABASE_URL` | dbmate, backend | `postgres://brain:brain@localhost:5432/ai_second_brain?sslmode=disable` | Shared by both |
+| `TEST_DATABASE_URL` | dbmate, pytest | `…/ai_second_brain_test?sslmode=disable` | Created by `just db::test-prepare` |
 | `SB_OWNER_PASSWORD_HASH` | backend | empty. `just setup` prints a hint to run `just hash-password` | argon2id encoded string |
 | `SB_SESSION_TTL_DAYS` | backend | `14` | Sliding expiry |
 | `SB_COOKIE_SECURE` | backend | `false` | `true` in production |
@@ -160,10 +160,10 @@ The `vector` extension is enabled now so that environment problems (a wrong imag
   - Requests carrying neither header are rejected, which keeps non-browser clients out until an API-token mechanism exists.
 - **Errors:** all errors use FastAPI's `{"detail": <code>}` shape with stable snake_case codes. The password and cookie values are never logged. Log lines carry method, path, status and duration only.
 - **OpenAPI:**
-  - `create_app().openapi()` is exported by `second-brain openapi` to stdout. Each route has an explicit `operation_id` (`health`, `ready`, `login`, `logout`, `me`), so generated names are stable.
+  - `create_app().openapi()` is exported by `ai-second-brain openapi` to stdout. Each route has an explicit `operation_id` (`health`, `ready`, `login`, `logout`, `me`), so generated names are stable.
   - The docs UI (`/api/docs`) is enabled only when `SB_ENV=dev`. `SB_ENV` is optional; it defaults to `dev` locally and is set to `prod` in deployment.
 
-### 6.3 CLI (`second-brain`, Typer)
+### 6.3 CLI (`ai-second-brain`, Typer)
 
 - `serve [--reload] [--port]` runs uvicorn on `127.0.0.1`.
 - `openapi [--output PATH]` writes the OpenAPI JSON to `PATH` (stdout by default). `--output` exists so just recipes need no shell redirects.
@@ -202,15 +202,15 @@ The root `justfile` uses `set dotenv-load`, `set windows-shell := ["powershell.e
 |---|---|
 | `setup` | `install`, then `db::up`, `db::wait`, `db::migrate`, `db::test-prepare`; prints next steps (hash password, `just dev`) |
 | `install` | `uv sync --directory backend` + `pnpm install` (root workspace, includes web) + `pnpm --dir web exec playwright install chromium` |
-| `dev` | `concurrently` with named, colored prefixes: `api` (`second-brain serve --reload`) and `web` (`vite`). Requires the DB to be up (`db::up` runs first) |
+| `dev` | `concurrently` with named, colored prefixes: `api` (`ai-second-brain serve --reload`) and `web` (`vite`). Requires the DB to be up (`db::up` runs first) |
 | `check` | `backend::check` (ruff check, ruff format --check, pyright), `web::check` (biome ci, tsc --noEmit, contrast, color guard), `api-client-check`, `db::schema-check` |
 | `test` | `backend::test` (all pytest tests, needs `TEST_DATABASE_URL`) + `web::test` (vitest run) |
 | `test-unit` | `backend::test-unit` (`pytest -m "not integration"`, no database) + `web::test`. Used by the macOS CI job |
 | `e2e` | `web::e2e`: Playwright against API + Vite started by Playwright's `webServer` config, using the test DB and a known test password hash from `.env.test` |
 | `fmt` | ruff format + ruff check --fix, biome format --write |
-| `api-client` | `second-brain openapi --output web/src/api/openapi.json`, then `openapi-typescript` → `schema.d.ts` (two lines, no redirects) |
+| `api-client` | `ai-second-brain openapi --output web/src/api/openapi.json`, then `openapi-typescript` → `schema.d.ts` (two lines, no redirects) |
 | `api-client-check` | `api-client`, then `git diff --exit-code web/src/api` |
-| `hash-password` | `second-brain hash-password` |
+| `hash-password` | `ai-second-brain hash-password` |
 | `db::up` / `db::down` / `db::wait` | compose up -d / down / `tsx scripts/wait-for-db.ts`, which retries `docker compose exec -T postgres pg_isready` every second (30 s timeout) and prints OS-specific guidance when the Docker daemon is unreachable (Docker Desktop on Windows; Docker Desktop or OrbStack on macOS; the Docker service on Linux) |
 | `db::migrate` / `db::status` / `db::rollback` / `db::new NAME` | dbmate via `pnpm exec dbmate` |
 | `db::test-prepare` | create the test DB if missing (`dbmate -e TEST_DATABASE_URL create`), then migrate it |

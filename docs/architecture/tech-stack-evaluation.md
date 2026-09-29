@@ -27,7 +27,7 @@ TypeScript is certain for the UI. The open question is how far it should reach. 
 | Node tooling | — | Adopt | **pnpm**, Node LTS pinned; build-time only in prod | 0009, [0010](adr/0010-web-ui-stack.md) |
 | Web UI | — (dashboard mentioned) | Adopt | **React 19 + TypeScript + Vite SPA**, TanStack Router/Query, Tailwind v4 + shadcn/ui, Biome, Vitest, Playwright | 0010 |
 | SSR framework | — | Reject | Next.js/Remix: a server runtime with no benefit for a single-user LAN app | 0010 |
-| Backend architecture | New `app/` tree | Adopt (reshaped) | Modular monolith in `backend/src/second_brain` | [0001](adr/0001-modular-monolith.md) |
+| Backend architecture | New `app/` tree | Adopt (reshaped) | Modular monolith in `backend/src/ai_second_brain` | [0001](adr/0001-modular-monolith.md) |
 | Backend language | Python 3.11+ | Adopt | Python 3.12 (see §1) | [0011](adr/0011-backend-language-python-vs-typescript.md) |
 | API | FastAPI | **Adopt now** | Primary interface; SSE for chat; OpenAPI drives the TS client | 0010 |
 | Auth / edge | — | Add | Caddy (LAN TLS, static assets, proxy) + single-user session cookie | — |
