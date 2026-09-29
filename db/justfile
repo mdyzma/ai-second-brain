@@ -1,0 +1,49 @@
+set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
+
+root := parent_directory(source_directory())
+compose_file := root / "infra" / "compose.yaml"
+# DBMATE in .env overrides the npm binary (fallback when it can't be downloaded), e.g. DBMATE=dbmate
+dbmate_bin := env("DBMATE", "pnpm --dir " + quote(root) + " exec dbmate")
+dbmate := dbmate_bin + " --migrations-dir " + quote(root / "db" / "migrations") + " --no-dump-schema"
+
+# Start the dev Postgres container (checks Docker first)
+up:
+    pnpm --dir {{ quote(root) }} exec tsx scripts/db-up.ts
+
+# Stop the dev Postgres container (data is kept in the volume)
+down:
+    docker compose -f {{ quote(compose_file) }} down
+
+# Create the dev database if needed and apply migrations
+migrate:
+    {{ dbmate }} up
+
+# Show applied and pending migrations
+status:
+    {{ dbmate }} status
+
+# Roll back the most recent migration
+rollback:
+    {{ dbmate }} rollback
+
+# Create a new migration file: just db::new add_things
+new name:
+    {{ dbmate }} new {{ name }}
+
+# Create and migrate the test database (TEST_DATABASE_URL)
+test-prepare:
+    {{ dbmate }} --env TEST_DATABASE_URL up
+
+# Drop, recreate and migrate the dev database
+[confirm("Drop and recreate the dev database? All local data will be lost.")]
+reset:
+    {{ dbmate }} drop
+    {{ dbmate }} up
+
+# Regenerate db/schema.sql from the dev database
+dump:
+    pnpm --dir {{ quote(root) }} exec tsx scripts/schema-check.ts --write
+
+# Fail if db/schema.sql is stale (skips when no database)
+schema-check:
+    pnpm --dir {{ quote(root) }} exec tsx scripts/schema-check.ts
