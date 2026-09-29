@@ -1,0 +1,35 @@
+# ADR-0006: Versioned embedding spaces and a multilingual default
+
+**Status:** Proposed
+**Date:** 2026-09-29
+**Deciders:** Michal Dyzma
+
+## Context
+
+The discarded MVP used `all-MiniLM-L6-v2` (384-d, English-centric). The prompt alternates between 1536-d (OpenAI) and 1024-d (bge-m3). Notes are Polish and English. OpenAI embeddings would send private text to a cloud API, which is incompatible with the privacy constraint.
+
+## Decision
+
+1. Store embeddings in `chunk_embeddings(chunk_id, space_id, embedding halfvec)` with an `embedding_spaces` registry. Each space gets one partial expression HNSW index (`(embedding::halfvec(N)) ... WHERE space_id = K`). Never compare vectors across spaces.
+2. Serve embeddings through **Ollama's `/api/embed`**. The backend stays free of torch, and the model is swappable by config ([ADR-0011](0011-backend-language-python-vs-typescript.md)).
+3. Choose the first default by a quick bake-off in the Python eval harness on a labelled PL/EN retrieval set. Candidates: `bge-m3` (1024-d, multilingual) and a `multilingual-e5` variant, with MiniLM as the baseline. Expected default: bge-m3.
+4. Cloud embedding APIs are not used.
+
+## Options Considered
+
+| Option | Pros | Cons |
+|---|---|---|
+| **A. Versioned spaces (chosen)** | Zero-downtime model swaps; A/B retrieval | Slightly more complex queries |
+| B. Single `vector(N)` column, re-embed in place | Simplest schema | Downtime/mixed state during re-embed; no comparison |
+| C. MiniLM (MVP model) | Small, fast | Weak Polish recall (unmeasured but likely) |
+| D. OpenAI `text-embedding-3` 1536-d | Strong quality | Private text leaves the LAN — rejected |
+
+## Consequences
+
+- Easier: trying a new model is "create space, backfill job, compare, flip default".
+- Harder: backfill jobs over ~0.5 M chunks (bge-m3 on CPU: hours; schedule on the GPU host at night).
+- Revisit: drop the non-default space after one month on the new default to reclaim space.
+
+## Action Items
+1. [ ] Build the labelled retrieval set (50 queries, PL/EN, known target notes) — reusable by Phase 0.
+2. [ ] Backfill job with checkpointing and progress in `doctor`.
