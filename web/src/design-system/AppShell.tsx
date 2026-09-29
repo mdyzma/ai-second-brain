@@ -23,15 +23,15 @@ function NavLinks({ layout }: { layout: "sidebar" | "bar" }) {
             <Link
               to={screen.path}
               className={cn(
-                "flex items-center rounded-md text-fg-muted hover:bg-surface-raised hover:text-fg",
+                "flex items-center rounded-md",
                 layout === "sidebar"
                   ? "gap-3 px-3 py-2 text-sm"
                   : "min-w-12 flex-col gap-1 px-2 py-2 text-xs",
               )}
-              activeProps={{
-                className: "bg-accent text-accent-fg hover:bg-accent hover:text-accent-fg",
-                "aria-current": "page",
+              inactiveProps={{
+                className: "text-fg-muted hover:bg-surface-raised hover:text-fg",
               }}
+              activeProps={{ className: "bg-accent text-accent-fg", "aria-current": "page" }}
             >
               <Icon aria-hidden className="size-4" />
               <span>{screen.label}</span>

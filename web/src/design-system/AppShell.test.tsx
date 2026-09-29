@@ -64,4 +64,15 @@ describe("AppShell", () => {
     await userEvent.setup().click(await screen.findByRole("button", { name: "Log out" }));
     expect(onLogout).toHaveBeenCalledTimes(1);
   });
+
+  it("gives active and inactive links non-conflicting colour classes", async () => {
+    await renderShell(vi.fn());
+    const [nav] = await screen.findAllByRole("navigation", { name: "Primary" });
+    const active = within(nav as HTMLElement).getByRole("link", { name: "Search" });
+    const inactive = within(nav as HTMLElement).getByRole("link", { name: "Ask" });
+    expect(active.className).toContain("text-accent-fg");
+    expect(active.className).not.toContain("text-fg-muted");
+    expect(inactive.className).toContain("text-fg-muted");
+    expect(inactive.className).not.toContain("bg-accent");
+  });
 });
