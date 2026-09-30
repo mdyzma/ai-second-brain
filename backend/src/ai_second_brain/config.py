@@ -19,6 +19,35 @@ HASH_HINT = (
 )
 
 
+def http_url(value: str) -> str:
+    """Validated http(s) origin/base URL: host required, no credentials, query or fragment."""
+    value = value.strip()
+    parts = urlsplit(value)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError("must be an http:// or https:// URL with a host")
+    if parts.username is not None or parts.password is not None:
+        raise ValueError("must not contain a user name or password")
+    if "?" in value or "#" in value:
+        raise ValueError("must not contain a query string or fragment")
+    return value.rstrip("/")
+
+
+HOSTED_MODEL_SUFFIXES = (":cloud", "-cloud")
+
+
+def local_model_name(value: str) -> str:
+    """Reject Ollama's hosted models: they forward prompts to ollama.com."""
+    value = value.strip()
+    if value.lower().endswith(HOSTED_MODEL_SUFFIXES):
+        raise ValueError("hosted (cloud) Ollama models are not allowed; use a local model")
+    return value
+
+
+def model_matches_space(tag: str, space_model: str) -> bool:
+    """An Ollama tag like 'bge-m3:567m' belongs to the embedding space 'bge-m3'."""
+    return tag == space_model or tag.startswith(f"{space_model}:")
+
+
 class OllamaEndpointConfig(BaseModel):
     """One Ollama endpoint on the owner's LAN. List order is preference order."""
 
@@ -32,15 +61,12 @@ class OllamaEndpointConfig(BaseModel):
     @field_validator("url")
     @classmethod
     def _check_url(cls, value: str) -> str:
-        value = value.strip()
-        parts = urlsplit(value)
-        if parts.scheme not in ("http", "https") or not parts.hostname:
-            raise ValueError("must be an http:// or https:// URL with a host")
-        if parts.username is not None or parts.password is not None:
-            raise ValueError("must not contain a user name or password")
-        if "?" in value or "#" in value:
-            raise ValueError("must not contain a query string or fragment")
-        return value.rstrip("/")
+        return http_url(value)
+
+    @field_validator("model")
+    @classmethod
+    def _local_model(cls, value: str) -> str:
+        return local_model_name(value)
 
 
 class Settings(BaseSettings):
@@ -68,6 +94,31 @@ class Settings(BaseSettings):
     chat_max_tokens: int = Field(default=2048, ge=64, le=32000)
     chat_status_ttl_seconds: float = Field(default=10.0, ge=0, le=300)
 
+    vault_path: Path | None = None
+    vault_exclude: str = ".obsidian/**,.trash/**,**/.git/**"
+    embed_url_override: str = Field(default="", validation_alias="SB_EMBED_URL")
+    embed_model: str = Field(default="bge-m3", min_length=1)
+    embed_batch: int = Field(default=16, ge=1, le=128)
+    reconcile_minutes: int = Field(default=15, ge=1, le=1440)
+    max_note_bytes: int = Field(default=2_000_000, ge=1_000, le=50_000_000)
+
+    @field_validator("vault_path")
+    @classmethod
+    def _absolute_vault(cls, value: Path | None) -> Path | None:
+        if value is not None and not value.is_absolute():
+            raise ValueError("SB_VAULT_PATH must be an absolute path")
+        return value
+
+    @field_validator("embed_url_override")
+    @classmethod
+    def _embed_url(cls, value: str) -> str:
+        return http_url(value) if value.strip() else ""
+
+    @field_validator("embed_model")
+    @classmethod
+    def _local_embed_model(cls, value: str) -> str:
+        return local_model_name(value)
+
     @field_validator("owner_password_hash")
     @classmethod
     def _must_be_argon2(cls, value: str) -> str:
@@ -88,6 +139,16 @@ class Settings(BaseSettings):
     @property
     def cloud_available(self) -> bool:
         return bool(self.anthropic_api_key.get_secret_value().strip())
+
+    @property
+    def vault_excludes(self) -> tuple[str, ...]:
+        return tuple(p.strip() for p in self.vault_exclude.split(",") if p.strip())
+
+    @property
+    def embed_url(self) -> str | None:
+        if self.embed_url_override:
+            return self.embed_url_override
+        return self.ollama_endpoints[0].url if self.ollama_endpoints else None
 
     @property
     def allowed_origin_set(self) -> frozenset[str]:
