@@ -1,6 +1,44 @@
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, keepPreviousData, queryOptions } from "@tanstack/react-query";
 import { api } from "@/api/client";
-import type { Filters } from "./types";
+import type { Filters, SourceRow } from "./types";
+
+export class HttpError extends Error {
+  constructor(readonly status: number) {
+    super(`Request failed with status ${status}`);
+  }
+}
+
+/** HTTP status of a failed query; 0 for network errors. */
+export function statusOf(error: unknown): number {
+  return error instanceof HttpError ? error.status : 0;
+}
+
+export const POLL_FAST_MS = 10_000;
+export const POLL_SLOW_MS = 60_000;
+
+type PollInput = {
+  revisions: { pending: number };
+  last_run: { trigger: string; finished_at: string | null } | null;
+};
+
+/** Shared refresh cadence for the summary and the list. */
+export function pollInterval(data: PollInput | undefined, scanQueued: boolean): number {
+  const scanning = data?.last_run?.trigger === "manual" && !data.last_run.finished_at;
+  return scanQueued || scanning || (data?.revisions.pending ?? 0) > 0 ? POLL_FAST_MS : POLL_SLOW_MS;
+}
+
+export function rowsOf(data: { pages: { items: SourceRow[] }[] } | undefined): SourceRow[] {
+  const seen = new Set<string>();
+  const rows: SourceRow[] = [];
+  for (const page of data?.pages ?? []) {
+    for (const row of page.items) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      rows.push(row);
+    }
+  }
+  return rows;
+}
 
 export const sourcesKeys = {
   summary: ["sources", "summary"] as const,
@@ -11,14 +49,10 @@ export const summaryQueryOptions = queryOptions({
   queryKey: sourcesKeys.summary,
   queryFn: async () => {
     const { data, response } = await api.GET("/api/sources/summary");
-    if (!data) throw new Error(`Sources summary failed with status ${response.status}`);
+    if (!data) throw new HttpError(response.status);
     return data;
   },
-  refetchInterval: (query) => {
-    const data = query.state.data;
-    const scanning = data?.last_run?.trigger === "manual" && !data.last_run.finished_at;
-    return data && (data.revisions.pending > 0 || scanning) ? 10_000 : 60_000;
-  },
+  refetchInterval: (query) => pollInterval(query.state.data, false),
 });
 
 export function listQueryOptions(filters: Filters) {
@@ -31,10 +65,11 @@ export function listQueryOptions(filters: Filters) {
       if (filters.q) query.q = filters.q;
       if (pageParam) query.cursor = pageParam;
       const { data, response } = await api.GET("/api/sources", { params: { query } });
-      if (!data) throw new Error(`Sources list failed with status ${response.status}`);
+      if (!data) throw new HttpError(response.status);
       return data;
     },
     getNextPageParam: (last) => last.next_cursor,
+    placeholderData: keepPreviousData,
   });
 }
 

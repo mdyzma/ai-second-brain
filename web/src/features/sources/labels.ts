@@ -48,12 +48,14 @@ export function bannersFor(summary: SourcesSummary): string[] {
 }
 
 export function relativeTime(iso: string, now: number = Date.now()): string {
-  const seconds = Math.max(0, Math.round((now - Date.parse(iso)) / 1000));
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "—";
+  const seconds = Math.max(0, Math.floor((now - then) / 1000));
   if (seconds < 60) return "just now";
-  const minutes = Math.round(seconds / 60);
+  const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  return hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours} h ago` : `${Math.floor(hours / 24)} d ago`;
 }
 
 const DB_DOWN = "The database is unavailable. Try again in a moment.";
@@ -92,4 +94,16 @@ export function scanMessage(status: number): string {
     default:
       return "Couldn't start the scan. Try again.";
   }
+}
+
+export function canRetry(row: SourceRow): boolean {
+  return row.state === "failed" || (row.state === "indexed" && row.embedded < row.chunks);
+}
+
+/** Note shown above a screen that still has older data when a background refresh failed. */
+export function refreshMessage(status: number): string {
+  const tail = "Showing the last known state.";
+  if (status === 503) return `The database is unavailable. ${tail}`;
+  if (status === 0) return `Can't reach the server. ${tail}`;
+  return `Couldn't refresh. ${tail}`;
 }

@@ -2,7 +2,7 @@ import { RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/design-system/cn";
 import { Button } from "@/design-system/ui/button";
-import { badgeFor, bannersFor, relativeTime, type Tone } from "./labels";
+import { badgeFor, bannersFor, canRetry, relativeTime, type Tone } from "./labels";
 import type { Filters, SourceRow, SourcesSummary, StateFilter } from "./types";
 
 const TONES: Record<Tone, string> = {
@@ -30,6 +30,9 @@ type Props = {
   onLoadMore: () => void;
   notice?: string | null;
   listError?: boolean;
+  loadingMore?: boolean;
+  listLoading?: boolean;
+  refreshNote?: string | null;
 };
 
 function Card({
@@ -50,10 +53,6 @@ function Card({
   );
 }
 
-function canRetry(row: SourceRow): boolean {
-  return row.state === "failed" || (row.state === "indexed" && row.embedded < row.chunks);
-}
-
 export function SourcesScreen({
   summary,
   rows,
@@ -65,7 +64,23 @@ export function SourcesScreen({
   onLoadMore,
   notice = null,
   listError = false,
+  loadingMore = false,
+  listLoading = false,
+  refreshNote = null,
 }: Props) {
+  const [retrying, setRetrying] = useState<ReadonlySet<string>>(new Set());
+  const retry = async (row: SourceRow) => {
+    setRetrying((prev) => new Set(prev).add(row.id));
+    try {
+      await onRetry(row);
+    } finally {
+      setRetrying((prev) => {
+        const next = new Set(prev);
+        next.delete(row.id);
+        return next;
+      });
+    }
+  };
   const [filters, setFilters] = useState<Filters>({ state: null, q: "" });
   const { embedded, total } = summary.embedding;
   const pct = total === 0 ? 100 : Math.floor((embedded / total) * 100);
@@ -88,6 +103,11 @@ export function SourcesScreen({
           className="rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-sm text-danger-fg"
         >
           {notice}
+        </p>
+      ) : null}
+      {refreshNote ? (
+        <p role="status" className="text-sm text-fg-muted">
+          {refreshNote}
         </p>
       ) : null}
       {bannersFor(summary).map((text) => (
@@ -120,6 +140,7 @@ export function SourcesScreen({
             key={f.label}
             size="sm"
             variant={filters.state === f.value ? "primary" : "outline"}
+            aria-pressed={filters.state === f.value}
             onClick={() => update({ ...filters, state: f.value })}
           >
             {f.label}
@@ -173,7 +194,8 @@ export function SourcesScreen({
                       size="sm"
                       variant="outline"
                       aria-label={`Retry ${r.title ?? r.path}`}
-                      onClick={() => void onRetry(r)}
+                      disabled={retrying.has(r.id)}
+                      onClick={() => void retry(r)}
                     >
                       Retry
                     </Button>
@@ -184,13 +206,16 @@ export function SourcesScreen({
           })}
         </tbody>
       </table>
+      {rows.length === 0 && !listError && !listLoading ? (
+        <p className="text-sm text-fg-muted">No notes here yet.</p>
+      ) : null}
       {listError ? (
         <p role="alert" className="text-sm text-danger-fg">
           Couldn't load the list.
         </p>
       ) : null}
       {hasMore ? (
-        <Button variant="outline" onClick={onLoadMore}>
+        <Button variant="outline" disabled={loadingMore} onClick={onLoadMore}>
           Load more
         </Button>
       ) : null}

@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { badgeFor, bannersFor, retryMessage, scanMessage } from "./labels";
@@ -139,6 +139,57 @@ describe("SourcesScreen", () => {
     expect(screen.getByRole("button", { name: "Scan queued…" })).toBeDisabled();
     await userEvent.click(screen.getByRole("button", { name: "Failed" }));
     expect(props.onFilter).toHaveBeenCalledWith({ state: "failed", q: "" });
+  });
+
+  it("retries with the row, and disables Retry while in flight", async () => {
+    let finish: () => void = () => {};
+    const onRetry = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    renderScreen({ onRetry });
+    const button = screen.getByRole("button", { name: "Retry big" });
+    await userEvent.click(button);
+    expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ path: "big.md" }));
+    expect(button).toBeDisabled();
+    finish();
+    await waitFor(() => expect(button).toBeEnabled());
+  });
+
+  it("passes the text filter and marks the active chip", async () => {
+    const props = renderScreen();
+    await userEvent.type(screen.getByPlaceholderText("Filter by title or path"), "nas");
+    expect(props.onFilter).toHaveBeenLastCalledWith({ state: null, q: "nas" });
+    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: "Failed" }));
+    expect(screen.getByRole("button", { name: "Failed" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("renders the last scan card", () => {
+    renderScreen();
+    expect(screen.getByText("Last scan")).toBeInTheDocument();
+    expect(screen.getByText("3 changed")).toBeInTheDocument();
+    cleanup();
+    renderScreen({ summary: { ...BASE, last_run: null } });
+    expect(screen.getByText("never")).toBeInTheDocument();
+  });
+
+  it("loads more, and disables the button while loading", async () => {
+    const props = renderScreen({ hasMore: true });
+    await userEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(props.onLoadMore).toHaveBeenCalledOnce();
+    cleanup();
+    renderScreen({ hasMore: true, loadingMore: true });
+    expect(screen.getByRole("button", { name: "Load more" })).toBeDisabled();
+  });
+
+  it("shows an empty state and a refresh note", () => {
+    renderScreen({ rows: [], refreshNote: "Couldn't refresh. Showing the last known state." });
+    expect(screen.getByText("No notes here yet.")).toBeInTheDocument();
+    expect(screen.getByText("Couldn't refresh. Showing the last known state.")).toBeInTheDocument();
   });
 
   it("shows an inline notice and a list error", () => {
