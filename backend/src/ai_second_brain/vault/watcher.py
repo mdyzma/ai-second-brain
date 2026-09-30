@@ -26,6 +26,7 @@ async def run_watcher(
     stop_event: asyncio.Event,
     *,
     debounce_ms: int = 1600,
+    on_rescan: Callable[[], None] | None = None,
 ) -> None:
     delay = 1.0
     while not stop_event.is_set():
@@ -34,12 +35,22 @@ async def run_watcher(
                 vault.root, stop_event=stop_event, debounce=debounce_ms, recursive=True
             ):
                 batch: list[tuple[Change, str]] = []
+                rescan = False
                 for kind, raw in changes:
                     rel = vault.rel(Path(raw))
-                    if rel is not None and vault.is_candidate(rel):
+                    if rel is None:
+                        continue
+                    if vault.is_candidate(rel):
                         batch.append((_MAP[kind], rel))
+                    elif not vault.is_excluded(rel) and not rel.lower().endswith(".md"):
+                        rescan = True  # a folder move/delete hides its notes from the watcher
+                if rescan and on_rescan is not None:
+                    on_rescan()
                 if batch:
-                    await handle_batch(sorted(set(batch)))
+                    try:
+                        await handle_batch(sorted(set(batch)))
+                    except Exception as error:  # keep watching; reconcile repairs the rest
+                        logger.warning("watcher_batch_error type=%s", type(error).__name__)
                 delay = 1.0
         except Exception as error:  # vault vanished, permissions, handler failure
             logger.warning("watcher_error type=%s", type(error).__name__)

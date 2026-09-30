@@ -27,6 +27,9 @@ class Vault:
     def is_candidate(self, rel: str) -> bool:
         return rel.lower().endswith(".md") and not _excluded(rel, self.excludes)
 
+    def is_excluded(self, rel: str) -> bool:
+        return _excluded(rel, self.excludes)
+
     def rel(self, path: Path) -> str | None:
         try:
             relative = path.resolve().relative_to(self.root.resolve())

@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 import signal
+from collections.abc import Awaitable, Callable
 
 from ai_second_brain.chat.providers.base import ChatTimeouts
 from ai_second_brain.chat.providers.ollama import create_http_client
@@ -29,19 +30,37 @@ def _install_signals(stop: asyncio.Event) -> None:
             signal.signal(sig, lambda *_: loop.call_soon_threadsafe(stop.set))
 
 
-async def _reconcile_loop(ctx: IngestContext, stop: asyncio.Event) -> None:
+ReconcileFn = Callable[..., Awaitable[object]]
+
+
+async def _guarded_reconcile(ctx: IngestContext, trigger: str, run: ReconcileFn) -> None:
     try:
-        await reconcile(ctx, trigger="startup")
+        await run(ctx, trigger=trigger)
     except Exception as error:
         logger.warning("reconcile_error type=%s", type(error).__name__)
+
+
+async def _reconcile_loop(
+    ctx: IngestContext,
+    stop: asyncio.Event,
+    wake: asyncio.Event,
+    run: ReconcileFn = reconcile,
+) -> None:
+    await _guarded_reconcile(ctx, "startup", run)
     while not stop.is_set():
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(stop.wait(), timeout=ctx.settings.reconcile_minutes * 60)
-        if not stop.is_set():
-            try:
-                await reconcile(ctx, trigger="schedule")
-            except Exception as error:
-                logger.warning("reconcile_error type=%s", type(error).__name__)
+        stop_wait = asyncio.create_task(stop.wait())
+        wake_wait = asyncio.create_task(wake.wait())
+        await asyncio.wait(
+            {stop_wait, wake_wait},
+            timeout=ctx.settings.reconcile_minutes * 60,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        stop_wait.cancel()
+        wake_wait.cancel()
+        if stop.is_set():
+            break
+        wake.clear()
+        await _guarded_reconcile(ctx, "schedule", run)
 
 
 async def run_worker(settings: Settings, *, stop_event: asyncio.Event | None = None) -> int:
@@ -87,11 +106,14 @@ async def run_worker(settings: Settings, *, stop_event: asyncio.Event | None = N
             )
             helpers: list[asyncio.Task[None]] = []
             if vault is None:
-                await reconcile(ctx, trigger="startup")  # records outcome 'disabled'
+                await _guarded_reconcile(ctx, "startup", reconcile)  # records 'disabled'
             else:
-                helpers.append(asyncio.create_task(_reconcile_loop(ctx, stop)))
+                wake = asyncio.Event()
+                helpers.append(asyncio.create_task(_reconcile_loop(ctx, stop, wake)))
                 helpers.append(
-                    asyncio.create_task(run_watcher(vault, lambda b: apply_batch(ctx, b), stop))
+                    asyncio.create_task(
+                        run_watcher(vault, lambda b: apply_batch(ctx, b), stop, on_rescan=wake.set)
+                    )
                 )
             stop_wait = asyncio.create_task(stop.wait())
             await asyncio.wait({stop_wait, worker}, return_when=asyncio.FIRST_COMPLETED)

@@ -1,6 +1,7 @@
 """Apply one watcher batch: pair moves, tombstone (guarded), observe the rest."""
 
 import asyncio
+import logging
 
 from ai_second_brain.knowledge import store
 from ai_second_brain.knowledge.context import IngestContext
@@ -8,6 +9,8 @@ from ai_second_brain.vault.observe import observe
 from ai_second_brain.vault.read import read_note
 from ai_second_brain.vault.reconcile import apply_moves_and_deletes
 from ai_second_brain.vault.watcher import Change
+
+logger = logging.getLogger("ai_second_brain.ingest")
 
 
 async def apply_batch(ctx: IngestContext, changes: list[tuple[Change, str]]) -> None:
@@ -34,5 +37,7 @@ async def apply_batch(ctx: IngestContext, changes: list[tuple[Change, str]]) -> 
     result = await apply_moves_and_deletes(
         ctx, deleted, new_hashes, guard=True, allow_mass_delete=False
     )
+    if result.tripped:
+        logger.warning("batch_guard_tripped missing=%d", result.missing)
     for rel in sorted(set(result.to_observe) | (touched & set(live))):
         await observe(ctx, rel)
