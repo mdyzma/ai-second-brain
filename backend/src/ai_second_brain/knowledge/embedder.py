@@ -17,6 +17,9 @@ class EmbedError(Exception):
         self.code: EmbedCode = code
 
 
+EMBED_RETRY_SECONDS = (30, 60, 120, 300, 600, 1200, 2400, 3600)
+
+
 class EmbedRetryable(Exception):  # noqa: N818 - name fixed by the task interface
     """embed_unreachable inside the embedding job: procrastinate retries it (Task 7)."""
 

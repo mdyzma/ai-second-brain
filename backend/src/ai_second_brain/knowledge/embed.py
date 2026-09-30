@@ -3,16 +3,16 @@
 import logging
 from uuid import UUID
 
+from psycopg.errors import ForeignKeyViolation
+
 from ai_second_brain.knowledge import store
 from ai_second_brain.knowledge.context import IngestContext
 from ai_second_brain.knowledge.embed_text import embed_input
-from ai_second_brain.knowledge.embedder import EmbedError, EmbedRetryable
+from ai_second_brain.knowledge.embedder import EMBED_RETRY_SECONDS, EmbedError, EmbedRetryable
 
 __all__ = ["EMBED_RETRY_SECONDS", "EmbedRetryable", "embed_revision"]
 
 logger = logging.getLogger("ai_second_brain.ingest")
-
-EMBED_RETRY_SECONDS = (30, 60, 120, 300, 600, 1200, 2400, 3600)
 
 
 async def embed_revision(ctx: IngestContext, revision_id: UUID, space_id: int) -> None:
@@ -42,10 +42,14 @@ async def embed_revision(ctx: IngestContext, revision_id: UUID, space_id: int) -
             if error.code == "embed_unreachable":
                 raise EmbedRetryable from None
             return
-        async with ctx.pool.connection() as conn, conn.transaction():
-            await store.write_embeddings(
-                conn, space_id, [(cid, v) for (cid, _, _), v in zip(part, vectors, strict=True)]
-            )
+        rows = [(cid, v) for (cid, _, _), v in zip(part, vectors, strict=True)]
+        try:
+            async with ctx.pool.connection() as conn, conn.transaction():
+                await store.write_embeddings(conn, space_id, rows)
+        except ForeignKeyViolation:
+            # The revision was superseded or deleted mid-run; its chunks are gone.
+            logger.info("embed revision=%s outcome=stale", revision_id)
+            return
     async with ctx.pool.connection() as conn:
         await store.clear_embed_error(conn, revision_id)
     logger.info("embed revision=%s chunks=%d outcome=ok", revision_id, len(pending))

@@ -1,3 +1,4 @@
+import dataclasses
 from collections.abc import Callable
 from pathlib import Path
 
@@ -187,3 +188,40 @@ def test_embed_skips_superseded_revision(
         assert len(fake.embed_requests()) == before
 
     run(db_url, tmp_path, fake, body)
+
+
+class StaleningEmbedder:
+    """Embedder stand-in that supersedes the revision while embedding `stale_on_call`."""
+
+    def __init__(self, h: Harness, stale_on_call: int) -> None:
+        self.h, self.stale_on_call, self.calls = h, stale_on_call, 0
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        self.calls += 1
+        if self.calls == self.stale_on_call:
+            await self.h.rows(
+                "DELETE FROM chunks WHERE revision_id IN (SELECT current_revision_id FROM sources)"
+            )
+        return [[0.1] * 1024 for _ in texts]
+
+
+@pytest.mark.parametrize("stale_on_call", [1, 2])
+def test_revision_going_stale_mid_embedding_stops_quietly(
+    db_url: str, tmp_path: Path, make_fake_ollama: MakeFake, stale_on_call: int
+) -> None:
+    fake = make_fake_ollama()
+    VaultBuilder(tmp_path).write("a.md", long_note(5))
+
+    async def body(h: Harness) -> None:
+        await observe(h.ctx, "a.md")
+        fake.behaviour.embed_status = 500
+        await h.drain()  # indexed, nothing embedded
+        stub = StaleningEmbedder(h, stale_on_call)
+        ctx = dataclasses.replace(h.ctx, embedder=stub)  # type: ignore[arg-type]
+        await embed_revision(ctx, await revision_id(h), 1)  # type: ignore[arg-type]
+        assert stub.calls == stale_on_call
+        assert await embedded(h) == (0, 0)
+        [row] = await h.rows("SELECT count(*) AS n FROM chunk_embeddings")
+        assert row["n"] == 0
+
+    run(db_url, tmp_path, fake, body, embed_batch=2)

@@ -14,7 +14,7 @@ from procrastinate import (
 )
 from procrastinate.jobs import Job
 
-from ai_second_brain.knowledge.embedder import EmbedRetryable
+from ai_second_brain.knowledge.embedder import EMBED_RETRY_SECONDS, EmbedRetryable
 
 if TYPE_CHECKING:
     from ai_second_brain.knowledge.context import IngestContext
@@ -72,7 +72,7 @@ async def index_source_task(context: JobContext, source_id: str) -> None:
     name="embed_revision",
     queue=EMBED_QUEUE,
     pass_context=True,
-    retry=ScheduleRetry((30, 60, 120, 300, 600, 1200, 2400, 3600), only=(EmbedRetryable,)),
+    retry=ScheduleRetry(EMBED_RETRY_SECONDS, only=(EmbedRetryable,)),
 )
 async def embed_revision_task(context: JobContext, revision_id: str, space_id: int) -> None:
     from ai_second_brain.knowledge.embed import embed_revision
