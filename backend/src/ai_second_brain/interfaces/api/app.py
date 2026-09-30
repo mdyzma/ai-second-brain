@@ -1,11 +1,13 @@
 """FastAPI application factory."""
 
 import asyncio
+import contextlib
 import http
 import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -26,7 +28,10 @@ from ai_second_brain.chat.service import ChatService
 from ai_second_brain.chat.wiring import make_cloud_factory
 from ai_second_brain.config import Settings, get_settings
 from ai_second_brain.db import create_pool
-from ai_second_brain.interfaces.api.routes import auth, chat, health
+from ai_second_brain.interfaces.api.routes import auth, chat, health, sources
+from ai_second_brain.knowledge.embedder import Embedder
+from ai_second_brain.knowledge.jobs import create_job_app
+from ai_second_brain.knowledge.queue import JobQueue, ProcrastinateQueue
 
 logger = logging.getLogger("ai_second_brain.api")
 
@@ -35,6 +40,26 @@ PLACEHOLDER_HASH = "$argon2id$v=19$m=65536,t=3,p=4$placeholder$placeholder"
 # API contract version: bumped only for breaking API changes, independent of app releases,
 # so a release never makes the generated web client stale.
 API_VERSION = "1.0"
+
+
+@dataclass
+class IngestAccess:
+    """What the Sources routes need from ingestion; `queue` is None if the job app didn't open."""
+
+    queue: JobQueue | None
+    space_id: int
+    embedder: Embedder | None
+    _cache: tuple[float, bool] | None = None
+
+    async def host_reachable(self) -> bool | None:
+        if self.embedder is None:
+            return None
+        now = time.monotonic()
+        if self._cache and now - self._cache[0] < 10:
+            return self._cache[1]
+        result = await self.embedder.reachable()
+        self._cache = (now, result)
+        return result
 
 
 def utc_now() -> datetime:
@@ -111,6 +136,19 @@ def create_app(
             app.state.ollama,
             make_cloud_factory(settings, timeouts),
         )
+        job_app = create_job_app(settings.database_url)
+        queue: JobQueue | None = None
+        try:
+            await job_app.open_async()
+            queue = ProcrastinateQueue(job_app)
+        except Exception as error:  # the API must start while the database is down
+            logger.warning("job_app_unavailable type=%s", type(error).__name__)
+        embedder = (
+            Embedder(settings.embed_url, settings.embed_model, 1024, http_client, timeouts)
+            if settings.embed_url
+            else None
+        )
+        app.state.ingest = IngestAccess(queue, 1, embedder)  # space 1 is seeded by the migration
         try:
             await app.state.sessions.purge_expired()
         except (PoolTimeout, psycopg.Error, OSError):
@@ -118,6 +156,8 @@ def create_app(
         try:
             yield
         finally:
+            with contextlib.suppress(Exception):
+                await job_app.close_async()
             await http_client.aclose()
             await pool.close(timeout=0.1)
 
@@ -145,6 +185,7 @@ def create_app(
     app.include_router(health.router, prefix="/api")
     app.include_router(auth.router, prefix="/api/auth")
     app.include_router(chat.router, prefix="/api")
+    app.include_router(sources.router, prefix="/api")
     return app
 
 

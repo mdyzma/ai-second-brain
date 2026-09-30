@@ -90,3 +90,11 @@ hash-password:
 # Ask the configured local model one question (checks SB_OLLAMA_ENDPOINTS; nothing is saved)
 chat-smoke:
     uv run --directory backend ai-second-brain chat-smoke
+
+# One reconcile pass now (pass --allow-mass-delete via: just vault-scan --allow-mass-delete)
+vault-scan *args:
+    uv run --directory backend ai-second-brain vault reconcile {{ args }}
+
+# Print ingestion status
+vault-status:
+    uv run --directory backend ai-second-brain vault status

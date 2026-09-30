@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -76,3 +77,70 @@ class CloudTierStatus(BaseModel):
 class ChatStatusResponse(BaseModel):
     private: PrivateTierStatus
     cloud: CloudTierStatus
+
+
+class VaultState(BaseModel):
+    configured: bool
+    readable: bool
+
+
+class SourceCounts(BaseModel):
+    active: int
+    deleted: int
+
+
+class RevisionCounts(BaseModel):
+    pending: int
+    indexed: int
+    failed: int
+
+
+class EmbeddingState(BaseModel):
+    model: str
+    embedded: int
+    total: int
+    host_reachable: bool | None
+    last_error: str | None
+
+
+class JobCounts(BaseModel):
+    waiting: int
+    failed: int
+
+
+class IngestRun(BaseModel):
+    trigger: str
+    started_at: datetime
+    finished_at: datetime | None
+    outcome: str | None
+    counts: dict[str, int]
+
+
+class SourcesSummary(BaseModel):
+    vault: VaultState
+    sources: SourceCounts
+    revisions: RevisionCounts
+    chunks: int
+    embedding: EmbeddingState
+    jobs: JobCounts
+    last_run: IngestRun | None
+
+
+class SourceRow(BaseModel):
+    id: UUID
+    title: str | None
+    path: str
+    state: Literal["pending", "indexed", "failed", "superseded", "deleted"]
+    error: str | None
+    indexed_at: datetime | None
+    chunks: int
+    embedded: int
+
+
+class SourceList(BaseModel):
+    items: list[SourceRow]
+    next_cursor: str | None
+
+
+class ReconcileQueued(BaseModel):
+    run_id: int
