@@ -9,7 +9,7 @@ MAX_CHARS = 1600
 OVERLAP = 200
 UNIT_MAX = MAX_CHARS - OVERLAP - 2  # a unit always fits after an overlap + "\n\n"
 
-HEADING = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.*?)[ \t#]*$")
+HEADING = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
 PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n")
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
@@ -48,9 +48,10 @@ def _units(text: str) -> list[tuple[str, str]]:
             continue
         first = True
         for sentence in (s for s in SENTENCE_END.split(paragraph) if s):
-            pieces = [sentence[i : i + UNIT_MAX] for i in range(0, len(sentence), UNIT_MAX)]
-            for piece in pieces:
-                units.append(("\n\n" if first else " ", piece))
+            for start in range(0, len(sentence), UNIT_MAX):
+                # Hard-split pieces of one sentence rejoin with "" so tokens stay intact.
+                joiner = ("\n\n" if first else " ") if start == 0 else ""
+                units.append((joiner, sentence[start : start + UNIT_MAX]))
                 first = False
     return units
 

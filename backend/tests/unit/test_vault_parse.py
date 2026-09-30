@@ -60,3 +60,9 @@ def test_nul_in_string_value_is_removed() -> None:
     parsed = parse_note('---\nk: "a\\0b"\n---\nBody', "f")
     assert parsed.frontmatter == {"k": "ab"}
     _round_trips(parsed)
+
+
+def test_h1_title_keeps_trailing_hash_but_strips_closing_sequence() -> None:
+    assert parse_note("# Learning C#\nx", "s").title == "Learning C#"
+    assert parse_note("# Title ##\nx", "s").title == "Title"
+    assert parse_note("# F# notes #\nx", "s").title == "F# notes"

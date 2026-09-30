@@ -10,7 +10,7 @@ import yaml
 
 FRONTMATTER = re.compile(r"\A---\n(.*?)\n---[ \t]*(?:\n|\Z)", re.DOTALL)
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-H1 = re.compile(r"^#[ \t]+(.+?)[ \t#]*$")
+H1 = re.compile(r"^#[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
 INLINE_CODE = re.compile(r"`[^`\n]*`")
 WIKILINK = re.compile(r"\[\[([^\]\|#\n]+)(?:#[^\]\|\n]*)?(?:\|[^\]\n]*)?\]\]")
 

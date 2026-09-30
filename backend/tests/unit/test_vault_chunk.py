@@ -63,4 +63,22 @@ def test_paragraph_packing_and_overlap() -> None:
 def test_long_sentence_is_hard_split() -> None:
     chunks = chunk_note("x" * 5000)
     assert all(len(c.content) <= MAX_CHARS for c in chunks)
-    assert "".join(c.content.replace("\n\n", "") for c in chunks).count("x") >= 5000
+    overlaps = sum(len(c.content.split("\n\n")[0]) for c in chunks[1:])
+    assert "".join(c.content for c in chunks).count("x") == 5000 + overlaps
+    assert all(" " not in c.content for c in chunks)
+
+
+def test_hard_split_never_injects_space_into_long_token() -> None:
+    chunks = chunk_note("a" * 1450 + "\n\n" + "b " * 400)
+    assert all(len(c.content) <= MAX_CHARS for c in chunks)
+    assert "a" * 1450 in chunks[0].content
+    assert " " not in chunks[0].content.split("\n\n")[0]
+
+
+def test_trailing_hash_kept_unless_closing_sequence() -> None:
+    def path(heading: str) -> tuple[str, ...]:
+        return chunk_note(f"{heading}\ntext")[0].heading_path
+
+    assert path("# Learning C#") == ("Learning C#",)
+    assert path("# Title ##") == ("Title",)
+    assert path("## F# notes #") == ("F# notes",)
