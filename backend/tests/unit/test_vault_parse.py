@@ -1,4 +1,6 @@
-from ai_second_brain.vault.parse import parse_note
+import json
+
+from ai_second_brain.vault.parse import ParsedNote, parse_note
 
 
 def test_title_prefers_frontmatter_then_h1_then_stem() -> None:
@@ -30,3 +32,31 @@ def test_wikilinks_outside_code_deduplicated() -> None:
         "```\n[[in fence]]\n```\n"
     )
     assert parse_note(text, "f").links == ["NAS", "Backups"]
+
+
+def _round_trips(parsed: ParsedNote) -> None:
+    json.dumps(parsed.frontmatter, allow_nan=False)
+
+
+def test_date_key_is_stringified() -> None:
+    parsed = parse_note("---\n2026-09-30: daily\n---\nBody", "f")
+    assert parsed.frontmatter == {"2026-09-30": "daily"}
+    _round_trips(parsed)
+
+
+def test_non_finite_floats_become_strings() -> None:
+    parsed = parse_note("---\na: .nan\nb: .inf\nc: -.inf\n---\nBody", "f")
+    assert parsed.frontmatter == {"a": "nan", "b": "inf", "c": "-inf"}
+    _round_trips(parsed)
+
+
+def test_recursive_anchor_is_invalid_frontmatter() -> None:
+    parsed = parse_note("---\na: &a [*a]\n---\nBody", "f")
+    assert parsed.frontmatter is None and parsed.frontmatter_error is True
+    assert parsed.body.startswith("---\na: &a")
+
+
+def test_nul_in_string_value_is_removed() -> None:
+    parsed = parse_note('---\nk: "a\\0b"\n---\nBody', "f")
+    assert parsed.frontmatter == {"k": "ab"}
+    _round_trips(parsed)

@@ -50,3 +50,11 @@ def test_too_large_is_never_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     st = path.stat()
     assert (note.error, note.text, note.size) == ("too_large", "", 2000)
     assert note.content_hash == hashlib.sha256(f"too_large:2000:{st.st_mtime_ns}".encode()).digest()
+
+
+def test_nul_character_is_encoding_error(tmp_path: Path) -> None:
+    path = tmp_path / "nul.md"
+    path.write_bytes(b"ab\x00cd")
+    note = read_note(path, max_bytes=1000)
+    assert (note.error, note.text) == ("encoding", "")
+    assert note.content_hash == hashlib.sha256(b"ab\x00cd").digest()

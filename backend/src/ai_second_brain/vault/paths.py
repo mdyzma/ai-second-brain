@@ -15,6 +15,10 @@ def _excluded(rel: str, patterns: tuple[str, ...]) -> bool:
     return False
 
 
+class VaultWalkError(OSError):
+    """A directory could not be listed; the walk result would be incomplete."""
+
+
 @dataclass(frozen=True)
 class Vault:
     root: Path
@@ -38,7 +42,10 @@ class Vault:
 
     def walk(self) -> dict[str, tuple[int, int]]:
         found: dict[str, tuple[int, int]] = {}
-        for dirpath, dirnames, filenames in os.walk(self.root, followlinks=False):
+        errors: list[OSError] = []
+        for dirpath, dirnames, filenames in os.walk(
+            self.root, followlinks=False, onerror=errors.append
+        ):
             base = Path(dirpath)
             rel_dir = PurePosixPath(*base.relative_to(self.root).parts).as_posix()
             prefix = "" if rel_dir == "." else f"{rel_dir}/"
@@ -48,8 +55,13 @@ class Vault:
                 if not self.is_candidate(rel):
                     continue
                 path = base / name
-                if path.is_symlink():
-                    continue
-                st = path.stat()
+                try:
+                    if path.is_symlink():
+                        continue
+                    st = path.stat()
+                except OSError:
+                    continue  # vanished or unreadable mid-walk: skip this file
                 found[rel] = (st.st_size, st.st_mtime_ns)
+        if errors:
+            raise VaultWalkError(f"could not list {len(errors)} vault directories: {errors[0]}")
         return found

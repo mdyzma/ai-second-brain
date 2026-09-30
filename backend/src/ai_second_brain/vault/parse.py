@@ -1,6 +1,6 @@
 """Obsidian note parsing: frontmatter, title, wikilinks. Pure and total."""
 
-import json
+import math
 import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
@@ -40,19 +40,34 @@ def iter_outside_code(lines: Iterable[str]) -> Iterator[tuple[str, bool]]:
             yield line, False
 
 
+def _json_safe(value: Any) -> Any:
+    """Recursively convert YAML output into data Postgres jsonb accepts."""
+    if value is None or isinstance(value, bool | int):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else str(value)
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, dict):
+        return {str(_json_safe(k)): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list | tuple | set | frozenset):
+        return [_json_safe(v) for v in value]
+    return str(value).replace("\x00", "")
+
+
 def _frontmatter(text: str) -> tuple[dict[str, Any] | None, bool, str]:
     match = FRONTMATTER.match(text)
     if not match:
         return None, False, text
     try:
         loaded = yaml.safe_load(match.group(1))
-    except yaml.YAMLError:
+        if loaded is None:
+            loaded = {}
+        if not isinstance(loaded, dict):
+            return None, True, text
+        safe = _json_safe(loaded)
+    except (yaml.YAMLError, RecursionError, ValueError, TypeError):
         return None, True, text
-    if loaded is None:
-        loaded = {}
-    if not isinstance(loaded, dict):
-        return None, True, text
-    safe = json.loads(json.dumps(loaded, default=str))
     return safe, False, text[match.end() :]
 
 

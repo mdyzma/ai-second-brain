@@ -1,4 +1,9 @@
+import os
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from ai_second_brain.vault.paths import Vault
 
@@ -41,3 +46,36 @@ def test_walk_lists_candidates_with_size_and_mtime(tmp_path: Path) -> None:
 def test_readable(tmp_path: Path) -> None:
     assert Vault(tmp_path, EXCLUDES).readable()
     assert not Vault(tmp_path / "missing", EXCLUDES).readable()
+
+
+def test_walk_skips_file_that_vanishes_before_stat(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    builder = VaultBuilder(tmp_path)
+    builder.write("keep.md", "k")
+    builder.write("gone.md", "g")
+    real_stat = Path.stat
+
+    def flaky(self: Path, *args: Any, **kwargs: Any) -> os.stat_result:
+        if self.name == "gone.md":
+            raise FileNotFoundError(str(self))
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", flaky)
+    assert set(Vault(tmp_path, EXCLUDES).walk()) == {"keep.md"}
+
+
+def test_walk_raises_when_a_directory_cannot_be_listed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    VaultBuilder(tmp_path).write("a.md", "a")
+    real_walk = os.walk
+
+    def failing(*args: Any, onerror: Any = None, **kwargs: Any) -> Iterator[Any]:
+        assert onerror is not None
+        onerror(PermissionError("denied"))
+        yield from real_walk(*args, **kwargs)
+
+    monkeypatch.setattr(os, "walk", failing)
+    with pytest.raises(OSError, match="denied"):
+        Vault(tmp_path, EXCLUDES).walk()

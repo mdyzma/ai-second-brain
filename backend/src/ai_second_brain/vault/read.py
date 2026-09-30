@@ -17,6 +17,8 @@ class ReadNote:
 
 def normalize_bytes(data: bytes) -> tuple[str, bytes]:
     text = data.decode("utf-8")  # raises UnicodeDecodeError
+    if "\x00" in text:  # Postgres text cannot store NUL
+        raise UnicodeDecodeError("utf-8", data, 0, 1, "NUL character")
     text = text.removeprefix("﻿").replace("\r\n", "\n").replace("\r", "\n")
     text = unicodedata.normalize("NFC", text)
     return text, hashlib.sha256(text.encode("utf-8")).digest()
