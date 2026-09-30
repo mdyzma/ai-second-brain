@@ -21,6 +21,7 @@ from ai_second_brain.vault.reconcile import reconcile
 from ai_second_brain.vault.watcher import run_watcher
 
 logger = logging.getLogger("ai_second_brain.ingest")
+WAKE_MIN_SECONDS = 10.0  # a wake-triggered reconcile runs at most once per this many seconds
 
 
 def _install_signals(stop: asyncio.Event) -> None:
@@ -40,13 +41,23 @@ async def _guarded_reconcile(ctx: IngestContext, trigger: str, run: ReconcileFn)
         logger.warning("reconcile_error type=%s", type(error).__name__)
 
 
+async def _sleep_unless(stop: asyncio.Event, seconds: float) -> None:
+    """Sleep up to `seconds`; return early when `stop` is set."""
+    with contextlib.suppress(TimeoutError):
+        await asyncio.wait_for(stop.wait(), timeout=max(seconds, 0))
+
+
 async def _reconcile_loop(
     ctx: IngestContext,
     stop: asyncio.Event,
     wake: asyncio.Event,
     run: ReconcileFn = reconcile,
+    *,
+    wake_interval: float = WAKE_MIN_SECONDS,
 ) -> None:
+    loop = asyncio.get_running_loop()
     await _guarded_reconcile(ctx, "startup", run)
+    last_finished = loop.time()
     while not stop.is_set():
         stop_wait = asyncio.create_task(stop.wait())
         wake_wait = asyncio.create_task(wake.wait())
@@ -59,8 +70,14 @@ async def _reconcile_loop(
         wake_wait.cancel()
         if stop.is_set():
             break
+        if wake.is_set():
+            # At most one wake-triggered pass per interval: later wakes fold into this deadline.
+            await _sleep_unless(stop, last_finished + wake_interval - loop.time())
+            if stop.is_set():
+                break
         wake.clear()
         await _guarded_reconcile(ctx, "schedule", run)
+        last_finished = loop.time()
 
 
 async def run_worker(settings: Settings, *, stop_event: asyncio.Event | None = None) -> int:

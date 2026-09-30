@@ -2,9 +2,15 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from watchfiles import Change as WfChange
+
 from ai_second_brain.runtime import new_event_loop
 from ai_second_brain.vault.paths import Vault
-from ai_second_brain.vault.watcher import Change, run_watcher
+from ai_second_brain.vault.watcher import (  # pyright: ignore[reportPrivateUsage]
+    Change,
+    _classify,
+    run_watcher,
+)
 
 EXCLUDES = (".obsidian/**",)
 
@@ -132,3 +138,31 @@ def test_handler_error_does_not_stop_watching(tmp_path: Path) -> None:
     )
     assert len(seen) >= 2
     assert any(rel == "b.md" for _, rel in seen[-1])
+
+
+def classify(tmp_path: Path, changes: list[tuple[WfChange, str]]) -> bool:
+    vault = Vault(tmp_path, EXCLUDES)
+    _, rescan = _classify(vault, {(kind, str(tmp_path / rel)) for kind, rel in changes})
+    return rescan
+
+
+def test_parent_directory_modified_does_not_rescan(tmp_path: Path) -> None:
+    # Windows reports the parent folder as modified whenever a note inside it is saved
+    (tmp_path / "Projects").mkdir()
+    (tmp_path / ".obsidian").mkdir()
+    assert not classify(tmp_path, [(WfChange.modified, "Projects")])
+    assert not classify(tmp_path, [(WfChange.modified, ".obsidian")])
+    assert not classify(
+        tmp_path, [(WfChange.modified, "Projects"), (WfChange.modified, "Projects/a.md")]
+    )
+
+
+def test_excluded_directory_itself_does_not_rescan(tmp_path: Path) -> None:
+    assert not classify(tmp_path, [(WfChange.added, ".obsidian")])
+    assert not classify(tmp_path, [(WfChange.deleted, ".obsidian")])
+
+
+def test_folder_added_or_deleted_rescans(tmp_path: Path) -> None:
+    (tmp_path / "moved").mkdir()
+    assert classify(tmp_path, [(WfChange.deleted, "folder")])
+    assert classify(tmp_path, [(WfChange.added, "moved")])

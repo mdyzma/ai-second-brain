@@ -23,7 +23,12 @@ _MAP: dict[WfChange, Change] = {
 def _classify(
     vault: Vault, changes: set[tuple[WfChange, str]]
 ) -> tuple[list[tuple[Change, str]], bool]:
-    """Note changes, plus whether a folder-level change needs a rescan."""
+    """Note changes, plus whether a folder-level change needs a rescan.
+
+    Only an added or deleted folder rescans: a folder move arrives as `deleted old` +
+    `added new`. A `modified` folder never does, because Windows reports the parent folder
+    as modified whenever a file inside it is saved.
+    """
     batch: list[tuple[Change, str]] = []
     rescan = False
     for kind, raw in changes:
@@ -33,7 +38,9 @@ def _classify(
         if vault.is_candidate(rel):
             batch.append((_MAP[kind], rel))
         elif (
-            not vault.is_excluded(rel)
+            kind in (WfChange.added, WfChange.deleted)
+            and not vault.is_excluded(rel)
+            and not vault.is_excluded(f"{rel}/")  # the excluded folder itself, e.g. .obsidian
             and not rel.lower().endswith(".md")
             and not Path(raw).is_file()  # attachments are not folder moves
         ):
