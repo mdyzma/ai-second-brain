@@ -20,6 +20,27 @@ _MAP: dict[WfChange, Change] = {
 }
 
 
+def _classify(
+    vault: Vault, changes: set[tuple[WfChange, str]]
+) -> tuple[list[tuple[Change, str]], bool]:
+    """Note changes, plus whether a folder-level change needs a rescan."""
+    batch: list[tuple[Change, str]] = []
+    rescan = False
+    for kind, raw in changes:
+        rel = vault.rel(Path(raw))
+        if rel is None:
+            continue
+        if vault.is_candidate(rel):
+            batch.append((_MAP[kind], rel))
+        elif (
+            not vault.is_excluded(rel)
+            and not rel.lower().endswith(".md")
+            and not Path(raw).is_file()  # attachments are not folder moves
+        ):
+            rescan = True  # a folder move/delete hides its notes from the watcher
+    return batch, rescan
+
+
 async def run_watcher(
     vault: Vault,
     handle_batch: Callable[[list[tuple[Change, str]]], Awaitable[None]],
@@ -34,16 +55,7 @@ async def run_watcher(
             async for changes in awatch(
                 vault.root, stop_event=stop_event, debounce=debounce_ms, recursive=True
             ):
-                batch: list[tuple[Change, str]] = []
-                rescan = False
-                for kind, raw in changes:
-                    rel = vault.rel(Path(raw))
-                    if rel is None:
-                        continue
-                    if vault.is_candidate(rel):
-                        batch.append((_MAP[kind], rel))
-                    elif not vault.is_excluded(rel) and not rel.lower().endswith(".md"):
-                        rescan = True  # a folder move/delete hides its notes from the watcher
+                batch, rescan = _classify(vault, changes)
                 if rescan and on_rescan is not None:
                     on_rescan()
                 if batch:

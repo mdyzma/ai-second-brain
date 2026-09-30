@@ -99,6 +99,21 @@ def test_folder_rename_requests_rescan(tmp_path: Path) -> None:
     assert calls
 
 
+def test_attachment_write_does_not_request_rescan(tmp_path: Path) -> None:
+    calls: list[int] = []
+
+    async def handle(batch: list[tuple[Change, str]]) -> None:
+        pass
+
+    watch_with(
+        tmp_path,
+        [lambda: (tmp_path / "image.png").write_bytes(b"\x89PNG")],
+        handle,
+        lambda: calls.append(1),
+    )
+    assert not calls
+
+
 def test_handler_error_does_not_stop_watching(tmp_path: Path) -> None:
     seen: list[list[tuple[Change, str]]] = []
 
