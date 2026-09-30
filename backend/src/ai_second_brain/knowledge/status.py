@@ -1,6 +1,7 @@
 """Read models for the Sources API and CLI."""
 
 import base64
+import binascii
 from collections import Counter
 from typing import Any, Literal, LiteralString
 from uuid import UUID
@@ -18,8 +19,23 @@ def encode_cursor(ref: str) -> str:
     return base64.urlsafe_b64encode(ref.encode()).decode().rstrip("=")
 
 
+class InvalidCursorError(ValueError):
+    """The cursor isn't one this API issued."""
+
+
 def decode_cursor(cursor: str) -> str:
-    return base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode()
+    try:
+        ref = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode()
+    except (binascii.Error, UnicodeDecodeError) as error:
+        raise InvalidCursorError from error
+    if not ref or "\x00" in ref:
+        raise InvalidCursorError
+    return ref
+
+
+def like_pattern(q: str) -> str:
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 async def _one(
@@ -46,7 +62,7 @@ async def summary(
         " count(*) FILTER (WHERE lr.state = 'indexed') AS indexed,"
         " count(*) FILTER (WHERE lr.state = 'failed') AS failed"
         " FROM sources s JOIN LATERAL (SELECT state FROM source_revisions r WHERE r.source_id = s.id"
-        " ORDER BY observed_at DESC LIMIT 1) lr ON true WHERE s.deleted_at IS NULL",
+        " ORDER BY observed_at DESC, id DESC LIMIT 1) lr ON true WHERE s.deleted_at IS NULL",
     )
     embedding = await _one(
         conn,
@@ -91,7 +107,7 @@ async def list_sources(
     conn: AsyncConnection, space_id: int, *, state: str | None, q: str | None, cursor: str | None
 ) -> dict[str, Any]:
     after = decode_cursor(cursor) if cursor else None
-    pattern = f"%{q}%" if q else None
+    pattern = like_pattern(q) if q else None
     async with conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
             f"SELECT * FROM (SELECT s.id, s.title, s.external_ref AS path, {STATE_SQL} AS state,"  # noqa: S608
@@ -101,9 +117,9 @@ async def list_sources(
             "   WHERE c.revision_id = s.current_revision_id AND s.deleted_at IS NULL) AS embedded"
             " FROM sources s LEFT JOIN source_revisions cur ON cur.id = s.current_revision_id"
             " LEFT JOIN LATERAL (SELECT state, error FROM source_revisions r WHERE r.source_id = s.id"
-            "   ORDER BY observed_at DESC LIMIT 1) lr ON true) x"
+            "   ORDER BY observed_at DESC, id DESC LIMIT 1) lr ON true) x"
             " WHERE (%(state)s::text IS NULL OR x.state = %(state)s)"
-            " AND (%(pattern)s::text IS NULL OR x.path ILIKE %(pattern)s OR x.title ILIKE %(pattern)s)"
+            " AND (%(pattern)s::text IS NULL OR x.path ILIKE %(pattern)s ESCAPE '\\' OR x.title ILIKE %(pattern)s ESCAPE '\\')"
             ' AND (%(after)s::text IS NULL OR x.path COLLATE "C" > %(after)s COLLATE "C")'
             ' ORDER BY x.path COLLATE "C" LIMIT %(limit)s',
             {
@@ -128,13 +144,15 @@ async def retry_source(
     """Returns what to queue: ('index', None), ('embed', current_revision_id), ('none'|'missing', None)."""
     row = await _one(
         conn,
-        "SELECT s.current_revision_id, lr.id AS latest_id, lr.state FROM sources s"
+        "SELECT s.current_revision_id, s.deleted_at, lr.id AS latest_id, lr.state FROM sources s"
         " LEFT JOIN LATERAL (SELECT id, state FROM source_revisions r WHERE r.source_id = s.id"
-        " ORDER BY observed_at DESC LIMIT 1) lr ON true WHERE s.id = %s",
+        " ORDER BY observed_at DESC, id DESC LIMIT 1) lr ON true WHERE s.id = %s",
         (source_id,),
     )
     if not row:
         return "missing", None
+    if row["deleted_at"] is not None:
+        return "none", None
     if row["state"] == "failed":
         await conn.execute(
             "UPDATE source_revisions SET state = 'pending', error = NULL WHERE id = %s",

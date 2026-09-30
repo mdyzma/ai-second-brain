@@ -198,7 +198,9 @@ def test_routes_return_503_when_the_job_app_failed_to_open(
         async def close_async(self) -> None:
             return None
 
-    monkeypatch.setattr("ai_second_brain.interfaces.api.app.create_job_app", lambda _url: _Broken())
+    monkeypatch.setattr(
+        "ai_second_brain.interfaces.api.app.create_job_app", lambda *_a, **_k: _Broken()
+    )
     client = make_api(vault_path=str(tmp_path))
     assert client.get("/api/sources/summary").status_code == 200
     for path in (
@@ -207,3 +209,96 @@ def test_routes_return_503_when_the_job_app_failed_to_open(
     ):
         response = client.post(path, headers=SAME_ORIGIN)
         assert (response.status_code, response.json()) == (503, {"detail": "database_unavailable"})
+
+
+@pytest.mark.parametrize("cursor", ["a", "_w", "AA"])
+def test_bad_cursor_is_422(make_api: Callable[..., TestClient], cursor: str) -> None:
+    response = make_api().get("/api/sources", params={"cursor": cursor})
+    assert (response.status_code, response.json()) == (422, {"detail": "invalid_cursor"})
+
+
+def test_search_escapes_wildcards_and_rejects_nul(
+    make_api: Callable[..., TestClient],
+    db_url: str,
+    tmp_path: Path,
+    make_fake_ollama: Callable[[], FakeOllama],
+) -> None:
+    vault = VaultBuilder(tmp_path)
+    vault.write("a_b.md", "one")
+    vault.write("axb.md", "two")
+    vault.write("50%.md", "three")
+    seed(db_url, tmp_path, make_fake_ollama().url, drain=False)
+    client = make_api(vault_path=str(tmp_path))
+
+    def paths(q: str) -> list[str]:
+        return [r["path"] for r in client.get("/api/sources", params={"q": q}).json()["items"]]
+
+    assert paths("_") == ["a_b.md"]
+    assert paths("%") == ["50%.md"]
+    assert paths("a\\") == []
+    assert client.get("/api/sources", params={"q": "a\x00"}).status_code == 422
+
+
+def test_retry_on_a_deleted_source_is_nothing_to_retry(
+    make_api: Callable[..., TestClient],
+    db_url: str,
+    tmp_path: Path,
+    make_fake_ollama: Callable[[], FakeOllama],
+) -> None:
+    VaultBuilder(tmp_path).write("big.md", "x" * 3_000_000)
+    seed(db_url, tmp_path, make_fake_ollama().url)
+    client = make_api(vault_path=str(tmp_path))
+    [row] = client.get("/api/sources").json()["items"]
+    assert row["state"] == "failed"
+    with psycopg.connect(db_url, autocommit=True) as conn:
+        conn.execute("UPDATE sources SET deleted_at = now()")
+    response = client.post(f"/api/sources/{row['id']}/retry", headers=SAME_ORIGIN)
+    assert (response.status_code, response.json()) == (409, {"detail": "nothing_to_retry"})
+    with psycopg.connect(db_url) as conn:
+        assert conn.execute("SELECT state FROM source_revisions").fetchall() == [("failed",)]
+
+
+def test_job_app_opens_lazily_after_the_database_recovers(
+    monkeypatch: pytest.MonkeyPatch, make_api: Callable[..., TestClient], tmp_path: Path
+) -> None:
+    class _Flaky:
+        opens = 0
+        closes = 0
+
+        async def open_async(self) -> None:
+            _Flaky.opens += 1
+            if _Flaky.opens == 1:
+                raise OSError("no database")
+
+        async def close_async(self) -> None:
+            _Flaky.closes += 1
+
+    monkeypatch.setattr(
+        "ai_second_brain.interfaces.api.app.create_job_app", lambda *_a, **_k: _Flaky()
+    )
+    client = make_api(vault_path=str(tmp_path))
+    assert client.app.state.ingest.queue is None  # type: ignore[attr-defined]
+    missing = client.post(
+        "/api/sources/00000000-0000-4000-8000-000000000000/retry", headers=SAME_ORIGIN
+    )
+    assert (missing.status_code, missing.json()) == (404, {"detail": "not_found"})
+    assert _Flaky.opens == 2
+    client.get("/api/sources/summary")
+    assert _Flaky.opens == 2  # opened once more only, not per request
+
+
+def test_unreachable_database_fails_the_open_quickly_and_can_retry() -> None:
+    import time
+
+    from ai_second_brain.knowledge.jobs import create_job_app
+
+    async def scenario() -> float:
+        app = create_job_app("postgres://u@127.0.0.1:1/x", open_timeout=1.0)
+        start = time.monotonic()
+        for _ in range(2):  # the second try proves a failed open leaves nothing half-open
+            with pytest.raises(Exception):  # noqa: B017, PT011
+                await app.open_async()
+            await app.close_async()
+        return time.monotonic() - start
+
+    assert run_async(scenario()) < 10

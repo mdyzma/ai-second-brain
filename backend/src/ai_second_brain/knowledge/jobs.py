@@ -1,7 +1,7 @@
 """procrastinate job app. Job arguments are ids only; never note text, titles or paths."""
 
 import copy
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from procrastinate import (
@@ -13,6 +13,7 @@ from procrastinate import (
     RetryDecision,
 )
 from procrastinate.jobs import Job
+from psycopg_pool import AsyncConnectionPool
 
 from ai_second_brain.knowledge.embedder import EMBED_RETRY_SECONDS, EmbedRetryable
 
@@ -87,8 +88,29 @@ async def reconcile_vault_task(context: JobContext, run_id: int) -> None:
     await reconcile(_ctx(context), trigger="manual", run_id=run_id)
 
 
-def create_job_app(database_url: str) -> App:
-    app = App(connector=PsycopgConnector(conninfo=database_url))
+class _QuickOpenPool(AsyncConnectionPool):
+    """procrastinate opens its pool with wait=True and a 30 s default; cap the wait."""
+
+    def __init__(self, *args: Any, open_timeout: float, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._open_timeout = open_timeout
+
+    async def open(self, wait: bool = False, timeout: float = 30.0) -> None:  # noqa: ASYNC109
+        await super().open(wait=wait, timeout=self._open_timeout)
+
+    async def close(self, timeout: float = 5.0) -> None:  # noqa: ASYNC109
+        await super().close(timeout=min(timeout, 0.5))  # workers stuck connecting shouldn't stall
+
+
+def create_job_app(database_url: str, *, open_timeout: float | None = None) -> App:
+    options: dict[str, Any] = {}
+    if open_timeout is not None:
+
+        def pool_factory(**kwargs: Any) -> AsyncConnectionPool:
+            return _QuickOpenPool(open_timeout=open_timeout, **kwargs)
+
+        options["pool_factory"] = pool_factory
+    app = App(connector=PsycopgConnector(conninfo=database_url, **options))
     # add_tasks_from renames and rebinds the tasks it copies, so hand each app its own copy
     app.add_tasks_from(copy.deepcopy(blueprint), namespace="ingest")
     return app

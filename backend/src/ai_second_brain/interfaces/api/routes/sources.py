@@ -23,9 +23,9 @@ ERRORS: dict[int | str, dict[str, Any]] = {
 }
 
 
-def _queue(request: Request) -> JobQueue:
-    queue = request.app.state.ingest.queue
-    if queue is None:  # the job app could not open at startup
+async def _queue(request: Request) -> JobQueue:
+    queue = await request.app.state.ingest.get_queue()
+    if queue is None:  # the job app can't open: the database is down
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="database_unavailable")
     return queue
 
@@ -50,10 +50,15 @@ async def list_sources(
     q: str | None = Query(default=None, max_length=200),
     cursor: str | None = Query(default=None, max_length=500),
 ) -> Any:
-    async with request.app.state.pool.connection() as conn:
-        return await read.list_sources(
-            conn, request.app.state.ingest.space_id, state=state, q=q, cursor=cursor
-        )
+    if q is not None and chr(0) in q:
+        raise HTTPException(422, detail="invalid_query")
+    try:
+        async with request.app.state.pool.connection() as conn:
+            return await read.list_sources(
+                conn, request.app.state.ingest.space_id, state=state, q=q, cursor=cursor
+            )
+    except read.InvalidCursorError as error:
+        raise HTTPException(422, detail="invalid_cursor") from error
 
 
 @router.post(
@@ -66,7 +71,7 @@ async def list_sources(
 )
 async def retry_source(source_id: UUID, request: Request) -> None:
     ingest = request.app.state.ingest
-    queue = _queue(request)
+    queue = await _queue(request)
     async with request.app.state.pool.connection() as conn:
         kind, revision_id = await read.retry_source(conn, source_id, ingest.space_id)
     if kind == "missing":
@@ -96,7 +101,7 @@ async def retry_source(source_id: UUID, request: Request) -> None:
 async def reconcile_vault(request: Request) -> ReconcileQueued:
     if get_settings(request).vault_path is None:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="vault_disabled")
-    queue = _queue(request)
+    queue = await _queue(request)
     pool = request.app.state.pool
     async with pool.connection() as conn:
         run_id = await store.start_run(conn, "manual")

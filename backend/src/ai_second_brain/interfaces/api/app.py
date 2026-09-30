@@ -7,7 +7,7 @@ import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -15,6 +15,7 @@ import psycopg
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from procrastinate import App
 from psycopg_pool import PoolTimeout
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -44,12 +45,37 @@ API_VERSION = "1.0"
 
 @dataclass
 class IngestAccess:
-    """What the Sources routes need from ingestion; `queue` is None if the job app didn't open."""
+    """What the Sources routes need from ingestion. The job app opens lazily (and again after a
+    failure), so the API starts, and recovers, while the database is down."""
 
-    queue: JobQueue | None
+    job_app: App
     space_id: int
     embedder: Embedder | None
+    queue: JobQueue | None = None
     _cache: tuple[float, bool] | None = None
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    async def get_queue(self) -> JobQueue | None:
+        """The queue, opening the job app if needed; None if the database is unreachable."""
+        if self.queue is not None:
+            return self.queue
+        async with self._lock:
+            if self.queue is not None:
+                return self.queue
+            try:
+                await self.job_app.open_async()
+            except Exception as error:
+                logger.warning("job_app_unavailable type=%s", type(error).__name__)
+                with contextlib.suppress(Exception):  # a half-open pool would block a retry
+                    await self.job_app.close_async()
+                return None
+            self.queue = ProcrastinateQueue(self.job_app)
+            return self.queue
+
+    async def close(self) -> None:
+        if self.queue is not None:
+            with contextlib.suppress(Exception):
+                await self.job_app.close_async()
 
     async def host_reachable(self) -> bool | None:
         if self.embedder is None:
@@ -136,19 +162,15 @@ def create_app(
             app.state.ollama,
             make_cloud_factory(settings, timeouts),
         )
-        job_app = create_job_app(settings.database_url)
-        queue: JobQueue | None = None
-        try:
-            await job_app.open_async()
-            queue = ProcrastinateQueue(job_app)
-        except Exception as error:  # the API must start while the database is down
-            logger.warning("job_app_unavailable type=%s", type(error).__name__)
         embedder = (
             Embedder(settings.embed_url, settings.embed_model, 1024, http_client, timeouts)
             if settings.embed_url
             else None
         )
-        app.state.ingest = IngestAccess(queue, 1, embedder)  # space 1 is seeded by the migration
+        job_app = create_job_app(settings.database_url, open_timeout=2.0)
+        # space 1 is seeded by the migration
+        app.state.ingest = IngestAccess(job_app, 1, embedder)
+        await app.state.ingest.get_queue()  # None when the database is down; retried per request
         try:
             await app.state.sessions.purge_expired()
         except (PoolTimeout, psycopg.Error, OSError):
@@ -156,8 +178,7 @@ def create_app(
         try:
             yield
         finally:
-            with contextlib.suppress(Exception):
-                await job_app.close_async()
+            await app.state.ingest.close()
             await http_client.aclose()
             await pool.close(timeout=0.1)
 
