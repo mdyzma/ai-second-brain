@@ -44,8 +44,9 @@ Option C is a valid fallback if procrastinate proves problematic; the job functi
 
 - **Vendored schema.** procrastinate's schema is committed as a dbmate migration rather than applied by the library, so `db/schema.sql` stays the single source of truth.
 - **Queue after commit.** Jobs are deferred after the transaction that saves the revision commits, not inside it. A crash in between leaves a `pending` revision with no job, and the reconcile re-queues it.
-- **Stalled jobs.** Jobs carry a heartbeat; reconcile resets jobs stuck in `doing` for more than 10 minutes so a crashed worker's jobs are retried.
-- **Reconcile timer.** The scheduled reconcile runs inside the worker process (a periodic task every `SB_RECONCILE_MINUTES`, plus one at startup), not in an external scheduler.
+- **Stalled jobs.** Workers (not jobs) heartbeat; reconcile resets `doing` jobs whose worker's heartbeat is more than 10 minutes old, so a crashed worker's jobs are retried.
+- **Reconcile timer.** The scheduled reconcile is an asyncio timer inside the worker process (every `SB_RECONCILE_MINUTES`, plus one at startup and at most one every 10 s when the watcher asks for a rescan), not a procrastinate periodic task or an external scheduler. "Scan now" defers a `reconcile_vault` job instead.
+- **Priorities.** Index and reconcile jobs are deferred with priority 10 and embed jobs with 0, so an edit is indexed ahead of a long embedding backlog.
 - **Queues.** `ingest` (parse, chunk and index a source) and `embed` (embed a revision's chunks for a space), concurrency 2. `nightly` and `hardware` (later `gpu`) follow with their phases.
 
 ## Action Items

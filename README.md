@@ -184,7 +184,7 @@ ai-second-brain/
 │   │   ├── ingest/             The worker process (procrastinate queues, watcher, scheduled reconcile)
 │   │   └── interfaces/
 │   │       ├── api/            FastAPI app, routes (health, auth), cross-site check, API schemas
-│   │       └── cli/            `ai-second-brain serve | openapi | hash-password`
+│   │       └── cli/            `ai-second-brain serve | openapi | hash-password | chat-smoke | worker | vault reconcile|status`
 │   └── tests/                  unit/ (no database) and integration/ (real Postgres)
 ├── web/                        React + TypeScript single-page app (pnpm, Vite)
 │   ├── src/
@@ -292,7 +292,11 @@ Details are in the [Phase 2a spec](docs/superpowers/specs/2026-09-30-phase-2a-va
   worker refuses to start. Models ending in `:cloud` or `-cloud` are refused for embeddings and chat, because
   private text never leaves your LAN. On Windows, prefer `http://127.0.0.1:11434` over `localhost`.
 - **What the worker watches.** It watches the vault for changes. A folder rename or move triggers an immediate
-  rescan, and a reconcile also runs every `SB_RECONCILE_MINUTES`, so offline edits are picked up.
+  rescan (at most one every 10 s), and a reconcile also runs every `SB_RECONCILE_MINUTES`, so offline edits are
+  picked up.
+- **Database restarts.** If Postgres restarts or is not up yet, the worker logs `database_unavailable`, retries
+  with a backoff (1 s, doubling up to 60 s) and carries on by itself; `just dev` keeps the API and web running.
+  The worker exits with an error only when `SB_EMBED_MODEL` doesn't match the default embedding space.
 - **Mass-deletion guard.** If a reconcile finds more than 10 notes missing **and** more than 20% of the live
   notes, it deletes nothing and reports `guard_tripped` (an unmounted drive or a wrong path looks just like that).
   The Sources screen cannot override it; only `just vault-scan --allow-mass-delete` can.
@@ -341,10 +345,18 @@ version files, commits `chore(release): vX.Y.Z [skip ci]`, tags `vX.Y.Z` and pub
 - **Sources says "found N notes missing and deleted nothing":** the mass-deletion guard tripped. Check
   `SB_VAULT_PATH` (and that the drive is mounted). If the notes really are gone, run
   `just vault-scan --allow-mass-delete`.
-- **Sources says "The worker hasn't picked this up yet.":** **Scan now** waits up to 60 s for the worker. Start
-  it with `just dev` or `just worker`.
+- **"The embedding host is unreachable":** the worker can't reach `SB_EMBED_URL` (or, when that is empty, the
+  first `SB_OLLAMA_ENDPOINTS` entry). Notes stay searchable by full text, and vectors are added by themselves
+  once it is back. Check that the host is awake and Ollama is running (`just chat-smoke`), the firewall, and
+  `OLLAMA_HOST` on that machine.
+- **Sources says "The worker hasn't picked this up yet.":** no worker started the scan within 60 s, and
+  **Scan now** is enabled again. Start the worker with `just dev` or `just worker`; the queued scan then runs.
+- **Sources says "A scan is already queued.":** a scan is already waiting for the worker; it runs when the
+  worker picks it up.
 - **The worker exits at start naming two models:** `SB_EMBED_MODEL` isn't a tag of the default space's model
-  (`bge-m3`), or ends in `:cloud` or `-cloud`.
+  (`bge-m3`).
+- **"Configuration error" naming a hosted model:** `SB_EMBED_MODEL` (or a chat model) ends in `:cloud` or
+  `-cloud`. Hosted models are refused at settings validation; use a local tag.
 - **The dbmate binary can't be downloaded (proxy or offline):** install dbmate with scoop/winget or
   `brew install dbmate`, and set `DBMATE=dbmate` in `.env`.
 
