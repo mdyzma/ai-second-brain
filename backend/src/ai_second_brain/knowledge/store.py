@@ -186,3 +186,62 @@ async def default_space(conn: AsyncConnection) -> tuple[int, str, int]:
     if row is None:
         raise RuntimeError("no default embedding space")
     return row[0], row[1], row[2]
+
+
+@dataclass(frozen=True)
+class EmbedTarget:
+    title: str
+    is_current: bool
+
+
+async def revision_for_embedding(conn: AsyncConnection, revision_id: UUID) -> EmbedTarget | None:
+    async with conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT s.title, (s.current_revision_id = r.id AND s.deleted_at IS NULL) AS is_current"
+            " FROM source_revisions r JOIN sources s ON s.id = r.source_id WHERE r.id = %s",
+            (revision_id,),
+        )
+        row = await cur.fetchone()
+    return EmbedTarget(row["title"] or "", bool(row["is_current"])) if row else None
+
+
+async def chunks_to_embed(
+    conn: AsyncConnection, revision_id: UUID, space_id: int
+) -> list[tuple[UUID, list[str], str]]:
+    cur = await conn.execute(
+        "SELECT c.id, c.heading_path, c.content FROM chunks c"
+        " LEFT JOIN chunk_embeddings e ON e.chunk_id = c.id AND e.space_id = %s"
+        " WHERE c.revision_id = %s AND e.chunk_id IS NULL ORDER BY c.ordinal",
+        (space_id, revision_id),
+    )
+    return [(row[0], list(row[1]), row[2]) for row in await cur.fetchall()]
+
+
+async def write_embeddings(
+    conn: AsyncConnection, space_id: int, rows: Sequence[tuple[UUID, list[float]]]
+) -> None:
+    async with conn.cursor() as cur:
+        await cur.executemany(
+            "INSERT INTO chunk_embeddings (chunk_id, space_id, embedding)"
+            " VALUES (%s, %s, %s::halfvec)"
+            " ON CONFLICT DO NOTHING",
+            [
+                (chunk_id, space_id, "[" + ",".join(repr(v) for v in vector) + "]")
+                for chunk_id, vector in rows
+            ],
+        )
+
+
+async def set_embed_error(conn: AsyncConnection, revision_id: UUID, code: str) -> None:
+    await conn.execute(
+        "UPDATE source_revisions"
+        " SET metadata = metadata || jsonb_build_object('embed_error', %s::text) WHERE id = %s",
+        (code, revision_id),
+    )
+
+
+async def clear_embed_error(conn: AsyncConnection, revision_id: UUID) -> None:
+    await conn.execute(
+        "UPDATE source_revisions SET metadata = metadata - 'embed_error' WHERE id = %s",
+        (revision_id,),
+    )

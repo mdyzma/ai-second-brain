@@ -48,7 +48,7 @@ class Harness:
     async def rows(self, sql: LiteralString, *params: Any) -> list[dict[str, Any]]:
         async with self.pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(sql, params)
-            return await cur.fetchall()
+            return await cur.fetchall() if cur.description is not None else []
 
 
 @asynccontextmanager

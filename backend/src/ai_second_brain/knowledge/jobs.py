@@ -14,6 +14,8 @@ from procrastinate import (
 )
 from procrastinate.jobs import Job
 
+from ai_second_brain.knowledge.embedder import EmbedRetryable
+
 if TYPE_CHECKING:
     from ai_second_brain.knowledge.context import IngestContext
 
@@ -66,9 +68,16 @@ async def index_source_task(context: JobContext, source_id: str) -> None:
         raise
 
 
-@blueprint.task(name="embed_revision", queue=EMBED_QUEUE, pass_context=True)
+@blueprint.task(
+    name="embed_revision",
+    queue=EMBED_QUEUE,
+    pass_context=True,
+    retry=ScheduleRetry((30, 60, 120, 300, 600, 1200, 2400, 3600), only=(EmbedRetryable,)),
+)
 async def embed_revision_task(context: JobContext, revision_id: str, space_id: int) -> None:
-    raise NotImplementedError  # Task 7
+    from ai_second_brain.knowledge.embed import embed_revision
+
+    await embed_revision(_ctx(context), UUID(revision_id), space_id)
 
 
 @blueprint.task(name="reconcile_vault", queue=INGEST_QUEUE, pass_context=True)
