@@ -20,6 +20,9 @@ describe("scanStatus", () => {
   it("is done when a newer run finished", () => {
     expect(scanStatus(queued, NEW, 2000)).toBe("done");
   });
+  it("does not time out once a newer run has started", () => {
+    expect(scanStatus(queued, RUNNING, 1000 + SCAN_TIMEOUT_MS * 5)).toBe("pending");
+  });
   it("times out after 60 s", () => {
     expect(scanStatus(queued, OLD, 1000 + SCAN_TIMEOUT_MS)).toBe("timed_out");
   });

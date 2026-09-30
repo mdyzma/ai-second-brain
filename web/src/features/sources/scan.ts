@@ -14,7 +14,9 @@ export function scanStatus(
   now: number,
 ): ScanStatus {
   if (queued === null) return "idle";
-  if (lastRun?.finished_at && lastRun.started_at !== queued.after) return "done";
+  const newer = lastRun !== null && lastRun.started_at !== queued.after;
+  if (newer && lastRun.finished_at) return "done";
+  if (newer) return "pending"; // picked up; a big vault can take minutes
   return now - queued.at >= SCAN_TIMEOUT_MS ? "timed_out" : "pending";
 }
 
@@ -37,6 +39,7 @@ export function useScanQueue(lastRun: RunLike | null) {
       expire();
       return;
     }
+    if (lastRun !== null && lastRun.started_at !== queued.after) return; // running
     const timer = setTimeout(expire, queued.at + SCAN_TIMEOUT_MS - Date.now());
     return () => clearTimeout(timer);
   }, [queued, lastRun]);
