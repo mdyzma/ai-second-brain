@@ -16,7 +16,7 @@ def test_chat_defaults(make_settings: Callable[..., Settings]) -> None:
     assert settings.ollama_endpoints == []
     assert settings.cloud_available is False
     assert settings.anthropic_model == "claude-sonnet-5-5"
-    assert settings.anthropic_base_url == ""
+    assert settings.anthropic_base_url == "https://api.anthropic.com"
     assert settings.chat_max_tokens == 2048
     assert settings.chat_status_ttl_seconds == 10.0
 

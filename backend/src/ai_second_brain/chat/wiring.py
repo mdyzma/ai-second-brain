@@ -20,7 +20,7 @@ def make_cloud_factory(
         return AnthropicProvider(
             api_key=api_key,
             model=settings.anthropic_model,
-            base_url=settings.anthropic_base_url or None,
+            base_url=settings.anthropic_base_url,
             max_tokens=settings.chat_max_tokens,
             timeouts=timeouts,
         )

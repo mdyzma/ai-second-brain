@@ -23,7 +23,7 @@ class AnthropicProvider:
         *,
         api_key: str,
         model: str,
-        base_url: str | None,
+        base_url: str,
         max_tokens: int,
         timeouts: ChatTimeouts,
     ) -> None:

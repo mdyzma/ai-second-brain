@@ -253,7 +253,7 @@ The app enforces routing, not the physical location of a URL: a "local" endpoint
 | `SB_OLLAMA_ENDPOINTS` | empty | JSON list of `{label, url, model, degraded?}`; the order is the preference |
 | `SB_ANTHROPIC_API_KEY` | empty | Empty disables cloud sessions |
 | `SB_ANTHROPIC_MODEL` | `claude-sonnet-5-5` | Model for cloud sessions |
-| `SB_ANTHROPIC_BASE_URL` | empty | Tests only |
+| `SB_ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | Pinned; `ANTHROPIC_BASE_URL` is ignored. Tests only |
 | `SB_CHAT_MAX_TOKENS` | `2048` | Maximum answer length |
 | `SB_CHAT_STATUS_TTL_SECONDS` | `10` | How long the endpoint status is cached |
 

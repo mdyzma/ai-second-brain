@@ -111,3 +111,18 @@ def test_sdk_debug_logging_never_carries_the_question(
     collect(settings_for(make_settings, fake))
     assert QUESTION not in caplog.text
     assert "sk-fake" not in caplog.text
+
+
+def test_ambient_anthropic_env_cannot_redirect_or_add_auth(
+    make_settings: Callable[..., Settings],
+    make_fake_anthropic: MakeFake,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake, other = make_fake_anthropic(), make_fake_anthropic()
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", other.url)
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "ambient-token")
+    assert collect(settings_for(make_settings, fake)) == "Hello from cloud"
+    assert other.requests == []
+    [request] = fake.requests
+    assert request.headers["x-api-key"] == "sk-fake"
+    assert "authorization" not in {name.lower() for name in request.headers}

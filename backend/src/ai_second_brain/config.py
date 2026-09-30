@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     ollama_endpoints: list[OllamaEndpointConfig] = Field(default_factory=list)
     anthropic_api_key: SecretStr = SecretStr("")
     anthropic_model: str = Field(default="claude-sonnet-5-5", min_length=1)
-    anthropic_base_url: str = ""  # tests only: points the SDK at a fake server
+    anthropic_base_url: str = "https://api.anthropic.com"  # pinned; tests point it at a fake
     chat_max_tokens: int = Field(default=2048, ge=64, le=32000)
     chat_status_ttl_seconds: float = Field(default=10.0, ge=0, le=300)
 
