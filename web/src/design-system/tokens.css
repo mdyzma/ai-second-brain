@@ -173,6 +173,15 @@
   --color-warning-fg: var(--sb-warning-fg);
   --color-warning-bg: var(--sb-warning-bg);
   --color-warning-border: var(--sb-warning-border);
+  --color-ingest-pending-fg: var(--sb-ingest-pending-fg);
+  --color-ingest-pending-bg: var(--sb-ingest-pending-bg);
+  --color-ingest-pending-border: var(--sb-ingest-pending-border);
+  --color-ingest-searchable-fg: var(--sb-ingest-searchable-fg);
+  --color-ingest-searchable-bg: var(--sb-ingest-searchable-bg);
+  --color-ingest-searchable-border: var(--sb-ingest-searchable-border);
+  --color-ingest-failed-fg: var(--sb-ingest-failed-fg);
+  --color-ingest-failed-bg: var(--sb-ingest-failed-bg);
+  --color-ingest-failed-border: var(--sb-ingest-failed-border);
 
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
