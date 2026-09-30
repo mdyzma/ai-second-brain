@@ -123,11 +123,7 @@ export function SourcesScreen({
         <Card title="Indexed" value={String(summary.revisions.indexed)} />
         <Card title="Waiting" value={String(summary.revisions.pending)} />
         <Card title="Failed" value={String(summary.revisions.failed)} />
-        <Card
-          title={`Embedded ${pct}%`}
-          value={`${pct}%`}
-          detail={`${embedded} of ${total} chunks`}
-        />
+        <Card title="Embedded" value={`${pct}%`} detail={`${embedded} of ${total} chunks`} />
         <Card
           title="Last scan"
           value={run ? relativeTime(run.started_at) : "never"}

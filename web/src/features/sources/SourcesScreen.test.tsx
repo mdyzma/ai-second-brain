@@ -129,8 +129,9 @@ describe("SourcesScreen", () => {
 
   it("shows summary cards and the table", () => {
     renderScreen();
-    expect(screen.getByText("Embedded 90%")).toBeInTheDocument();
-    expect(screen.getByText("9 of 10 chunks")).toBeInTheDocument();
+    const embedded = screen.getByText("Embedded", { exact: true }).parentElement as HTMLElement;
+    expect(within(embedded).getByText("90%", { exact: true })).toBeInTheDocument();
+    expect(within(embedded).getByText("9 of 10 chunks")).toBeInTheDocument();
     const table = screen.getByRole("table");
     expect(within(table).getByText("Projects/NAS.md")).toBeInTheDocument();
     expect(within(table).getByText("Failed · too_large")).toBeInTheDocument();
