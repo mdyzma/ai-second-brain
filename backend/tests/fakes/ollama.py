@@ -1,7 +1,10 @@
 """Scriptable fake Ollama (`/api/version`, streamed `/api/chat`) that records requests."""
 
 import asyncio
+import hashlib
 import json
+import math
+import random
 import threading
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -35,6 +38,21 @@ class OllamaBehaviour:
     send_done: bool = True
     malformed_after: int | None = None  # replace chunk N with a non-JSON line
     error_line_after: int | None = None  # replace chunk N with {"error": error_text}
+    embed_status: int = 200
+    embed_error_text: str = ""
+    embed_dims: int = 1024
+    embed_count_delta: int = 0
+    embed_nonfinite: bool = False
+    embed_fail_on_call: int | None = None  # 1-based call number that returns 500
+    embed_delay: float = 0.0
+
+
+def fake_vector(text: str, dims: int = 1024) -> list[float]:
+    seed = int.from_bytes(hashlib.sha256(text.encode("utf-8")).digest()[:8], "big")
+    rng = random.Random(seed)  # noqa: S311 - deterministic test vectors
+    values = [rng.gauss(0.0, 1.0) for _ in range(dims)]
+    norm = math.sqrt(sum(v * v for v in values)) or 1.0
+    return [v / norm for v in values]
 
 
 class FakeOllama:
@@ -47,6 +65,7 @@ class FakeOllama:
             routes=[
                 Route("/api/version", self._version, methods=["GET"]),
                 Route("/api/chat", self._chat, methods=["POST"]),
+                Route("/api/embed", self._embed, methods=["POST"]),
                 Route("/{path:path}", self._other, methods=["GET", "POST"]),
             ]
         )
@@ -62,6 +81,29 @@ class FakeOllama:
 
     def chat_requests(self) -> list[RecordedRequest]:
         return [r for r in self.requests if r.path == "/api/chat"]
+
+    def embed_requests(self) -> list[RecordedRequest]:
+        return [r for r in self.requests if r.path == "/api/embed"]
+
+    async def _embed(self, request: Request) -> Response:
+        body = await self._record(request)
+        b = self.behaviour
+        if b.embed_delay:
+            await asyncio.sleep(b.embed_delay)
+        if b.embed_fail_on_call is not None and len(self.embed_requests()) == b.embed_fail_on_call:
+            return JSONResponse({"error": "boom"}, status_code=500)
+        if b.embed_status != 200:
+            return JSONResponse({"error": b.embed_error_text}, status_code=b.embed_status)
+        inputs = body["input"] if isinstance(body["input"], list) else [body["input"]]
+        vectors = [fake_vector(text, b.embed_dims) for text in inputs]
+        if b.embed_count_delta < 0:
+            vectors = vectors[: b.embed_count_delta]
+        elif b.embed_count_delta > 0:
+            vectors += [fake_vector("extra", b.embed_dims)] * b.embed_count_delta
+        if b.embed_nonfinite and vectors:
+            vectors[0] = [float("nan")] * b.embed_dims
+        payload = json.dumps({"model": body["model"], "embeddings": vectors})  # allows NaN
+        return Response(payload, media_type="application/json")
 
     async def _record(self, request: Request) -> Any:
         raw = await request.body()
