@@ -107,3 +107,27 @@ def test_run_worker_returns_zero_when_stopped_without_vault(db_url: str) -> None
         return await asyncio.wait_for(run_worker(settings, stop_event=stop), 60)
 
     assert run_async(scenario()) == 0
+
+
+def test_apply_batch_case_only_rename_is_a_move(
+    db_url: str, tmp_path: Path, make_fake_ollama: MakeFake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ai_second_brain.vault.paths import Vault
+
+    fake = make_fake_ollama()
+    vault = VaultBuilder(tmp_path)
+    vault.write("Note.md", "treść")
+
+    async def body(h: Harness) -> None:
+        await reconcile(h.ctx, trigger="startup")
+        [before] = await h.rows("SELECT id FROM sources")
+        vault.rename("Note.md", "note.md")
+        # a case-insensitive disk (NTFS, APFS) still opens "Note.md"; only the listing tells
+        monkeypatch.setattr(Vault, "exists_exact", lambda self, rel: rel == "note.md")
+        await apply_batch(h.ctx, [("deleted", "Note.md"), ("added", "note.md")])
+        rows = await h.rows("SELECT id, external_ref, deleted_at FROM sources")
+        assert [(r["id"], r["external_ref"], r["deleted_at"]) for r in rows] == [
+            (before["id"], "note.md", None)
+        ]
+
+    run(db_url, tmp_path, fake, body)

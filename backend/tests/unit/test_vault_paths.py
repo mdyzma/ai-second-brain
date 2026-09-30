@@ -79,3 +79,22 @@ def test_walk_raises_when_a_directory_cannot_be_listed(
     monkeypatch.setattr(os, "walk", failing)
     with pytest.raises(OSError, match="denied"):
         Vault(tmp_path, EXCLUDES).walk()
+
+
+def test_rel_keeps_the_event_file_name_case(tmp_path: Path) -> None:
+    (tmp_path / "Dir").mkdir()
+    (tmp_path / "Dir" / "note.md").write_text("x", encoding="utf-8")
+    vault = Vault(tmp_path, ())
+    # on a case-insensitive disk resolve() would rewrite this to the on-disk "note.md"
+    assert vault.rel(tmp_path / "Dir" / "Note.md") == "Dir/Note.md"
+
+
+def test_exists_exact_matches_the_name_case(tmp_path: Path) -> None:
+    (tmp_path / "note.md").write_text("x", encoding="utf-8")
+    (tmp_path / "folder.md").mkdir()
+    vault = Vault(tmp_path, ())
+    assert vault.exists_exact("note.md")
+    assert not vault.exists_exact("Note.md")
+    assert not vault.exists_exact("missing.md")
+    assert not vault.exists_exact("nowhere/note.md")
+    assert not vault.exists_exact("folder.md")  # a directory is not a note

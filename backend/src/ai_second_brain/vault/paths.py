@@ -31,14 +31,24 @@ class Vault:
         return _excluded(rel, self.excludes)
 
     def rel(self, path: Path) -> str | None:
+        # Resolve the parent only: on a case-insensitive disk resolving the file itself would
+        # rewrite a case-only rename's `deleted Note.md` event to the new on-disk `note.md`.
         try:
-            relative = path.resolve().relative_to(self.root.resolve())
+            relative = (path.parent.resolve() / path.name).relative_to(self.root.resolve())
         except ValueError:
             return None
         return PurePosixPath(*relative.parts).as_posix()
 
     def abs(self, rel: str) -> Path:
         return self.root.joinpath(*PurePosixPath(rel).parts)
+
+    def exists_exact(self, rel: str) -> bool:
+        """The file exists under exactly this name's case (is_file() ignores case on NTFS/APFS)."""
+        path = self.abs(rel)
+        try:
+            return path.name in os.listdir(path.parent) and path.is_file()
+        except OSError:
+            return False
 
     def readable(self) -> bool:
         return self.root.is_dir() and os.access(self.root, os.R_OK | os.X_OK)

@@ -16,7 +16,11 @@ logger = logging.getLogger("ai_second_brain.ingest")
 async def apply_batch(ctx: IngestContext, changes: list[tuple[Change, str]]) -> None:
     if ctx.vault is None:
         raise RuntimeError("vault is not configured")
-    exists = {rel: ctx.vault.abs(rel).is_file() for _, rel in changes}
+    vault = ctx.vault
+    # exact case: a case-only rename must read as `deleted Note.md` + `added note.md`
+    exists = {
+        rel: await asyncio.to_thread(vault.exists_exact, rel) for rel in {r for _, r in changes}
+    }
     deleted_rels = {rel for kind, rel in changes if kind == "deleted" and not exists[rel]}
     touched = {rel for _, rel in changes if exists[rel]}
     async with ctx.pool.connection() as conn:
