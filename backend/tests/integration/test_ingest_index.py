@@ -268,3 +268,24 @@ def test_claim_refuses_a_pending_revision_with_a_read_error(db_url: str, tmp_pat
         assert source["current_revision_id"] is None
 
     run(db_url, tmp_path, body)
+
+
+def test_index_and_reconcile_jobs_jump_the_embed_backlog(db_url: str, tmp_path: Path) -> None:
+    from uuid import uuid4
+
+    async def body(h: Harness) -> None:
+        await h.ctx.queue.embed_revision(uuid4(), h.ctx.space_id)  # an older embed backlog
+        await h.ctx.queue.index_source(uuid4())
+        await h.ctx.queue.reconcile(1)
+        worker_id = await h.app.job_manager.register_worker()
+        fetched = []
+        while (job := await h.app.job_manager.fetch_job(None, worker_id)) is not None:
+            fetched.append(job.task_name)
+        await h.app.job_manager.unregister_worker(worker_id)
+        assert fetched == [
+            "ingest:index_source",
+            "ingest:reconcile_vault",
+            "ingest:embed_revision",
+        ]
+
+    run(db_url, tmp_path, body)
