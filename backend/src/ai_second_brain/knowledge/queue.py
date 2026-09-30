@@ -5,7 +5,7 @@ from typing import Protocol
 from uuid import UUID
 
 from procrastinate import App
-from procrastinate.exceptions import AlreadyEnqueued
+from procrastinate.exceptions import AlreadyEnqueued, UniqueViolation
 from procrastinate.types import JSONValue
 
 
@@ -46,6 +46,9 @@ class ProcrastinateQueue:
         )
         count = 0
         for job in stalled:
-            await self._app.job_manager.retry_job(job)
+            try:
+                await self._app.job_manager.retry_job(job)
+            except UniqueViolation:  # a twin with the same queueing lock is already waiting
+                continue
             count += 1
         return count

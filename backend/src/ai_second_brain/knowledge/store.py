@@ -245,3 +245,96 @@ async def clear_embed_error(conn: AsyncConnection, revision_id: UUID) -> None:
         "UPDATE source_revisions SET metadata = metadata - 'embed_error' WHERE id = %s",
         (revision_id,),
     )
+
+
+@dataclass(frozen=True)
+class LiveSource:
+    source_id: UUID
+    current_hash: bytes | None
+    size: int | None
+    mtime_ns: int | None
+
+
+async def live_sources(conn: AsyncConnection) -> dict[str, LiveSource]:
+    async with conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT s.id, s.external_ref, r.content_hash,"
+            " (r.metadata->>'size')::bigint AS size, (r.metadata->>'mtime_ns')::bigint AS mtime_ns"
+            " FROM sources s LEFT JOIN LATERAL ("
+            "   SELECT content_hash, metadata FROM source_revisions x WHERE x.source_id = s.id"
+            "   ORDER BY observed_at DESC LIMIT 1) r ON true"
+            " WHERE s.kind = 'obsidian' AND s.deleted_at IS NULL"
+        )
+        rows = await cur.fetchall()
+    return {
+        r["external_ref"]: LiveSource(
+            r["id"],
+            bytes(r["content_hash"]) if r["content_hash"] else None,
+            r["size"],
+            r["mtime_ns"],
+        )
+        for r in rows
+    }
+
+
+async def tombstone(conn: AsyncConnection, source_id: UUID) -> None:
+    await conn.execute(
+        "DELETE FROM chunks WHERE revision_id ="
+        " (SELECT current_revision_id FROM sources WHERE id = %s)",
+        (source_id,),
+    )
+    await conn.execute("UPDATE sources SET deleted_at = now() WHERE id = %s", (source_id,))
+
+
+async def path_taken(conn: AsyncConnection, rel: str) -> bool:
+    cur = await conn.execute(
+        "SELECT 1 FROM sources WHERE kind = 'obsidian' AND external_ref = %s", (rel,)
+    )
+    return await cur.fetchone() is not None
+
+
+async def move_source(conn: AsyncConnection, source_id: UUID, new_rel: str) -> None:
+    await conn.execute(
+        "UPDATE sources SET external_ref = %s, deleted_at = NULL WHERE id = %s",
+        (new_rel, source_id),
+    )
+
+
+async def pending_sources(conn: AsyncConnection) -> list[UUID]:
+    cur = await conn.execute(
+        "SELECT DISTINCT r.source_id FROM source_revisions r JOIN sources s ON s.id = r.source_id"
+        " WHERE r.state = 'pending' AND s.deleted_at IS NULL"
+    )
+    return [row[0] for row in await cur.fetchall()]
+
+
+async def revisions_missing_embeddings(conn: AsyncConnection, space_id: int) -> list[UUID]:
+    cur = await conn.execute(
+        "SELECT r.id FROM sources s JOIN source_revisions r ON r.id = s.current_revision_id"
+        " WHERE s.deleted_at IS NULL AND r.state = 'indexed'"
+        " AND coalesce(r.metadata->>'embed_error', '') <> 'embed_bad_response'"
+        " AND EXISTS (SELECT 1 FROM chunks c LEFT JOIN chunk_embeddings e"
+        "   ON e.chunk_id = c.id AND e.space_id = %s"
+        "   WHERE c.revision_id = r.id AND e.chunk_id IS NULL)",
+        (space_id,),
+    )
+    return [row[0] for row in await cur.fetchall()]
+
+
+async def start_run(conn: AsyncConnection, trigger: str) -> int:
+    cur = await conn.execute(
+        "INSERT INTO ingest_runs (trigger, started_at) VALUES (%s, now()) RETURNING id", (trigger,)
+    )
+    row = await cur.fetchone()
+    if row is None:
+        raise RuntimeError("ingest run was not created")
+    return row[0]
+
+
+async def finish_run(
+    conn: AsyncConnection, run_id: int, outcome: str, counts: dict[str, int]
+) -> None:
+    await conn.execute(
+        "UPDATE ingest_runs SET finished_at = now(), outcome = %s, counts = %s WHERE id = %s",
+        (outcome, Jsonb(counts), run_id),
+    )

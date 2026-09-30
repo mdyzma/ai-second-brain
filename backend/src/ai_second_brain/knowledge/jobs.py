@@ -82,7 +82,9 @@ async def embed_revision_task(context: JobContext, revision_id: str, space_id: i
 
 @blueprint.task(name="reconcile_vault", queue=INGEST_QUEUE, pass_context=True)
 async def reconcile_vault_task(context: JobContext, run_id: int) -> None:
-    raise NotImplementedError  # Task 8
+    from ai_second_brain.vault.reconcile import reconcile
+
+    await reconcile(_ctx(context), trigger="manual", run_id=run_id)
 
 
 def create_job_app(database_url: str) -> App:
