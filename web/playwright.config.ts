@@ -9,6 +9,7 @@ const testEnv = parseEnv(readFileSync(join(root, ".env.test"), "utf8"));
 const apiPort = testEnv.SB_API_PORT ?? "8001";
 const webPort = testEnv.SB_WEB_PORT ?? "5174";
 const baseURL = `http://localhost:${webPort}`;
+const fixtureVault = join(root, "web", "tests", "e2e", "fixtures", "vault");
 const fakeOllamaPort = "11501";
 const fakeOllamaURL = `http://127.0.0.1:${fakeOllamaPort}`;
 
@@ -29,6 +30,9 @@ const serverEnv = {
   SB_OLLAMA_ENDPOINTS: JSON.stringify([{ label: "e2e", url: fakeOllamaURL, model: "fake-model" }]),
   SB_CHAT_STATUS_TTL_SECONDS: "0",
   SB_ANTHROPIC_API_KEY: "",
+  SB_VAULT_PATH: fixtureVault,
+  SB_EMBED_URL: fakeOllamaURL,
+  SB_RECONCILE_MINUTES: "60",
   FAKE_OLLAMA_PORT: fakeOllamaPort,
 };
 
@@ -57,6 +61,19 @@ export default defineConfig({
       timeout: 60_000,
       // Linux CI hung on the default SIGKILL teardown; ask nicely, then force.
       gracefulShutdown: { signal: "SIGTERM", timeout: 5000 },
+    },
+    {
+      // The reset runs first in the same command so it always precedes the worker's startup
+      // reconcile (Playwright starts web servers before any globalSetup). The worker has no
+      // HTTP port, and Playwright refuses a url another entry already owns, so this entry is
+      // "started" once the reset script has printed its marker line.
+      command:
+        "uv run --directory ../backend python tests/e2e_reset.py && uv run --directory ../backend ai-second-brain worker",
+      wait: { stdout: /e2e database reset/ },
+      env: serverEnv,
+      reuseExistingServer: false,
+      timeout: 60_000,
+      gracefulShutdown: { signal: "SIGTERM", timeout: 10000 },
     },
     {
       command: "pnpm exec vite",

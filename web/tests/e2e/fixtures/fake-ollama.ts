@@ -59,6 +59,19 @@ const server = createServer(async (req, res) => {
     );
     return;
   }
+  if (path === "/api/embed" && req.method === "POST") {
+    const body = JSON.parse(await readBody(req)) as { input: string[] | string };
+    const inputs = Array.isArray(body.input) ? body.input : [body.input];
+    const embeddings = inputs.map((text) => {
+      let seed = 0;
+      for (const ch of text) seed = (seed * 31 + (ch.codePointAt(0) ?? 0)) >>> 0;
+      const v = Array.from({ length: 1024 }, (_, i) => Math.sin(seed + i));
+      const norm = Math.hypot(...v) || 1;
+      return v.map((x) => x / norm);
+    });
+    json(res, 200, { embeddings });
+    return;
+  }
   res.writeHead(404).end();
 });
 
