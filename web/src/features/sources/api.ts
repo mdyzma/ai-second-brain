@@ -73,12 +73,24 @@ export function listQueryOptions(filters: Filters) {
   });
 }
 
-export type ActionResult = { ok: true } | { ok: false; status: number };
+/** `detail` is the API's error code (e.g. "scan_already_queued"), never shown as-is. */
+export type ActionResult =
+  | { ok: true }
+  | { ok: false; status: number; detail?: string | undefined };
 
-async function post(call: () => Promise<{ response: Response }>): Promise<ActionResult> {
+/** The string error code in an API error body, if any. */
+export function detailOf(body: unknown): string | undefined {
+  if (typeof body !== "object" || body === null || !("detail" in body)) return undefined;
+  return typeof body.detail === "string" ? body.detail : undefined;
+}
+
+async function post(
+  call: () => Promise<{ response: Response; error?: unknown }>,
+): Promise<ActionResult> {
   try {
-    const { response } = await call();
-    return response.status === 202 ? { ok: true } : { ok: false, status: response.status };
+    const { response, error } = await call();
+    if (response.status === 202) return { ok: true };
+    return { ok: false, status: response.status, detail: detailOf(error) };
   } catch {
     return { ok: false, status: 0 };
   }

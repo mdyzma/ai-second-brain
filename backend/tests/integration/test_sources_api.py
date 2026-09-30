@@ -172,7 +172,7 @@ def test_auth_and_csrf(make_api: Callable[..., TestClient]) -> None:
 
 
 class _BrokenQueue:
-    async def reconcile(self, run_id: int) -> None:
+    async def reconcile(self, run_id: int) -> bool:
         raise ConnectionError("queue down")
 
 
@@ -348,3 +348,20 @@ def test_manual_run_is_picked_up_only_when_the_worker_starts_it(
     run_async(work())
     done = client.get("/api/sources/summary").json()["last_run"]
     assert done["picked_up_at"] is not None and done["finished_at"] is not None
+
+
+class _BusyQueue:
+    async def reconcile(self, run_id: int) -> bool:
+        return False  # a reconcile job is already waiting
+
+
+def test_reconcile_already_queued_is_409_and_finishes_the_run(
+    make_api: Callable[..., TestClient], db_url: str, tmp_path: Path
+) -> None:
+    client = make_api(vault_path=str(tmp_path))
+    client.app.state.ingest.queue = _BusyQueue()  # type: ignore[attr-defined]
+    response = client.post("/api/sources/reconcile", headers=SAME_ORIGIN)
+    assert (response.status_code, response.json()) == (409, {"detail": "scan_already_queued"})
+    with psycopg.connect(db_url) as conn:
+        rows = conn.execute("SELECT outcome, finished_at IS NOT NULL FROM ingest_runs").fetchall()
+    assert rows == [("error:already_queued", True)]

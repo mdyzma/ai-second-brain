@@ -106,7 +106,7 @@ async def reconcile_vault(request: Request) -> ReconcileQueued:
     async with pool.connection() as conn:
         run_id = await store.start_run(conn, "manual")
     try:
-        await queue.reconcile(run_id)
+        queued = await queue.reconcile(run_id)
     except Exception as error:
         logger.warning("reconcile_queue_error type=%s", type(error).__name__)
         async with pool.connection() as conn:  # never leave an orphaned 'running' row
@@ -114,4 +114,8 @@ async def reconcile_vault(request: Request) -> ReconcileQueued:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, detail="database_unavailable"
         ) from error
+    if not queued:  # a scan is already waiting; this run would never be picked up
+        async with pool.connection() as conn:
+            await store.finish_run(conn, run_id, "error:already_queued", {})
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="scan_already_queued")
     return ReconcileQueued(run_id=run_id)

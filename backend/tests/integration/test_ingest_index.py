@@ -289,3 +289,11 @@ def test_index_and_reconcile_jobs_jump_the_embed_backlog(db_url: str, tmp_path: 
         ]
 
     run(db_url, tmp_path, body)
+
+
+def test_reconcile_reports_an_already_queued_scan(db_url: str, tmp_path: Path) -> None:
+    async def body(h: Harness) -> None:
+        assert await h.ctx.queue.reconcile(1) is True
+        assert await h.ctx.queue.reconcile(2) is False
+
+    run(db_url, tmp_path, body)

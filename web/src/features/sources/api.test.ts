@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HttpError, pollInterval, rowsOf, statusOf } from "./api";
+import { detailOf, HttpError, pollInterval, rowsOf, statusOf } from "./api";
 
 const r = (id: string) => ({
   id,
@@ -40,5 +40,14 @@ describe("statusOf", () => {
   it("reads an HttpError status and maps anything else to 0", () => {
     expect(statusOf(new HttpError(503))).toBe(503);
     expect(statusOf(new TypeError("Failed to fetch"))).toBe(0);
+  });
+});
+
+describe("detailOf", () => {
+  it("reads a string detail code from an error body, and nothing else", () => {
+    expect(detailOf({ detail: "scan_already_queued" })).toBe("scan_already_queued");
+    expect(detailOf({ detail: [{ msg: "x" }] })).toBeUndefined();
+    expect(detailOf(undefined)).toBeUndefined();
+    expect(detailOf("text")).toBeUndefined();
   });
 });

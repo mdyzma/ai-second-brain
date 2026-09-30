@@ -17,7 +17,10 @@ EMBED_PRIORITY = 0
 class JobQueue(Protocol):
     async def index_source(self, source_id: UUID) -> None: ...
     async def embed_revision(self, revision_id: UUID, space_id: int) -> None: ...
-    async def reconcile(self, run_id: int) -> None: ...
+    async def reconcile(self, run_id: int) -> bool:
+        """False when a reconcile job is already waiting (its queueing lock is taken)."""
+        ...
+
     async def reset_stalled(self, seconds_since_heartbeat: int) -> int: ...
 
 
@@ -25,13 +28,14 @@ class ProcrastinateQueue:
     def __init__(self, app: App) -> None:
         self._app = app
 
-    async def _defer(self, task: str, lock: str | None, priority: int, **kwargs: JSONValue) -> None:
+    async def _defer(self, task: str, lock: str | None, priority: int, **kwargs: JSONValue) -> bool:
         try:
             await self._app.configure_task(task, queueing_lock=lock, priority=priority).defer_async(
                 **kwargs
             )
         except AlreadyEnqueued:
-            pass
+            return False
+        return True
 
     async def index_source(self, source_id: UUID) -> None:
         await self._defer(
@@ -47,8 +51,10 @@ class ProcrastinateQueue:
             space_id=space_id,
         )
 
-    async def reconcile(self, run_id: int) -> None:
-        await self._defer("ingest:reconcile_vault", "reconcile", INGEST_PRIORITY, run_id=run_id)
+    async def reconcile(self, run_id: int) -> bool:
+        return await self._defer(
+            "ingest:reconcile_vault", "reconcile", INGEST_PRIORITY, run_id=run_id
+        )
 
     async def reset_stalled(self, seconds_since_heartbeat: int) -> int:
         stalled = await self._app.job_manager.get_stalled_jobs(

@@ -81,10 +81,12 @@ export function retryMessage(status: number): string {
 }
 
 /** Plain-language text for a failed Scan now. */
-export function scanMessage(status: number): string {
+export function scanMessage(status: number, detail?: string): string {
   switch (status) {
     case 409:
-      return "No vault is configured, so there is nothing to scan.";
+      return detail === "scan_already_queued"
+        ? "A scan is already queued."
+        : "No vault is configured, so there is nothing to scan.";
     case 401:
       return SESSION_ENDED;
     case 503:

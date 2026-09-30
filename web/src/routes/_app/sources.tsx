@@ -73,7 +73,7 @@ function SourcesRoute() {
           setNotice(null);
           scan.start();
         } else {
-          setNotice(scanMessage(result.status));
+          setNotice(scanMessage(result.status, result.detail));
         }
         await queryClient.invalidateQueries({ queryKey: sourcesKeys.summary });
       }}

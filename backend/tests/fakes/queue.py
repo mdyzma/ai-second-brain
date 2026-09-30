@@ -11,8 +11,9 @@ class RecordingQueue:
     async def embed_revision(self, revision_id: UUID, space_id: int) -> None:
         self.calls.append(("embed", (revision_id, space_id)))
 
-    async def reconcile(self, run_id: int) -> None:
+    async def reconcile(self, run_id: int) -> bool:
         self.calls.append(("reconcile", run_id))
+        return True
 
     async def reset_stalled(self, seconds_since_heartbeat: int) -> int:
         self.calls.append(("reset_stalled", seconds_since_heartbeat))

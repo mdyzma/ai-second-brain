@@ -85,6 +85,7 @@ describe("action messages", () => {
 
   it("maps scan statuses to calm messages", () => {
     expect(scanMessage(409)).toBe("No vault is configured, so there is nothing to scan.");
+    expect(scanMessage(409, "scan_already_queued")).toBe("A scan is already queued.");
     expect(scanMessage(503)).toBe("The database is unavailable. Try again in a moment.");
     expect(scanMessage(0)).toBe("Can't reach the server.");
     expect(scanMessage(500)).toBe("Couldn't start the scan. Try again.");
