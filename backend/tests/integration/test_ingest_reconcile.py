@@ -1,10 +1,12 @@
+import asyncio
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
+from ai_second_brain.vault import reconcile as reconcile_module
 from ai_second_brain.vault.paths import Vault, VaultWalkError
-from ai_second_brain.vault.reconcile import reconcile
+from ai_second_brain.vault.reconcile import apply_moves_and_deletes, reconcile
 
 from ..conftest import run_async
 from ..fakes.ollama import FakeOllama
@@ -207,5 +209,63 @@ def test_stalled_jobs_are_reset(db_url: str, tmp_path: Path, make_fake_ollama: M
         )
         _, counts = await reconcile(h.ctx, trigger="schedule")
         assert counts.stalled_reset == 1
+
+    run(db_url, tmp_path, fake.url, body)
+
+
+def test_revert_before_indexing_is_stable_and_still_moves(
+    db_url: str, tmp_path: Path, make_fake_ollama: MakeFake
+) -> None:
+    fake = make_fake_ollama()
+    vault = VaultBuilder(tmp_path)
+    vault.write("a.md", "wersja pierwsza")
+
+    async def body(h: Harness) -> None:
+        await reconcile(h.ctx, trigger="startup")
+        await h.drain()
+        vault.write("a.md", "wersja druga, dluzsza")
+        await reconcile(h.ctx, trigger="schedule")  # B observed, still pending
+        vault.write("a.md", "wersja pierwsza")  # revert to A before indexing
+        await reconcile(h.ctx, trigger="schedule")
+        _, counts = await reconcile(h.ctx, trigger="schedule")
+        assert counts.changed == 0
+        vault.rename("a.md", "b.md")
+        _, counts = await reconcile(h.ctx, trigger="schedule")
+        assert (counts.moved, counts.tombstoned, counts.new) == (1, 0, 0)
+
+    run(db_url, tmp_path, fake.url, body)
+
+
+def test_stale_deleted_key_is_skipped(
+    db_url: str, tmp_path: Path, make_fake_ollama: MakeFake
+) -> None:
+    fake = make_fake_ollama()
+    VaultBuilder(tmp_path).write("a.md", "alfa")
+
+    async def body(h: Harness) -> None:
+        await reconcile(h.ctx, trigger="startup")
+        result = await apply_moves_and_deletes(
+            h.ctx, {"gone.md": b"x" * 32}, {}, guard=True, allow_mass_delete=False
+        )
+        assert (result.moved, result.tombstoned) == (0, 0)
+        assert await live(h) == ["a.md"]
+
+    run(db_url, tmp_path, fake.url, body)
+
+
+def test_cancelled_reconcile_is_recorded_as_interrupted(
+    db_url: str, tmp_path: Path, make_fake_ollama: MakeFake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = make_fake_ollama()
+    VaultBuilder(tmp_path).write("a.md", "alfa")
+
+    async def body(h: Harness) -> None:
+        async def cancelled(conn: object) -> list[object]:
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(reconcile_module.store, "pending_sources", cancelled)
+        with pytest.raises(asyncio.CancelledError):
+            await reconcile(h.ctx, trigger="schedule")
+        assert (await last_run(h))["outcome"] == "interrupted"
 
     run(db_url, tmp_path, fake.url, body)

@@ -250,7 +250,7 @@ async def clear_embed_error(conn: AsyncConnection, revision_id: UUID) -> None:
 @dataclass(frozen=True)
 class LiveSource:
     source_id: UUID
-    current_hash: bytes | None
+    snapshot_hash: bytes | None
     size: int | None
     mtime_ns: int | None
 
@@ -262,7 +262,8 @@ async def live_sources(conn: AsyncConnection) -> dict[str, LiveSource]:
             " (r.metadata->>'size')::bigint AS size, (r.metadata->>'mtime_ns')::bigint AS mtime_ns"
             " FROM sources s LEFT JOIN LATERAL ("
             "   SELECT content_hash, metadata FROM source_revisions x WHERE x.source_id = s.id"
-            "   ORDER BY observed_at DESC LIMIT 1) r ON true"
+            "   AND (x.state = 'pending' OR x.id = s.current_revision_id)"
+            "   ORDER BY (x.state = 'pending') DESC, x.observed_at DESC LIMIT 1) r ON true"
             " WHERE s.kind = 'obsidian' AND s.deleted_at IS NULL"
         )
         rows = await cur.fetchall()

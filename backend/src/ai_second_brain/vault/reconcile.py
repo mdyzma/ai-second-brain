@@ -60,6 +60,8 @@ async def apply_moves_and_deletes(
 ) -> MoveResult:
     async with ctx.pool.connection() as conn:
         live = await store.live_sources(conn)
+    # the caller's snapshot may be older than ours; skip anything no longer live
+    deleted = {rel: digest for rel, digest in deleted.items() if rel in live}
     pairs, gone, rest = pair_moves(deleted, added)
     moved = 0
     async with ctx.pool.connection() as conn, conn.transaction():
@@ -108,7 +110,9 @@ async def reconcile(
             if rel in live and (live[rel].size, live[rel].mtime_ns) != (size, mtime)
         ]
         missing = {
-            rel: s.current_hash for rel, s in live.items() if rel not in on_disk and s.current_hash
+            rel: s.snapshot_hash
+            for rel, s in live.items()
+            if rel not in on_disk and s.snapshot_hash
         }
         added_hashes = {rel: h for rel in new_paths if (h := await _hash(ctx, rel)) is not None}
         result = await apply_moves_and_deletes(
@@ -141,12 +145,21 @@ async def reconcile(
             await ctx.queue.embed_revision(revision_id, ctx.space_id)
         counts.requeued_index, counts.requeued_embed = len(pending), len(missing_vectors)
         return outcome, counts
-    except Exception as error:
-        outcome = f"error:{type(error).__name__}"
+    except BaseException as error:
+        outcome = (
+            "interrupted"
+            if isinstance(error, asyncio.CancelledError)
+            else (f"error:{type(error).__name__}")
+        )
         raise
     finally:
-        async with ctx.pool.connection() as conn:
-            await store.finish_run(conn, run_id, outcome, counts.as_dict())
+        try:
+            async with ctx.pool.connection() as conn:
+                await store.finish_run(conn, run_id, outcome, counts.as_dict())
+        except Exception as record_error:  # never mask the original outcome
+            logger.error(
+                "reconcile run=%s could not record outcome: %s", run_id, type(record_error).__name__
+            )
         logger.info(
             "reconcile run=%s trigger=%s outcome=%s counts=%s",
             run_id,
