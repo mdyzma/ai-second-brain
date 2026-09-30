@@ -98,3 +98,19 @@ def test_exists_exact_matches_the_name_case(tmp_path: Path) -> None:
     assert not vault.exists_exact("missing.md")
     assert not vault.exists_exact("nowhere/note.md")
     assert not vault.exists_exact("folder.md")  # a directory is not a note
+
+
+def test_symlinked_note_is_not_part_of_the_vault(tmp_path: Path) -> None:
+    root = tmp_path / "vault"
+    root.mkdir()
+    secret = tmp_path / "secret.md"
+    secret.write_text("private", encoding="utf-8")
+    link = root / "x.md"
+    try:
+        link.symlink_to(secret)
+    except OSError:
+        pytest.skip("symlinks need extra privileges on this platform")
+    vault = Vault(root, ())
+    # a link could point outside the vault; the walk skips links, so events must too
+    assert vault.rel(link) is None
+    assert not vault.exists_exact("x.md")

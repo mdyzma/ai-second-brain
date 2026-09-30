@@ -33,6 +33,9 @@ class Vault:
     def rel(self, path: Path) -> str | None:
         # Resolve the parent only: on a case-insensitive disk resolving the file itself would
         # rewrite a case-only rename's `deleted Note.md` event to the new on-disk `note.md`.
+        # A symlink could point outside the vault; the walk skips links, and so do events.
+        if path.is_symlink():
+            return None
         try:
             relative = (path.parent.resolve() / path.name).relative_to(self.root.resolve())
         except ValueError:
@@ -46,7 +49,7 @@ class Vault:
         """The file exists under exactly this name's case (is_file() ignores case on NTFS/APFS)."""
         path = self.abs(rel)
         try:
-            return path.name in os.listdir(path.parent) and path.is_file()
+            return path.name in os.listdir(path.parent) and not path.is_symlink() and path.is_file()
         except OSError:
             return False
 
