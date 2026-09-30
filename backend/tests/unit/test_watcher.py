@@ -211,3 +211,9 @@ def test_rescan_requested_after_recovering_from_error(
         loop.close()
     assert len(starts) == 2
     assert rescans == [1]
+
+
+def test_vault_root_event_does_not_rescan(tmp_path: Path) -> None:
+    # macOS FSEvents can report the vault root itself, e.g. its creation just before watching
+    assert not classify(tmp_path, [(WfChange.added, ".")])
+    assert not classify(tmp_path, [(WfChange.modified, ".")])

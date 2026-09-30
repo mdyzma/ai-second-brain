@@ -33,7 +33,7 @@ def _classify(
     rescan = False
     for kind, raw in changes:
         rel = vault.rel(Path(raw))
-        if rel is None:
+        if rel is None or rel == ".":  # outside the vault, or the vault root itself
             continue
         if vault.is_candidate(rel):
             batch.append((_MAP[kind], rel))
