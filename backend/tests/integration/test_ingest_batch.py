@@ -147,3 +147,40 @@ def test_apply_batch_tombstones_a_failed_only_source(
         assert await live(h) == []
 
     run(db_url, tmp_path, fake, body)
+
+
+def test_run_worker_restarts_the_job_worker_and_stops_cleanly(
+    db_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from procrastinate import App
+
+    from ai_second_brain.config import Settings
+    from ai_second_brain.ingest.worker import run_worker
+
+    from ..conftest import TEST_HASH
+
+    values: dict[str, Any] = {
+        "DATABASE_URL": db_url,
+        "owner_password_hash": TEST_HASH,
+        "vault_path": None,
+    }
+    settings = Settings(_env_file=None, **values)  # pyright: ignore[reportCallIssue]
+    calls: list[int] = []
+
+    async def scenario() -> int:
+        stop = asyncio.Event()
+
+        async def fake_run_worker_async(self: App, **_: object) -> None:
+            calls.append(1)
+            if len(calls) == 1:
+                raise ConnectionError("database restarted")
+            stop.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(App, "run_worker_async", fake_run_worker_async)
+        return await asyncio.wait_for(run_worker(settings, stop_event=stop), 60)
+
+    assert run_async(scenario()) == 0
+    assert len(calls) == 2
