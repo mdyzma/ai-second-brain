@@ -1,0 +1,177 @@
+"""All SQL for sources, revisions, chunks, embeddings and ingest runs. Never logs content."""
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any, Literal
+from uuid import UUID
+
+from psycopg import AsyncConnection
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
+
+from ai_second_brain.vault.chunk import Chunk
+from ai_second_brain.vault.read import ReadNote
+
+ObserveAction = Literal["new", "unchanged", "requeued", "restored", "failed"]
+
+
+@dataclass(frozen=True)
+class ObserveOutcome:
+    source_id: UUID
+    action: ObserveAction
+    queue_index: bool
+
+
+@dataclass(frozen=True)
+class Claimed:
+    source_id: UUID
+    revision_id: UUID
+    raw_text: str
+    external_ref: str
+    previous_revision_id: UUID | None
+
+
+async def record_observation(conn: AsyncConnection, rel: str, note: ReadNote) -> ObserveOutcome:
+    meta = {"size": note.size, "mtime_ns": note.mtime_ns}
+    async with conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT id, current_revision_id, deleted_at FROM sources"
+            " WHERE kind = 'obsidian' AND external_ref = %s FOR UPDATE",
+            (rel,),
+        )
+        source = await cur.fetchone()
+        if source is None:
+            await cur.execute(
+                "INSERT INTO sources (kind, external_ref) VALUES ('obsidian', %s)"
+                " RETURNING id, current_revision_id, deleted_at",
+                (rel,),
+            )
+            source = await cur.fetchone()
+        if source is None:
+            raise RuntimeError("source row missing after insert")
+        was_deleted = source["deleted_at"] is not None
+        if was_deleted:
+            await cur.execute("UPDATE sources SET deleted_at = NULL WHERE id = %s", (source["id"],))
+        state = "failed" if note.error else "pending"
+        await cur.execute(
+            "INSERT INTO source_revisions"
+            " (source_id, content_hash, raw_text, metadata, state, error)"
+            " VALUES (%s, %s, %s, %s, %s, %s)"
+            " ON CONFLICT (source_id, content_hash) DO NOTHING RETURNING id",
+            (source["id"], note.content_hash, note.text, Jsonb(meta), state, note.error),
+        )
+        inserted = await cur.fetchone()
+        if inserted is not None:
+            if note.error:
+                return ObserveOutcome(source["id"], "failed", False)
+            return ObserveOutcome(source["id"], "new", True)
+        await cur.execute(
+            "SELECT id, state FROM source_revisions WHERE source_id = %s AND content_hash = %s",
+            (source["id"], note.content_hash),
+        )
+        existing = await cur.fetchone()
+        if existing is None:
+            raise RuntimeError("revision row vanished under lock")
+        is_current = existing["id"] == source["current_revision_id"]
+        if existing["state"] == "failed" and note.error:
+            return ObserveOutcome(source["id"], "unchanged", False)
+        if is_current and existing["state"] == "indexed" and not was_deleted:
+            await cur.execute(
+                "UPDATE source_revisions SET metadata = metadata || %s WHERE id = %s",
+                (Jsonb(meta), existing["id"]),
+            )
+            return ObserveOutcome(source["id"], "unchanged", False)
+        if existing["state"] == "pending" and not was_deleted:
+            return ObserveOutcome(source["id"], "new", True)
+        await cur.execute(
+            "UPDATE source_revisions SET state = 'pending', error = NULL, observed_at = now(),"
+            " metadata = metadata || %s WHERE id = %s",
+            (Jsonb(meta), existing["id"]),
+        )
+        action: ObserveAction = "restored" if was_deleted and is_current else "requeued"
+        return ObserveOutcome(source["id"], action, True)
+
+
+async def claim_pending(conn: AsyncConnection, source_id: UUID) -> Claimed | None:
+    async with conn.cursor(row_factory=dict_row) as cur:
+        await cur.execute(
+            "SELECT external_ref, current_revision_id FROM sources WHERE id = %s FOR UPDATE",
+            (source_id,),
+        )
+        source = await cur.fetchone()
+        if source is None:
+            return None
+        await cur.execute(
+            "SELECT id, raw_text FROM source_revisions WHERE source_id = %s AND state = 'pending'"
+            " ORDER BY observed_at DESC, id DESC",
+            (source_id,),
+        )
+        pending = await cur.fetchall()
+        if not pending:
+            return None
+        newest, older = pending[0], pending[1:]
+        if older:
+            await cur.execute(
+                "UPDATE source_revisions SET state = 'superseded' WHERE id = ANY(%s)",
+                ([r["id"] for r in older],),
+            )
+        previous = source["current_revision_id"]
+        return Claimed(
+            source_id,
+            newest["id"],
+            newest["raw_text"],
+            source["external_ref"],
+            previous if previous != newest["id"] else None,
+        )
+
+
+async def insert_chunks(conn: AsyncConnection, revision_id: UUID, chunks: Sequence[Chunk]) -> None:
+    async with conn.cursor() as cur:
+        await cur.execute("DELETE FROM chunks WHERE revision_id = %s", (revision_id,))
+        if chunks:
+            await cur.executemany(
+                "INSERT INTO chunks (revision_id, ordinal, heading_path, content)"
+                " VALUES (%s, %s, %s, %s)",
+                [(revision_id, c.ordinal, list(c.heading_path), c.content) for c in chunks],
+            )
+
+
+async def delete_revision_chunks(conn: AsyncConnection, revision_id: UUID) -> None:
+    await conn.execute("DELETE FROM chunks WHERE revision_id = %s", (revision_id,))
+
+
+async def supersede_revision(conn: AsyncConnection, revision_id: UUID) -> None:
+    await delete_revision_chunks(conn, revision_id)
+    await conn.execute(
+        "UPDATE source_revisions SET state = 'superseded' WHERE id = %s", (revision_id,)
+    )
+
+
+async def finish_index(
+    conn: AsyncConnection, source_id: UUID, revision_id: UUID, title: str, metadata: dict[str, Any]
+) -> None:
+    await conn.execute(
+        "UPDATE source_revisions SET state = 'indexed', indexed_at = now(), error = NULL,"
+        " metadata = (metadata - 'embed_error') || %s WHERE id = %s",
+        (Jsonb(metadata), revision_id),
+    )
+    await conn.execute(
+        "UPDATE sources SET current_revision_id = %s, title = %s WHERE id = %s",
+        (revision_id, title, source_id),
+    )
+
+
+async def mark_index_failed(conn: AsyncConnection, source_id: UUID) -> None:
+    await conn.execute(
+        "UPDATE source_revisions SET state = 'failed', error = 'index_error'"
+        " WHERE source_id = %s AND state = 'pending'",
+        (source_id,),
+    )
+
+
+async def default_space(conn: AsyncConnection) -> tuple[int, str, int]:
+    cur = await conn.execute("SELECT id, model, dims FROM embedding_spaces WHERE is_default")
+    row = await cur.fetchone()
+    if row is None:
+        raise RuntimeError("no default embedding space")
+    return row[0], row[1], row[2]

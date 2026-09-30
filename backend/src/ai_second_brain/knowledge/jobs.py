@@ -1,6 +1,21 @@
 """procrastinate job app. Job arguments are ids only; never note text, titles or paths."""
 
-from procrastinate import App, Blueprint, JobContext, PsycopgConnector
+import copy
+from typing import TYPE_CHECKING
+from uuid import UUID
+
+from procrastinate import (
+    App,
+    BaseRetryStrategy,
+    Blueprint,
+    JobContext,
+    PsycopgConnector,
+    RetryDecision,
+)
+from procrastinate.jobs import Job
+
+if TYPE_CHECKING:
+    from ai_second_brain.knowledge.context import IngestContext
 
 INGEST_QUEUE = "ingest"
 EMBED_QUEUE = "embed"
@@ -8,9 +23,47 @@ EMBED_QUEUE = "embed"
 blueprint = Blueprint()
 
 
-@blueprint.task(name="index_source", queue=INGEST_QUEUE, pass_context=True)
+INDEX_RETRY_SECONDS = (10, 30, 90)
+
+
+class ScheduleRetry(BaseRetryStrategy):
+    """Retry on the listed delays (seconds), optionally only for some exception types."""
+
+    def __init__(
+        self, schedule: tuple[int, ...], only: tuple[type[BaseException], ...] = ()
+    ) -> None:
+        self.schedule, self.only = schedule, only
+
+    def get_retry_decision(self, *, exception: BaseException, job: Job) -> RetryDecision | None:
+        if self.only and not isinstance(exception, self.only):
+            return None
+        if job.attempts >= len(self.schedule):
+            return None
+        return RetryDecision(retry_in={"seconds": self.schedule[job.attempts]})
+
+
+def _ctx(context: JobContext) -> "IngestContext":
+    return context.additional_context["ingest"]
+
+
+@blueprint.task(
+    name="index_source",
+    queue=INGEST_QUEUE,
+    pass_context=True,
+    retry=ScheduleRetry(INDEX_RETRY_SECONDS),
+)
 async def index_source_task(context: JobContext, source_id: str) -> None:
-    raise NotImplementedError  # Task 6
+    from ai_second_brain.knowledge import store
+    from ai_second_brain.knowledge.index import index_source
+
+    ctx = _ctx(context)
+    try:
+        await index_source(ctx, UUID(source_id))
+    except Exception:
+        if context.job.attempts >= len(INDEX_RETRY_SECONDS):
+            async with ctx.pool.connection() as conn:
+                await store.mark_index_failed(conn, UUID(source_id))
+        raise
 
 
 @blueprint.task(name="embed_revision", queue=EMBED_QUEUE, pass_context=True)
@@ -25,5 +78,6 @@ async def reconcile_vault_task(context: JobContext, run_id: int) -> None:
 
 def create_job_app(database_url: str) -> App:
     app = App(connector=PsycopgConnector(conninfo=database_url))
-    app.add_tasks_from(blueprint, namespace="ingest")
+    # add_tasks_from renames and rebinds the tasks it copies, so hand each app its own copy
+    app.add_tasks_from(copy.deepcopy(blueprint), namespace="ingest")
     return app
