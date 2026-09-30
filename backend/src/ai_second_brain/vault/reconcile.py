@@ -4,6 +4,8 @@ import asyncio
 import logging
 from dataclasses import asdict, dataclass
 
+import psycopg
+
 from ai_second_brain.knowledge import store
 from ai_second_brain.knowledge.context import IngestContext
 from ai_second_brain.vault.moves import guard_trips, pair_moves
@@ -12,6 +14,8 @@ from ai_second_brain.vault.read import read_note
 
 logger = logging.getLogger("ai_second_brain.ingest")
 STALLED_SECONDS = 600
+# pg_advisory_xact_lock key serialising the move + tombstone phase across processes
+MOVES_LOCK_KEY = 0x5EC0_B7A1_0001
 
 
 @dataclass
@@ -50,31 +54,44 @@ class MoveResult:
     to_observe: list[str]
 
 
+async def _still_on_disk(ctx: IngestContext, rel: str) -> bool:
+    return ctx.vault is not None and await asyncio.to_thread(ctx.vault.exists_exact, rel)
+
+
 async def apply_moves_and_deletes(
     ctx: IngestContext,
-    deleted: dict[str, bytes],
+    deleted: dict[str, bytes | None],
     added: dict[str, bytes],
     *,
     guard: bool,
     allow_mass_delete: bool,
 ) -> MoveResult:
-    async with ctx.pool.connection() as conn:
-        live = await store.live_sources(conn)
-    # the caller's snapshot may be older than ours; skip anything no longer live
-    deleted = {rel: digest for rel, digest in deleted.items() if rel in live}
-    pairs, gone, rest = pair_moves(deleted, added)
+    """`deleted` maps a vanished path to its snapshot hash (None never pairs: tombstone only)."""
     moved = 0
     async with ctx.pool.connection() as conn, conn.transaction():
+        # One mover at a time (watcher batch vs reconcile, any process), and a live snapshot
+        # that can't change under us.
+        await conn.execute("SELECT pg_advisory_xact_lock(%s)", (MOVES_LOCK_KEY,))
+        live = await store.live_sources(conn)
+        # the caller's snapshot may be older than ours; skip anything no longer live
+        deleted = {rel: digest for rel, digest in deleted.items() if rel in live}
+        pairs, gone, rest = pair_moves(deleted, added)
         for old, new in pairs:
-            if await store.path_taken(conn, new):
-                gone.append(old)
-                rest.append(new)
-                continue
-            await store.move_source(conn, live[old].source_id, new)
-            moved += 1
-    if guard and not allow_mass_delete and guard_trips(len(gone), len(live)):
-        return MoveResult(True, moved, len(gone), 0, sorted(rest))
-    async with ctx.pool.connection() as conn, conn.transaction():
+            if not await store.path_taken(conn, new):
+                try:
+                    async with conn.transaction():  # savepoint: a collision keeps the rest
+                        await store.move_source(conn, live[old].source_id, new)
+                except psycopg.errors.UniqueViolation:
+                    pass  # a concurrent observe took `new`; its DETAIL holds a path: never log it
+                else:
+                    moved += 1
+                    continue
+            gone.append(old)
+            rest.append(new)
+        # the listing may be stale: never tombstone a path that is back on disk
+        gone = [rel for rel in gone if not await _still_on_disk(ctx, rel)]
+        if guard and not allow_mass_delete and guard_trips(len(gone), len(live)):
+            return MoveResult(True, moved, len(gone), 0, sorted(rest))
         for rel in gone:
             await store.tombstone(conn, live[rel].source_id)
     return MoveResult(False, moved, len(gone), len(gone), sorted(rest))
@@ -95,6 +112,10 @@ async def reconcile(
         if not await asyncio.to_thread(ctx.vault.readable):
             outcome = "vault_unavailable"
             return outcome, counts
+        # A source that became live while we walked (a watcher batch observed or moved it) is
+        # absent from the listing but not missing: only sources live before the walk can be.
+        async with ctx.pool.connection() as conn:
+            live_before = await store.live_sources(conn)
         try:
             on_disk = await asyncio.to_thread(ctx.vault.walk)
         except OSError:  # includes VaultWalkError: a partial walk must never tombstone anything
@@ -109,10 +130,11 @@ async def reconcile(
             for rel, (size, mtime) in on_disk.items()
             if rel in live and (live[rel].size, live[rel].mtime_ns) != (size, mtime)
         ]
+        # snapshot-less (failed-only) sources can't pair as moves, but still get tombstoned
         missing = {
             rel: s.snapshot_hash
             for rel, s in live.items()
-            if rel not in on_disk and s.snapshot_hash
+            if rel in live_before and rel not in on_disk
         }
         added_hashes = {rel: h for rel in new_paths if (h := await _hash(ctx, rel)) is not None}
         result = await apply_moves_and_deletes(

@@ -16,7 +16,7 @@ def _shared_prefix(a: str, b: str) -> int:
 
 
 def pair_moves(
-    deleted: Mapping[str, bytes], added: Mapping[str, bytes]
+    deleted: Mapping[str, bytes | None], added: Mapping[str, bytes]
 ) -> tuple[list[tuple[str, str]], list[str], list[str]]:
     remaining = dict(deleted)
     pairs: list[tuple[str, str]] = []

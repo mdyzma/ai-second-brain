@@ -131,3 +131,19 @@ def test_apply_batch_case_only_rename_is_a_move(
         ]
 
     run(db_url, tmp_path, fake, body)
+
+
+def test_apply_batch_tombstones_a_failed_only_source(
+    db_url: str, tmp_path: Path, make_fake_ollama: MakeFake
+) -> None:
+    fake = make_fake_ollama()
+    vault = VaultBuilder(tmp_path)
+    vault.write("big.md", "x" * 3_000_000)
+
+    async def body(h: Harness) -> None:
+        await reconcile(h.ctx, trigger="startup")
+        vault.delete("big.md")
+        await apply_batch(h.ctx, [("deleted", "big.md")])
+        assert await live(h) == []
+
+    run(db_url, tmp_path, fake, body)

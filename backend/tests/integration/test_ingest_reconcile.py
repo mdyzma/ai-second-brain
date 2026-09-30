@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from ai_second_brain.vault import reconcile as reconcile_module
+from ai_second_brain.vault.observe import observe
 from ai_second_brain.vault.paths import Vault, VaultWalkError
 from ai_second_brain.vault.reconcile import apply_moves_and_deletes, reconcile
 
@@ -267,5 +268,96 @@ def test_cancelled_reconcile_is_recorded_as_interrupted(
         with pytest.raises(asyncio.CancelledError):
             await reconcile(h.ctx, trigger="schedule")
         assert (await last_run(h))["outcome"] == "interrupted"
+
+    run(db_url, tmp_path, fake.url, body)
+
+
+def test_note_observed_during_the_walk_is_not_tombstoned(
+    db_url: str, tmp_path: Path, make_fake_ollama: MakeFake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = make_fake_ollama()
+    vault = VaultBuilder(tmp_path)
+    vault.write("a.md", "alfa")
+    real_walk = Vault.walk
+
+    async def body(h: Harness) -> None:
+        loop = asyncio.get_running_loop()
+
+        def stale_walk(self: Vault) -> dict[str, tuple[int, int]]:
+            listing = real_walk(self)  # taken before the note exists
+            vault.write("Ideas/New.md", "nowy pomysł")
+            # the watcher records it while the walk is still running
+            asyncio.run_coroutine_threadsafe(observe(h.ctx, "Ideas/New.md"), loop).result(10)
+            return listing
+
+        monkeypatch.setattr(Vault, "walk", stale_walk)
+        outcome, counts = await reconcile(h.ctx, trigger="schedule")
+        assert (outcome, counts.tombstoned) == ("ok", 0)
+        assert set(await live(h)) == {"Ideas/New.md", "a.md"}
+
+    run(db_url, tmp_path, fake.url, body)
+
+
+def test_a_path_back_on_disk_is_not_tombstoned(
+    db_url: str, tmp_path: Path, make_fake_ollama: MakeFake
+) -> None:
+    fake = make_fake_ollama()
+    VaultBuilder(tmp_path).write("a.md", "alfa")
+
+    async def body(h: Harness) -> None:
+        await reconcile(h.ctx, trigger="startup")
+        [row] = await h.rows("SELECT content_hash FROM source_revisions")
+        result = await apply_moves_and_deletes(
+            h.ctx, {"a.md": bytes(row["content_hash"])}, {}, guard=True, allow_mass_delete=False
+        )
+        assert result.tombstoned == 0
+        assert await live(h) == ["a.md"]
+
+    run(db_url, tmp_path, fake.url, body)
+
+
+def test_failed_only_source_is_tombstoned_when_deleted(
+    db_url: str, tmp_path: Path, make_fake_ollama: MakeFake
+) -> None:
+    fake = make_fake_ollama()
+    vault = VaultBuilder(tmp_path)
+    vault.write("big.md", "x" * 3_000_000)
+    vault.write("keep.md", "zostaje")
+
+    async def body(h: Harness) -> None:
+        await reconcile(h.ctx, trigger="startup")
+        vault.delete("big.md")
+        outcome, counts = await reconcile(h.ctx, trigger="schedule")
+        assert (outcome, counts.tombstoned) == ("ok", 1)
+        assert await live(h) == ["keep.md"]
+
+    run(db_url, tmp_path, fake.url, body)
+
+
+def test_move_onto_a_path_taken_meanwhile_is_unpaired(
+    db_url: str, tmp_path: Path, make_fake_ollama: MakeFake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ai_second_brain.knowledge import store
+
+    fake = make_fake_ollama()
+    vault = VaultBuilder(tmp_path)
+    vault.write("a.md", "ta sama treść")
+
+    async def body(h: Harness) -> None:
+        await reconcile(h.ctx, trigger="startup")
+        # an old tombstoned row holds b.md, and the check-then-act gap lets the move collide
+        await h.rows(
+            "INSERT INTO sources (kind, external_ref, deleted_at)"
+            " VALUES ('obsidian', 'b.md', now())"
+        )
+
+        async def never_taken(conn: object, rel: str) -> bool:
+            return False
+
+        monkeypatch.setattr(store, "path_taken", never_taken)
+        vault.rename("a.md", "b.md")
+        outcome, counts = await reconcile(h.ctx, trigger="schedule")
+        assert (outcome, counts.moved, counts.tombstoned) == ("ok", 0, 1)
+        assert await live(h) == ["b.md"]
 
     run(db_url, tmp_path, fake.url, body)

@@ -298,7 +298,8 @@ async def tombstone(conn: AsyncConnection, source_id: UUID) -> None:
         await delete_revision_chunks(conn, row[0])
     # A queued index job must find nothing to claim; a restore re-pends a matching revision.
     await conn.execute(
-        "UPDATE source_revisions SET state = 'superseded' WHERE source_id = %s AND state = 'pending'",
+        "UPDATE source_revisions SET state = 'superseded'"
+        " WHERE source_id = %s AND state = 'pending'",
         (source_id,),
     )
     await conn.execute("UPDATE sources SET deleted_at = now() WHERE id = %s", (source_id,))

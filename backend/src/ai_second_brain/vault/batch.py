@@ -25,10 +25,8 @@ async def apply_batch(ctx: IngestContext, changes: list[tuple[Change, str]]) -> 
     touched = {rel for _, rel in changes if exists[rel]}
     async with ctx.pool.connection() as conn:
         live = await store.live_sources(conn)
-    deleted: dict[str, bytes] = {}
-    for rel in deleted_rels:
-        if rel in live and (snapshot := live[rel].snapshot_hash):
-            deleted[rel] = snapshot
+    # a failed-only source has no snapshot: it can't pair as a move, but is still tombstoned
+    deleted = {rel: live[rel].snapshot_hash for rel in deleted_rels if rel in live}
     new_hashes: dict[str, bytes] = {}
     for rel in sorted(touched - set(live)):
         try:
