@@ -45,6 +45,7 @@ class OllamaBehaviour:
     embed_nonfinite: bool = False
     embed_fail_on_call: int | None = None  # 1-based call number that returns 500
     embed_delay: float = 0.0
+    embed_raw_vector: list[Any] | None = None  # replaces the first vector verbatim
 
 
 def fake_vector(text: str, dims: int = 1024) -> list[float]:
@@ -102,6 +103,8 @@ class FakeOllama:
             vectors += [fake_vector("extra", b.embed_dims)] * b.embed_count_delta
         if b.embed_nonfinite and vectors:
             vectors[0] = [float("nan")] * b.embed_dims
+        if b.embed_raw_vector is not None and vectors:
+            vectors[0] = b.embed_raw_vector
         payload = json.dumps({"model": body["model"], "embeddings": vectors})  # allows NaN
         return Response(payload, media_type="application/json")
 

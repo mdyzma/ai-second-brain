@@ -58,11 +58,20 @@ class Embedder:
             raise EmbedError("embed_bad_response") from None
         if not isinstance(vectors, list) or len(vectors) != len(texts):
             raise EmbedError("embed_bad_response")
-        for vector in vectors:
-            if (
-                not isinstance(vector, list)
-                or len(vector) != self.dims
-                or not all(isinstance(v, int | float) and math.isfinite(v) for v in vector)
-            ):
+        return [self._checked(vector) for vector in vectors]
+
+    def _checked(self, vector: object) -> list[float]:
+        if not isinstance(vector, list) or len(vector) != self.dims:
+            raise EmbedError("embed_bad_response")
+        values: list[float] = []
+        for v in vector:
+            if isinstance(v, bool) or not isinstance(v, int | float):
                 raise EmbedError("embed_bad_response")
-        return [[float(v) for v in vector] for vector in vectors]
+            try:
+                number = float(v)
+            except OverflowError:
+                raise EmbedError("embed_bad_response") from None
+            if not math.isfinite(number):
+                raise EmbedError("embed_bad_response")
+            values.append(number)
+        return values

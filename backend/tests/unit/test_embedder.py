@@ -45,6 +45,8 @@ def test_embeds_batch_in_order(make_fake_ollama: MakeFake) -> None:
         ({"embed_count_delta": -1}, "embed_bad_response"),
         ({"embed_nonfinite": True}, "embed_bad_response"),
         ({"embed_status": 400, "embed_error_text": "bad"}, "embed_bad_response"),
+        ({"embed_raw_vector": [True] * 1024}, "embed_bad_response"),
+        ({"embed_raw_vector": [10**400] * 1024}, "embed_bad_response"),
         ({"embed_status": 307}, "embed_bad_response"),
         ({"embed_delay": 2.0}, "embed_unreachable"),
     ],
