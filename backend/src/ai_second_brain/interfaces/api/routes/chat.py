@@ -1,11 +1,14 @@
+import inspect
+from collections.abc import AsyncGenerator
 from dataclasses import asdict
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
+from starlette.types import Receive, Scope, Send
 
-from ai_second_brain.chat.events import TurnEventStream
+from ai_second_brain.chat.events import TurnEvent, TurnEventStream
 from ai_second_brain.chat.models import ChatMode, ChatSession
 from ai_second_brain.chat.repository import ChatRepository
 from ai_second_brain.chat.service import ChatService
@@ -32,6 +35,38 @@ ERRORS: dict[int | str, dict[str, Any]] = {
 }
 NOT_FOUND: dict[int | str, dict[str, Any]] = {404: {"model": ErrorResponse}}
 CONFLICT: dict[int | str, dict[str, Any]] = {409: {"model": ErrorResponse}}
+
+
+class TurnResponse(StreamingResponse):
+    """Streaming response that owns a session reservation.
+
+    Starlette can drop a response before it iterates the body (client gone before
+    the start message is sent); the turn generator's own `finally` never runs then,
+    so the reservation is released here if the turn never started."""
+
+    def __init__(
+        self,
+        turn: AsyncGenerator[TurnEvent, None],
+        content: AsyncGenerator[str, None],
+        chat: ChatService,
+        session_id: UUID,
+    ) -> None:
+        super().__init__(
+            content,
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
+        self._turn = turn
+        self._chat = chat
+        self._session_id = session_id
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            if inspect.getasyncgenstate(self._turn) == inspect.AGEN_CREATED:
+                self._chat.release(self._session_id)
+                await self._turn.aclose()
 
 
 def get_chat(request: Request) -> ChatService:
@@ -130,10 +165,9 @@ async def ask_turn(session_id: UUID, body: AskRequest, request: Request) -> Stre
     if session is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not_found")
     chat = get_chat(request)
-    if chat.is_busy(session_id):
+    if not chat.reserve(session_id):
         raise HTTPException(status.HTTP_409_CONFLICT, detail="turn_in_progress")
-    return StreamingResponse(
-        sse_stream(chat.run_turn(session, body.question), request.app.state.sse_ping_interval),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    turn = chat.run_turn(session, body.question, reserved=True)
+    return TurnResponse(
+        turn, sse_stream(turn, request.app.state.sse_ping_interval), chat, session_id
     )

@@ -60,13 +60,25 @@ class ChatService:
     def is_busy(self, session_id: UUID) -> bool:
         return session_id in self._active
 
+    def reserve(self, session_id: UUID) -> bool:
+        """Claim the session for a turn; False if one is already active."""
+        if session_id in self._active:
+            return False
+        self._active.add(session_id)
+        return True
+
+    def release(self, session_id: UUID) -> None:
+        self._active.discard(session_id)
+
     async def run_turn(
-        self, session: ChatSession, question: str
+        self, session: ChatSession, question: str, *, reserved: bool = False
     ) -> AsyncGenerator[TurnEvent, None]:
-        if session.id in self._active:
-            yield _error(ChatError("turn_in_progress", "chat"), session)
-            return
-        self._active.add(session.id)
+        """Run one turn. With `reserved=True` the caller already called `reserve`;
+        the turn still releases it when it ends."""
+        if not reserved:
+            if not self.reserve(session.id):
+                yield _error(ChatError("turn_in_progress", "chat"), session)
+                return
         started_at, started = self._clock(), self._timer()
         outcome, endpoint, model = "interrupted", "-", "-"
         try:
@@ -116,7 +128,7 @@ class ChatService:
             outcome = f"error:{error.code}"
             yield _error(error, session)
         finally:
-            self._active.discard(session.id)
+            self.release(session.id)
             logger.info(
                 "chat turn mode=%s endpoint=%s model=%s outcome=%s duration_ms=%d",
                 session.mode.value,

@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 
 import pytest
@@ -207,6 +207,34 @@ def test_second_turn_while_one_runs_is_rejected() -> None:
     run_async(scenario())
 
 
+def test_reserve_is_exclusive_and_a_reserved_turn_releases_when_done() -> None:
+    async def scenario() -> None:
+        service, repo = make_service()
+        session = await repo.create_session(ChatMode.PRIVATE)
+        assert service.reserve(session.id)
+        assert not service.reserve(session.id)
+        assert service.is_busy(session.id)
+        events = [e async for e in service.run_turn(session, "Q", reserved=True)]
+        assert isinstance(events[-1], DoneEvent)
+        assert not service.is_busy(session.id)
+        assert service.reserve(session.id)
+
+    run_async(scenario())
+
+
+def test_reserved_turn_closed_midway_releases_the_session() -> None:
+    async def scenario() -> None:
+        service, repo = make_service(local=StubPool(ScriptedProvider(("a", "b"))))
+        session = await repo.create_session(ChatMode.PRIVATE)
+        assert service.reserve(session.id)
+        stream = service.run_turn(session, "Q", reserved=True)
+        await anext(stream)
+        await stream.aclose()
+        assert not service.is_busy(session.id)
+
+    run_async(scenario())
+
+
 def test_interrupted_turn_saves_nothing_and_frees_the_session(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -282,3 +310,31 @@ def test_logs_carry_no_content(caplog: pytest.LogCaptureFixture) -> None:
     for secret in ("secret-question-4b2", "secret-answer-9c1", INJECTION, "notes/nas.md"):
         assert secret not in caplog.text
     assert "outcome=ok" in caplog.text
+
+
+def test_turn_response_never_started_releases_the_reservation() -> None:
+    from ai_second_brain.interfaces.api.routes.chat import TurnResponse
+
+    async def scenario() -> None:
+        service, repo = make_service()
+        session = await repo.create_session(ChatMode.PRIVATE)
+        assert service.reserve(session.id)
+        turn = service.run_turn(session, "Q", reserved=True)
+
+        async def body() -> AsyncGenerator[str, None]:
+            yield ""
+
+        response = TurnResponse(turn, body(), service, session.id)
+
+        async def gone(_message: dict[str, object]) -> None:
+            raise OSError("client gone")
+
+        async def receive() -> dict[str, object]:
+            return {"type": "http.disconnect"}
+
+        scope = {"type": "http", "asgi": {"spec_version": "2.4"}}
+        with pytest.raises(Exception):  # noqa: B017,PT011 - ClientDisconnect
+            await response(scope, receive, gone)  # type: ignore[arg-type]
+        assert not service.is_busy(session.id)
+
+    run_async(scenario())

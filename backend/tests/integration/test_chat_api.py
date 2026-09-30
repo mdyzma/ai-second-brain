@@ -3,6 +3,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack
 from typing import Any
+from uuid import UUID
 
 import psycopg
 import pytest
@@ -210,7 +211,10 @@ def test_second_turn_while_streaming_is_409(
     first: dict[str, Any] = {}
     thread = threading.Thread(target=lambda: first.update(r=ask(client, session["id"])))
     thread.start()
-    time.sleep(0.3)
+    deadline = time.monotonic() + 5
+    while not client.app.state.chat.is_busy(UUID(session["id"])):  # type: ignore[attr-defined]
+        assert time.monotonic() < deadline, "first turn never became busy"
+        time.sleep(0.01)
     second = ask(client, session["id"])
     thread.join(timeout=10)
     assert (second.status_code, second.json()) == (409, {"detail": "turn_in_progress"})
