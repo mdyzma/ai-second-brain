@@ -320,3 +320,31 @@ def test_retry_on_a_read_error_is_nothing_to_retry(
     with psycopg.connect(db_url) as conn:
         rows = conn.execute("SELECT state, error FROM source_revisions").fetchall()
     assert rows == [("failed", "too_large")]
+
+
+def test_manual_run_is_picked_up_only_when_the_worker_starts_it(
+    make_api: Callable[..., TestClient],
+    db_url: str,
+    tmp_path: Path,
+    make_fake_ollama: Callable[[], FakeOllama],
+) -> None:
+    fake = make_fake_ollama()
+    VaultBuilder(tmp_path).write("a.md", "x")
+    seed(db_url, tmp_path, fake.url)
+    client = make_api(vault_path=str(tmp_path))
+    assert client.get("/api/sources/summary").json()["last_run"]["picked_up_at"] is not None
+    run_id = client.post("/api/sources/reconcile", headers=SAME_ORIGIN).json()["run_id"]
+    queued = client.get("/api/sources/summary").json()["last_run"]
+    assert (queued["trigger"], queued["finished_at"], queued["picked_up_at"]) == (
+        "manual",
+        None,
+        None,
+    )
+
+    async def work() -> None:  # the worker picks the job up
+        async with ingest_harness(db_url, tmp_path, fake.url, fresh=False) as h:
+            await reconcile(h.ctx, trigger="manual", run_id=run_id)
+
+    run_async(work())
+    done = client.get("/api/sources/summary").json()["last_run"]
+    assert done["picked_up_at"] is not None and done["finished_at"] is not None

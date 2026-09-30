@@ -15,6 +15,7 @@ const BASE: SourcesSummary = {
   last_run: {
     trigger: "schedule",
     started_at: "2026-09-30T10:00:00Z",
+    picked_up_at: "2026-09-30T10:00:00Z",
     finished_at: "2026-09-30T10:00:02Z",
     outcome: "ok",
     counts: { changed: 3 },

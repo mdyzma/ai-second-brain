@@ -13,7 +13,7 @@ import {
 } from "@/features/sources/api";
 import { refreshMessage, retryMessage, scanMessage } from "@/features/sources/labels";
 import { SourcesScreen } from "@/features/sources/SourcesScreen";
-import { useScanQueue } from "@/features/sources/scan";
+import { serverScanning, useScanQueue } from "@/features/sources/scan";
 import type { Filters } from "@/features/sources/types";
 
 export const Route = createFileRoute("/_app/sources")({ component: SourcesRoute });
@@ -50,14 +50,13 @@ function SourcesRoute() {
       );
     return <p className="text-sm text-fg-muted">Loading…</p>;
   }
-  const serverScanning = lastRun?.trigger === "manual" && !lastRun.finished_at;
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["sources"] });
   return (
     <SourcesScreen
       summary={summary.data}
       rows={rowsOf(list.data)}
       hasMore={list.hasNextPage}
-      scanPending={serverScanning || scan.queued}
+      scanPending={serverScanning(lastRun) || scan.queued}
       notice={notice ?? scan.notice}
       refreshNote={summary.isError ? refreshMessage(statusOf(summary.error)) : null}
       listError={list.isError}

@@ -1,6 +1,7 @@
 import dataclasses
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -35,7 +36,7 @@ async def embedded(h: Harness) -> tuple[int, int]:
 
 
 def run(
-    db_url: str, root: Path, fake: FakeOllama, body: Callable[[Harness], object], **kw: object
+    db_url: str, root: Path, fake: FakeOllama, body: Callable[[Harness], object], **kw: Any
 ) -> None:
     async def scenario() -> None:
         async with ingest_harness(db_url, root, fake.url, **kw) as h:

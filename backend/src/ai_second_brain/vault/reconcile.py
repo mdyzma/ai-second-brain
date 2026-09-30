@@ -104,6 +104,7 @@ async def reconcile(
     async with ctx.pool.connection() as conn:
         if run_id is None:
             run_id = await store.start_run(conn, trigger)
+        await store.mark_picked_up(conn, run_id)  # a queued manual run is now running
     outcome = "ok"
     try:
         if ctx.vault is None:

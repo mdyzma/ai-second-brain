@@ -348,6 +348,8 @@ export interface components {
             finished_at: string | null;
             /** Outcome */
             outcome: string | null;
+            /** Picked Up At */
+            picked_up_at: string | null;
             /**
              * Started At
              * Format: date-time

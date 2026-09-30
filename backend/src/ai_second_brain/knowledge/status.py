@@ -84,7 +84,7 @@ async def summary(
     )
     last = await _one(
         conn,
-        "SELECT trigger, started_at, finished_at, outcome, counts FROM ingest_runs ORDER BY id DESC LIMIT 1",
+        "SELECT trigger, started_at, picked_up_at, finished_at, outcome, counts FROM ingest_runs ORDER BY id DESC LIMIT 1",
     )
     return {
         "vault": {"configured": vault is not None, "readable": readable},

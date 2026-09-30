@@ -296,6 +296,18 @@
             ],
             "title": "Outcome"
           },
+          "picked_up_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Picked Up At"
+          },
           "started_at": {
             "format": "date-time",
             "title": "Started At",
@@ -309,6 +321,7 @@
         "required": [
           "trigger",
           "started_at",
+          "picked_up_at",
           "finished_at",
           "outcome",
           "counts"

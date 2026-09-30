@@ -715,6 +715,7 @@ CREATE TABLE public.ingest_runs (
     finished_at timestamp with time zone,
     outcome text,
     counts jsonb DEFAULT '{}'::jsonb NOT NULL,
+    picked_up_at timestamp with time zone,
     CONSTRAINT ingest_runs_trigger_check CHECK ((trigger = ANY (ARRAY['startup'::text, 'schedule'::text, 'manual'::text, 'cli'::text])))
 );
 

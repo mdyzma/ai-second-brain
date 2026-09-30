@@ -350,6 +350,13 @@ async def start_run(conn: AsyncConnection, trigger: str) -> int:
     return row[0]
 
 
+async def mark_picked_up(conn: AsyncConnection, run_id: int) -> None:
+    await conn.execute(
+        "UPDATE ingest_runs SET picked_up_at = coalesce(picked_up_at, now()) WHERE id = %s",
+        (run_id,),
+    )
+
+
 async def finish_run(
     conn: AsyncConnection, run_id: int, outcome: str, counts: dict[str, int]
 ) -> None:

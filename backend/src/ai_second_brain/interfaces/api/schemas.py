@@ -111,6 +111,7 @@ class JobCounts(BaseModel):
 class IngestRun(BaseModel):
     trigger: str
     started_at: datetime
+    picked_up_at: datetime | None  # null: a manual run no worker has started yet
     finished_at: datetime | None
     outcome: str | None
     counts: dict[str, int]

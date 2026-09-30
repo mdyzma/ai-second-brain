@@ -53,8 +53,14 @@ class Harness:
 
 @asynccontextmanager
 async def ingest_harness(
-    db_url: str, vault_root: Path | None, embed_url: str | None, **overrides: Any
+    db_url: str,
+    vault_root: Path | None,
+    embed_url: str | None,
+    *,
+    fresh: bool = True,
+    **overrides: Any,
 ) -> AsyncIterator[Harness]:
+    """`fresh=False` keeps the database as it is (e.g. an API-created run row)."""
     values: dict[str, Any] = {
         "DATABASE_URL": db_url,
         "owner_password_hash": TEST_HASH,
@@ -66,8 +72,9 @@ async def ingest_harness(
     async with AsyncConnectionPool[AsyncConnection](
         db_url, min_size=1, max_size=4, open=False
     ) as pool:
-        async with pool.connection() as conn:
-            await conn.execute(TRUNCATE_ALL)
+        if fresh:
+            async with pool.connection() as conn:
+                await conn.execute(TRUNCATE_ALL)
         app = create_job_app(db_url)
         async with app.open_async(), create_http_client() as client:
             embedder = Embedder(embed_url, "bge-m3", 1024, client, FAST) if embed_url else None

@@ -4,8 +4,23 @@ export const SCAN_TIMEOUT_MS = 60_000;
 export const WORKER_NOT_PICKED_UP = "The worker hasn't picked this up yet.";
 
 export type Queued = { after: string | null; at: number };
-export type RunLike = { started_at: string; finished_at: string | null };
+export type RunLike = {
+  trigger: string;
+  started_at: string;
+  /** null while no worker has started the run: the API creates a manual run when queueing it. */
+  picked_up_at: string | null;
+  finished_at: string | null;
+};
 export type ScanStatus = "idle" | "pending" | "done" | "timed_out";
+
+/** A manual scan a worker is running now (a queued, unclaimed one doesn't count). */
+export function serverScanning(run: RunLike | null): boolean {
+  return run?.trigger === "manual" && run.picked_up_at !== null && !run.finished_at;
+}
+
+function runningSince(queued: Queued, lastRun: RunLike | null): boolean {
+  return lastRun !== null && lastRun.started_at !== queued.after && lastRun.picked_up_at !== null;
+}
 
 /** `after` is the started_at of the last run when the scan was queued; `at` is when. */
 export function scanStatus(
@@ -16,7 +31,7 @@ export function scanStatus(
   if (queued === null) return "idle";
   const newer = lastRun !== null && lastRun.started_at !== queued.after;
   if (newer && lastRun.finished_at) return "done";
-  if (newer) return "pending"; // picked up; a big vault can take minutes
+  if (runningSince(queued, lastRun)) return "pending"; // picked up; a big vault can take minutes
   return now - queued.at >= SCAN_TIMEOUT_MS ? "timed_out" : "pending";
 }
 
@@ -39,7 +54,7 @@ export function useScanQueue(lastRun: RunLike | null) {
       expire();
       return;
     }
-    if (lastRun !== null && lastRun.started_at !== queued.after) return; // running
+    if (runningSince(queued, lastRun)) return; // a worker has it: no timeout
     const timer = setTimeout(expire, queued.at + SCAN_TIMEOUT_MS - Date.now());
     return () => clearTimeout(timer);
   }, [queued, lastRun]);
