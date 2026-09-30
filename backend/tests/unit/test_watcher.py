@@ -1,7 +1,8 @@
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
+import pytest
 from watchfiles import Change as WfChange
 
 from ai_second_brain.runtime import new_event_loop
@@ -166,3 +167,47 @@ def test_folder_added_or_deleted_rescans(tmp_path: Path) -> None:
     (tmp_path / "moved").mkdir()
     assert classify(tmp_path, [(WfChange.deleted, "folder")])
     assert classify(tmp_path, [(WfChange.added, "moved")])
+
+
+def test_rescan_requested_after_recovering_from_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ai_second_brain.vault import watcher
+
+    starts: list[int] = []
+    rescans: list[int] = []
+
+    async def fake_awatch(
+        *_: object, stop_event: asyncio.Event, **__: object
+    ) -> AsyncIterator[set[tuple[WfChange, str]]]:
+        starts.append(1)
+        if len(starts) == 1:
+            raise OSError("share went away")
+        await stop_event.wait()
+        return
+        yield set()  # pragma: no cover - makes this an async generator
+
+    monkeypatch.setattr(watcher, "awatch", fake_awatch)
+
+    async def scenario() -> None:
+        stop = asyncio.Event()
+
+        async def handle(batch: list[tuple[Change, str]]) -> None:
+            pass
+
+        task = asyncio.create_task(
+            run_watcher(
+                Vault(tmp_path, EXCLUDES), handle, stop, on_rescan=lambda: rescans.append(1)
+            )
+        )
+        await asyncio.sleep(1.5)  # first backoff is 1 s
+        stop.set()
+        await asyncio.wait_for(task, 5)
+
+    loop = new_event_loop()
+    try:
+        loop.run_until_complete(scenario())
+    finally:
+        loop.close()
+    assert len(starts) == 2
+    assert rescans == [1]

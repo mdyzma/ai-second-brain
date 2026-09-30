@@ -57,7 +57,11 @@ async def run_watcher(
     on_rescan: Callable[[], None] | None = None,
 ) -> None:
     delay = 1.0
+    recovering = False
     while not stop_event.is_set():
+        if recovering and on_rescan is not None:
+            on_rescan()  # changes made while the watcher was down were never reported
+        recovering = False
         try:
             async for changes in awatch(
                 vault.root, stop_event=stop_event, debounce=debounce_ms, recursive=True
@@ -73,6 +77,7 @@ async def run_watcher(
                 delay = 1.0
         except Exception as error:  # vault vanished, permissions, handler failure
             logger.warning("watcher_error type=%s", type(error).__name__)
+            recovering = True
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=delay)
             except TimeoutError:
