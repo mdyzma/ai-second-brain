@@ -22,7 +22,7 @@
 **AI Second Brain** collects the things you know into one searchable memory: Obsidian notes, documents,
 invoices and contracts, email, git history, and the state of your home-lab machines. You can then ask it
 questions and it answers with sources. That is the goal; today the platform and a private chat exist.
-Private content is processed only by models running on your own machines (Ollama on your LAN), and a
+Private content is processed only by the Ollama endpoints you configure (on your own machines or LAN), and a
 cloud model is used only when you explicitly choose it. It never reads your notes.
 
 > **Status: Phase 1b "private chat" (see the latest release badge above).** The platform is in place: a secure single-user
