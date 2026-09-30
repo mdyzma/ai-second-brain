@@ -144,8 +144,9 @@ async def retry_source(
     """Returns what to queue: ('index', None), ('embed', current_revision_id), ('none'|'missing', None)."""
     row = await _one(
         conn,
-        "SELECT s.current_revision_id, s.deleted_at, lr.id AS latest_id, lr.state FROM sources s"
-        " LEFT JOIN LATERAL (SELECT id, state FROM source_revisions r WHERE r.source_id = s.id"
+        "SELECT s.current_revision_id, s.deleted_at, lr.id AS latest_id, lr.state, lr.error"
+        " FROM sources s"
+        " LEFT JOIN LATERAL (SELECT id, state, error FROM source_revisions r WHERE r.source_id = s.id"
         " ORDER BY observed_at DESC, id DESC LIMIT 1) lr ON true WHERE s.id = %s",
         (source_id,),
     )
@@ -154,6 +155,8 @@ async def retry_source(
     if row["deleted_at"] is not None:
         return "none", None
     if row["state"] == "failed":
+        if row["error"] != "index_error":
+            return "none", None  # too_large/encoding: only a changed file can fix it
         await conn.execute(
             "UPDATE source_revisions SET state = 'pending', error = NULL WHERE id = %s",
             (row["latest_id"],),

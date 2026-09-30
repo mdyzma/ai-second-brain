@@ -13,6 +13,7 @@ from ai_second_brain.vault.chunk import Chunk
 from ai_second_brain.vault.read import ReadNote
 
 ObserveAction = Literal["new", "unchanged", "requeued", "restored", "failed"]
+READ_ERRORS = ("too_large", "encoding")  # set when reading the file; the revision has no text
 
 
 @dataclass(frozen=True)
@@ -106,12 +107,19 @@ async def record_observation(conn: AsyncConnection, rel: str, note: ReadNote) ->
 async def claim_pending(conn: AsyncConnection, source_id: UUID) -> Claimed | None:
     async with conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
-            "SELECT external_ref, current_revision_id FROM sources WHERE id = %s FOR UPDATE",
+            "SELECT external_ref, current_revision_id, deleted_at FROM sources"
+            " WHERE id = %s FOR UPDATE",
             (source_id,),
         )
         source = await cur.fetchone()
-        if source is None:
-            return None
+        if source is None or source["deleted_at"] is not None:
+            return None  # a tombstoned note must never regain chunks; a restore re-pends it
+        # A read error has no text to index; only a changed file can clear it.
+        await cur.execute(
+            "UPDATE source_revisions SET state = 'failed'"
+            " WHERE source_id = %s AND state = 'pending' AND error = ANY(%s)",
+            (source_id, list(READ_ERRORS)),
+        )
         await cur.execute(
             "SELECT id, raw_text FROM source_revisions WHERE source_id = %s AND state = 'pending'"
             " ORDER BY observed_at DESC, id DESC",
@@ -279,9 +287,18 @@ async def live_sources(conn: AsyncConnection) -> dict[str, LiveSource]:
 
 
 async def tombstone(conn: AsyncConnection, source_id: UUID) -> None:
+    # Lock first, so a concurrent index_source can't swap in a revision whose chunks survive.
+    cur = await conn.execute(
+        "SELECT current_revision_id FROM sources WHERE id = %s FOR UPDATE", (source_id,)
+    )
+    row = await cur.fetchone()
+    if row is None:
+        return
+    if row[0] is not None:
+        await delete_revision_chunks(conn, row[0])
+    # A queued index job must find nothing to claim; a restore re-pends a matching revision.
     await conn.execute(
-        "DELETE FROM chunks WHERE revision_id ="
-        " (SELECT current_revision_id FROM sources WHERE id = %s)",
+        "UPDATE source_revisions SET state = 'superseded' WHERE source_id = %s AND state = 'pending'",
         (source_id,),
     )
     await conn.execute("UPDATE sources SET deleted_at = now() WHERE id = %s", (source_id,))

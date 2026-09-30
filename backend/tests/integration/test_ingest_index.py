@@ -225,3 +225,46 @@ def test_revert_to_indexed_supersedes_pending_edit(db_url: str, tmp_path: Path) 
         ]
 
     run(db_url, tmp_path, body)
+
+
+def test_tombstone_before_indexing_leaves_no_chunks(db_url: str, tmp_path: Path) -> None:
+    vault = VaultBuilder(tmp_path)
+    vault.write("gone.md", "# Gone\nusunięta notatka\n")
+
+    async def body(h: Harness) -> None:
+        observed = await observe(h.ctx, "gone.md")  # index job queued, not yet run
+        assert observed is not None
+        async with h.pool.connection() as conn, conn.transaction():
+            await store.tombstone(conn, observed.source_id)
+        await h.drain()
+        chunks = await h.rows(
+            "SELECT count(*) AS n FROM chunks c JOIN source_revisions r ON r.id = c.revision_id"
+            " WHERE r.source_id = %s",
+            observed.source_id,
+        )
+        assert chunks == [{"n": 0}]
+        [source] = await h.rows(
+            "SELECT current_revision_id FROM sources WHERE id = %s", observed.source_id
+        )
+        assert source["current_revision_id"] is None
+        revisions = await h.rows("SELECT state FROM source_revisions")
+        assert [r["state"] for r in revisions] == ["superseded"]
+
+    run(db_url, tmp_path, body)
+
+
+def test_claim_refuses_a_pending_revision_with_a_read_error(db_url: str, tmp_path: Path) -> None:
+    vault = VaultBuilder(tmp_path)
+    vault.write("big.md", "x" * 3_000_000)
+
+    async def body(h: Harness) -> None:
+        observed = await observe(h.ctx, "big.md")
+        assert observed is not None and observed.action == "failed"
+        await h.rows("UPDATE source_revisions SET state = 'pending'")  # e.g. an old retry
+        await index_source(h.ctx, observed.source_id)
+        revisions = await h.rows("SELECT state, error FROM source_revisions")
+        assert revisions == [{"state": "failed", "error": "too_large"}]
+        [source] = await h.rows("SELECT current_revision_id FROM sources")
+        assert source["current_revision_id"] is None
+
+    run(db_url, tmp_path, body)

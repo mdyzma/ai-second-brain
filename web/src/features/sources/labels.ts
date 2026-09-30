@@ -96,8 +96,12 @@ export function scanMessage(status: number): string {
   }
 }
 
+/** Read errors (too_large, encoding) have no text to index: only editing the file fixes them. */
+const READ_ERRORS = new Set(["too_large", "encoding"]);
+
 export function canRetry(row: SourceRow): boolean {
-  return row.state === "failed" || (row.state === "indexed" && row.embedded < row.chunks);
+  if (row.state === "failed") return !READ_ERRORS.has(row.error ?? "");
+  return row.state === "indexed" && row.embedded < row.chunks;
 }
 
 /** Note shown above a screen that still has older data when a background refresh failed. */

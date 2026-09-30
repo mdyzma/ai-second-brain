@@ -38,6 +38,11 @@ describe("canRetry", () => {
     expect(canRetry(row({ state: "pending" }))).toBe(false);
     expect(canRetry(row({ state: "deleted" }))).toBe(false);
   });
+  it("hides Retry for read errors, which only a changed file can fix", () => {
+    expect(canRetry(row({ state: "failed", error: "index_error" }))).toBe(true);
+    expect(canRetry(row({ state: "failed", error: "too_large" }))).toBe(false);
+    expect(canRetry(row({ state: "failed", error: "encoding" }))).toBe(false);
+  });
 });
 
 describe("refreshMessage", () => {

@@ -302,3 +302,21 @@ def test_unreachable_database_fails_the_open_quickly_and_can_retry() -> None:
         return time.monotonic() - start
 
     assert run_async(scenario()) < 10
+
+
+def test_retry_on_a_read_error_is_nothing_to_retry(
+    make_api: Callable[..., TestClient],
+    db_url: str,
+    tmp_path: Path,
+    make_fake_ollama: Callable[[], FakeOllama],
+) -> None:
+    VaultBuilder(tmp_path).write("big.md", "x" * 3_000_000)
+    seed(db_url, tmp_path, make_fake_ollama().url)
+    client = make_api(vault_path=str(tmp_path))
+    [row] = client.get("/api/sources").json()["items"]
+    assert (row["state"], row["error"]) == ("failed", "too_large")
+    response = client.post(f"/api/sources/{row['id']}/retry", headers=SAME_ORIGIN)
+    assert (response.status_code, response.json()) == (409, {"detail": "nothing_to_retry"})
+    with psycopg.connect(db_url) as conn:
+        rows = conn.execute("SELECT state, error FROM source_revisions").fetchall()
+    assert rows == [("failed", "too_large")]
