@@ -3,6 +3,7 @@
 import asyncio
 import copy
 import json
+import logging.config
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -133,4 +134,19 @@ def chat_smoke() -> None:
         typer.echo("No Ollama endpoints configured. Set SB_OLLAMA_ENDPOINTS in .env (see README).")
         raise typer.Exit(code=1)
     code = asyncio.run(_chat_smoke(settings), loop_factory=new_event_loop)
+    raise typer.Exit(code=code)
+
+
+@app.command()
+def worker() -> None:
+    """Run the ingestion worker (jobs + vault watcher + reconcile). Ctrl+C to stop."""
+    from ai_second_brain.ingest.worker import run_worker
+
+    try:
+        settings = get_settings()
+    except ValidationError as error:
+        typer.echo(f"Configuration error:\n{error}", err=True)
+        raise typer.Exit(code=1) from error
+    logging.config.dictConfig(build_log_config())
+    code = asyncio.run(run_worker(settings), loop_factory=new_event_loop)
     raise typer.Exit(code=code)

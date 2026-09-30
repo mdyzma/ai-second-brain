@@ -26,3 +26,7 @@ fmt:
 # Run the API (pass --reload for development)
 serve *args:
     uv run ai-second-brain serve {{ args }}
+
+# Run the ingestion worker (jobs, vault watcher, reconcile)
+worker:
+    uv run ai-second-brain worker

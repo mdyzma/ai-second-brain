@@ -37,10 +37,14 @@ setup: install
     just db::test-prepare
     @echo "Setup complete. Next: run 'just hash-password', paste the line into .env, then 'just dev'."
 
-# Run API (reload) and web dev server together; open http://localhost:5173
+# Run the ingestion worker alone
+worker:
+    just backend::worker
+
+# Run API (reload), web dev server and ingestion worker together; open http://localhost:5173
 dev:
     just db::up
-    pnpm exec concurrently --names api,web --prefix-colors blue,magenta --kill-others-on-fail "just backend::serve --reload" "just web::dev"
+    pnpm exec concurrently --names api,web,worker --prefix-colors blue,magenta,green --kill-others-on-fail "just backend::serve --reload" "just web::dev" "just backend::worker"
 
 # All static checks (backend, web, API client, DB schema)
 check:

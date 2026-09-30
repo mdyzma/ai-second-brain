@@ -1,0 +1,1 @@
+"""The ingestion worker process."""
