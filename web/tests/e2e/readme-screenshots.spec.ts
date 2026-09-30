@@ -30,3 +30,12 @@ test("ask screen", async ({ page, baseURL }) => {
   await expect(page.getByText("This is the fake e2e answer.")).toBeVisible();
   await page.screenshot({ path: "../docs/images/readme/ask.jpg", type: "jpeg", quality: 85 });
 });
+
+test("sources screen", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/sources");
+  await page.getByLabel("Password").fill("e2e-test-password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("table").getByText("Searchable")).toHaveCount(5, { timeout: 60_000 });
+  await page.screenshot({ path: "../docs/images/readme/sources.jpg", type: "jpeg", quality: 85 });
+});

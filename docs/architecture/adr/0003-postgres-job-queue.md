@@ -1,6 +1,6 @@
 # ADR-0003: Postgres-backed job queue (procrastinate) instead of Celery + Redis
 
-**Status:** Proposed
+**Status:** Accepted (2026-09-30)
 **Date:** 2026-09-29
 **Deciders:** Michal Dyzma
 
@@ -40,6 +40,14 @@ Option C is a valid fallback if procrastinate proves problematic; the job functi
 - Harder: must keep job payloads small (ids only, never content — also a privacy rule).
 - Revisit: if long GPU jobs need to run *on the workstation*, add a second worker there consuming a `gpu` queue.
 
+## Implementation notes (Phase 2a)
+
+- **Vendored schema.** procrastinate's schema is committed as a dbmate migration rather than applied by the library, so `db/schema.sql` stays the single source of truth.
+- **Queue after commit.** Jobs are deferred after the transaction that saves the revision commits, not inside it. A crash in between leaves a `pending` revision with no job, and the reconcile re-queues it.
+- **Stalled jobs.** Jobs carry a heartbeat; reconcile resets jobs stuck in `doing` for more than 10 minutes so a crashed worker's jobs are retried.
+- **Reconcile timer.** The scheduled reconcile runs inside the worker process (a periodic task every `SB_RECONCILE_MINUTES`, plus one at startup), not in an external scheduler.
+- **Queues.** `ingest` (parse, chunk and index a source) and `embed` (embed a revision's chunks for a space), concurrency 2. `nightly` and `hardware` (later `gpu`) follow with their phases.
+
 ## Action Items
 1. [ ] Spike: index + periodic task under procrastinate against the dev Compose DB.
-2. [ ] Define queues: `default`, `ingest`, `nightly`, `hardware` (later `gpu`).
+2. [x] Define queues: `ingest` and `embed` (Phase 2a); `nightly`, `hardware` (later `gpu`) follow with their phases.

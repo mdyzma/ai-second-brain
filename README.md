@@ -25,9 +25,9 @@ questions and it answers with sources. That is the goal; today the platform and 
 Private content is processed only by the Ollama endpoints you configure (on your own machines or LAN), and a
 cloud model is used only when you explicitly choose it. It never reads your notes.
 
-> **Status: Phase 1b "private chat" (see the latest release badge above).** The platform is in place: a secure single-user
+> **Status: Phase 2a "vault ingestion" (see the latest release badge above).** The platform is in place: a secure single-user
 > login, the web app shell, the API, the database, CI and automated releases, plus the Ask screen
-> for chatting with a local model. Your notes are not searchable yet. The knowledge
+> for chatting with a local model. Your Obsidian vault is indexed in the background, but you can't search it or use it in chat yet (Phase 2b). The knowledge
 > features arrive phase by phase; see the [roadmap](#roadmap). The screens show what each one
 > will do.
 
@@ -50,7 +50,8 @@ cloud model is used only when you explicitly choose it. It never reads your note
 
 | | |
 | --- | --- |
-| 💬 **Ask (private by default)** | Chat with a local Ollama model on your LAN; sources are shown before the answer; nothing is sent to the cloud. Cloud sessions (Anthropic) are an explicit, per-conversation opt-in and never read your notes. Retrieval arrives with Phase 2, so answers currently say "No matching local sources". |
+| 💬 **Ask (private by default)** | Chat with a local Ollama model on your LAN; sources are shown before the answer; nothing is sent to the cloud. Cloud sessions (Anthropic) are an explicit, per-conversation opt-in and never read your notes. Retrieval arrives with Phase 2b, so answers currently say "No matching local sources". |
+| 📚 **Vault ingestion** | The worker keeps an index of your Obsidian vault in Postgres (full-text immediately, bge-m3 vectors in the background), survives crashes and offline edits, and shows its state on the Sources screen. Search and using your notes in chat arrive in Phase 2b. |
 | 🔐 **Single-owner login** | argon2id password hash, server-side sessions (only a SHA-256 of the token is stored), HttpOnly `SameSite=Strict` cookie, same-origin check on every write, lockout after 5 failed attempts, and protection against open redirects. |
 | 🧭 **Web app shell** | React + TypeScript app with a sidebar on desktop and a bottom bar on phones. It has the eight screens of the product (Ask, Search, Projects, Digest, Review, Nodes, Sources, Settings) and a skip link, and it can be used from the keyboard alone. |
 | 🌗 **Light and dark themes** | Follows your system or your choice. Every colour comes from design tokens, a check keeps all text at WCAG AA contrast in both themes, and another check blocks hard-coded colours. |
@@ -63,6 +64,8 @@ cloud model is used only when you explicitly choose it. It never reads your note
 ## Screenshots
 
 ![Ask screen](docs/images/readme/ask.jpg)
+
+![Sources screen showing five indexed notes, all searchable, with embedding at 100%](docs/images/readme/sources.jpg)
 
 <table>
   <tr>
@@ -103,8 +106,9 @@ Each phase gets its own spec and plan before any code is written, in
 | --- | --- | --- |
 | 1a | Foundation: monorepo, login, app shell, database, CI, releases | ✅ v0.2.0 |
 | 1b | **Ask** privately: chat answered by a local model (Ollama), with sources shown first; settings | ✅ Done |
-| 2 | **Search** and **Sources**: durable Obsidian sync (watcher and nightly reconcile), hybrid vector and full-text search, quick capture | Planned |
-| 3 | Multilingual (Polish/English) embeddings, chosen by measured retrieval quality | Planned |
+| 2a | **Sources**: durable Obsidian ingestion (watcher, reconcile, bge-m3 embeddings), with its state on the Sources screen | ✅ Done |
+| 2b | **Search**, chat retrieval and quick capture: hybrid full-text and vector search, your notes in private chat, a capture box | Planned |
+| 3 | Embedding evaluation: bge-m3 against MiniLM/e5 on a Polish/English retrieval set; a new space only if it wins | Planned |
 | 4 | **Digest** and **Review**: nightly consolidation links notes to projects, people and machines; a morning digest; a review queue | Planned |
 | 5 | **Nodes**: see and wake your machines (RTX workstation, MacBook, Proxmox) with truthful online, offline and unknown states | Planned |
 | 6 | Paperwork and history: invoices and contracts from PDF, email archives, git history | Planned |
@@ -147,7 +151,10 @@ command from the repository root.
 
 | Command | What it does |
 | --- | --- |
-| `just dev` | API (auto-reload) and web app (Vite) together, with the database started first |
+| `just dev` | API (auto-reload), web app (Vite) and the ingestion worker together, with the database started first |
+| `just worker` | The ingestion worker alone (watches the vault, indexes and embeds) |
+| `just vault-scan` | One reconcile pass now; add `--allow-mass-delete` to override the mass-deletion guard |
+| `just vault-status` | Print the ingestion summary (notes, embedding progress, last scan) as text |
 | `just check` | Lint, format check, type checks, token contrast, hard-coded colours, API-client and schema freshness: the same as CI |
 | `just test` | Backend (unit and integration), web and helper-script tests |
 | `just test-unit` | Only the tests that need no database |
@@ -172,6 +179,9 @@ ai-second-brain/
 │   │   ├── runtime.py          Event loop that psycopg needs on Windows
 │   │   ├── auth/               Password hashing, login throttle, server-side sessions
 │   │   ├── chat/               Private/cloud routing, Ollama and Anthropic clients, conversations
+│   │   ├── vault/              Reading the vault: observe, parse, chunk, watcher, reconcile, moves and deletions
+│   │   ├── knowledge/          Sources, revisions, chunks and embeddings in Postgres; the index and embed jobs and the status summary
+│   │   ├── ingest/             The worker process (procrastinate queues, watcher, scheduled reconcile)
 │   │   └── interfaces/
 │   │       ├── api/            FastAPI app, routes (health, auth), cross-site check, API schemas
 │   │       └── cli/            `ai-second-brain serve | openapi | hash-password`
@@ -180,7 +190,7 @@ ai-second-brain/
 │   ├── src/
 │   │   ├── api/                Generated OpenAPI schema and client (never edited by hand)
 │   │   ├── design-system/      tokens.css (colours, fonts, radii), theme, UI primitives, app shell
-│   │   ├── features/           auth (session, login form, route guard), chat (Ask screen) and screens (placeholders)
+│   │   ├── features/           auth (session, login form, route guard), chat (Ask screen), sources (Sources screen) and screens (placeholders)
 │   │   └── routes/             File-based routes: /login and the protected app screens
 │   ├── scripts/                Contrast checker and hard-coded-colour guard for the design tokens
 │   └── tests/e2e/              Playwright browser tests
@@ -257,6 +267,37 @@ The app enforces routing, not the physical location of a URL: a "local" endpoint
 | `SB_CHAT_MAX_TOKENS` | `2048` | Maximum answer length |
 | `SB_CHAT_STATUS_TTL_SECONDS` | `10` | How long the endpoint status is cached |
 
+### Vault ingestion
+
+The worker indexes the Markdown notes of an Obsidian vault. It only reads the vault and never writes to it.
+Details are in the [Phase 2a spec](docs/superpowers/specs/2026-09-30-phase-2a-vault-ingestion-design.md).
+
+1. Set `SB_VAULT_PATH` (an absolute path) and, if needed, `SB_VAULT_EXCLUDE` in `.env`.
+2. On the embedding host run `ollama pull bge-m3`. Set `SB_EMBED_URL` if embedding runs on a different host from chat.
+3. Run `just db::migrate`, then `just dev`. The worker starts and scans the vault.
+4. Watch progress on the Sources screen (its **Scan now** button queues a scan), or with `just vault-status`.
+5. Network shares and WSL paths may not deliver file events. Rely on the scheduled reconcile and consider lowering `SB_RECONCILE_MINUTES`.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SB_VAULT_PATH` | empty | Absolute path of the vault. Empty disables ingestion (the worker idles and Sources says so) |
+| `SB_VAULT_EXCLUDE` | `.obsidian/**,.trash/**,**/.git/**` | Comma-separated globs matched against vault-relative paths. Only `*.md` files are read |
+| `SB_EMBED_URL` | empty | Ollama URL for embeddings. Empty uses the first `SB_OLLAMA_ENDPOINTS` URL; with neither, notes are indexed for full text only |
+| `SB_EMBED_MODEL` | `bge-m3` | The exact Ollama tag installed on the embedding host, for example `bge-m3` or `bge-m3:567m` |
+| `SB_EMBED_BATCH` | `16` | Chunks per embedding call (1 to 128) |
+| `SB_RECONCILE_MINUTES` | `15` | Interval of the scheduled reconcile (1 to 1440) |
+| `SB_MAX_NOTE_BYTES` | `2000000` | Larger files are not read |
+
+- **Embedding model.** `SB_EMBED_MODEL` must be a tag of the default embedding space's model (`bge-m3`), or the
+  worker refuses to start. Models ending in `:cloud` or `-cloud` are refused for embeddings and chat, because
+  private text never leaves your LAN. On Windows, prefer `http://127.0.0.1:11434` over `localhost`.
+- **What the worker watches.** It watches the vault for changes. A folder rename or move triggers an immediate
+  rescan, and a reconcile also runs every `SB_RECONCILE_MINUTES`, so offline edits are picked up.
+- **Mass-deletion guard.** If a reconcile finds more than 10 notes missing **and** more than 20% of the live
+  notes, it deletes nothing and reports `guard_tripped` (an unmounted drive or a wrong path looks just like that).
+  The Sources screen cannot override it; only `just vault-scan --allow-mass-delete` can.
+- **One worker per deployment.** A second worker is safe but wasteful, so run just one.
+
 `.env` is never committed. `.env.test` is committed on purpose and contains only test values
 (the e2e password is `e2e-test-password`).
 
@@ -295,6 +336,15 @@ version files, commits `chore(release): vX.Y.Z [skip ci]`, tags `vX.Y.Z` and pub
   or the Docker service (Linux).
 - **"No local model reachable":** run `just chat-smoke`; every endpoint marked UNREACHABLE failed
   `GET /api/version` within 1 s. Check `OLLAMA_HOST`, the firewall and the URL in `SB_OLLAMA_ENDPOINTS`.
+- **"The embedding model isn't installed":** run `ollama pull bge-m3` on the embedding host (use the same tag
+  as `SB_EMBED_MODEL`). Embedding resumes by itself; notes are searchable by full text meanwhile.
+- **Sources says "found N notes missing and deleted nothing":** the mass-deletion guard tripped. Check
+  `SB_VAULT_PATH` (and that the drive is mounted). If the notes really are gone, run
+  `just vault-scan --allow-mass-delete`.
+- **Sources says "The worker hasn't picked this up yet.":** **Scan now** waits up to 60 s for the worker. Start
+  it with `just dev` or `just worker`.
+- **The worker exits at start naming two models:** `SB_EMBED_MODEL` isn't a tag of the default space's model
+  (`bge-m3`), or ends in `:cloud` or `-cloud`.
 - **The dbmate binary can't be downloaded (proxy or offline):** install dbmate with scoop/winget or
   `brew install dbmate`, and set `DBMATE=dbmate` in `.env`.
 
@@ -305,5 +355,6 @@ version files, commits `chore(release): vX.Y.Z [skip ci]`, tags `vX.Y.Z` and pub
 - [Tech stack evaluation](docs/architecture/tech-stack-evaluation.md), including why the backend is Python and the UI is TypeScript
 - [Architecture decision records](docs/architecture/adr/)
 - [Design system](docs/architecture/design-system-audit.md): tokens, components and the accessibility bar
+- [Phase 2a spec (vault ingestion)](docs/superpowers/specs/2026-09-30-phase-2a-vault-ingestion-design.md)
 - [Phase 1a spec](docs/superpowers/specs/2026-09-29-phase-1a-foundation-design.md) and
   [implementation plan](docs/superpowers/plans/2026-09-29-phase-1a-foundation.md)

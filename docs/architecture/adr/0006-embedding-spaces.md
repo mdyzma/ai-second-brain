@@ -1,6 +1,6 @@
 # ADR-0006: Versioned embedding spaces and a multilingual default
 
-**Status:** Proposed
+**Status:** Accepted (2026-09-30)
 **Date:** 2026-09-29
 **Deciders:** Michal Dyzma
 
@@ -29,6 +29,8 @@ The discarded MVP used `all-MiniLM-L6-v2` (384-d, English-centric). The prompt a
 - Easier: trying a new model is "create space, backfill job, compare, flip default".
 - Harder: backfill jobs over ~0.5 M chunks (bge-m3 on CPU: hours; schedule on the GPU host at night).
 - Revisit: drop the non-default space after one month on the new default to reclaim space.
+
+**Note (Phase 2a):** Space 1 is bge-m3 (1024-d) from Phase 2a; the bake-off against MiniLM/e5 moves to Phase 3 as an evaluation of this default.
 
 ## Action Items
 1. [ ] Build the labelled retrieval set (50 queries, PL/EN, known target notes) — reusable by Phase 0.
