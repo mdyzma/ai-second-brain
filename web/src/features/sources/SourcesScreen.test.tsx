@@ -104,6 +104,14 @@ describe("SourcesScreen", () => {
           chunks: 0,
           embedded: 0,
         }),
+        row({
+          path: "broken.md",
+          title: "broken",
+          state: "failed",
+          error: "index_error",
+          chunks: 0,
+          embedded: 0,
+        }),
       ],
       hasMore: false,
       scanPending: false,
@@ -128,7 +136,8 @@ describe("SourcesScreen", () => {
 
   it("retries failed rows and scans", async () => {
     const props = renderScreen();
-    await userEvent.click(screen.getByRole("button", { name: "Retry big" }));
+    expect(screen.queryByRole("button", { name: "Retry big" })).toBeNull(); // too_large
+    await userEvent.click(screen.getByRole("button", { name: "Retry broken" }));
     expect(props.onRetry).toHaveBeenCalledOnce();
     await userEvent.click(screen.getByRole("button", { name: "Scan now" }));
     expect(props.onScan).toHaveBeenCalledOnce();
@@ -150,9 +159,9 @@ describe("SourcesScreen", () => {
         }),
     );
     renderScreen({ onRetry });
-    const button = screen.getByRole("button", { name: "Retry big" });
+    const button = screen.getByRole("button", { name: "Retry broken" });
     await userEvent.click(button);
-    expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ path: "big.md" }));
+    expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ path: "broken.md" }));
     expect(button).toBeDisabled();
     finish();
     await waitFor(() => expect(button).toBeEnabled());
