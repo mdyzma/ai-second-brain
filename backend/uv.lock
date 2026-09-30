@@ -39,7 +39,7 @@ requires-dist = [
     { name = "argon2-cffi", specifier = ">=23.1" },
     { name = "fastapi", specifier = ">=0.118" },
     { name = "httpx2", specifier = ">=2.13.1" },
-    { name = "procrastinate", extras = ["psycopg"], specifier = ">=3.10,<3.11" },
+    { name = "procrastinate", specifier = ">=3.10,<3.11" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2" },
     { name = "pydantic-settings", specifier = ">=2.7" },
     { name = "pyyaml", specifier = ">=6.0" },
