@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -167,5 +168,60 @@ def test_missing_file_is_io_error(db_url: str, tmp_path: Path) -> None:
     async def body(h: Harness) -> None:
         assert await observe(h.ctx, "ghost.md") is None
         assert await h.rows("SELECT 1 FROM sources") == []
+
+    run(db_url, tmp_path, body)
+
+
+def test_concurrent_observe_of_new_file(db_url: str, tmp_path: Path) -> None:
+    VaultBuilder(tmp_path).write("a.md", "wspolny")
+
+    async def body(h: Harness) -> None:
+        results = await asyncio.gather(observe(h.ctx, "a.md"), observe(h.ctx, "a.md"))
+        assert all(r is not None for r in results)
+        assert len(await h.rows("SELECT 1 FROM sources")) == 1
+        assert len(await h.rows("SELECT 1 FROM source_revisions")) == 1
+
+    run(db_url, tmp_path, body)
+
+
+def test_revert_to_still_pending_revision(db_url: str, tmp_path: Path) -> None:
+    vault = VaultBuilder(tmp_path)
+
+    async def body(h: Harness) -> None:
+        for text in ("BBB", "CCC", "BBB"):
+            vault.write("a.md", text)
+            await observe(h.ctx, "a.md")
+        await h.drain()
+        assert await fts(h, "bbb") == ["a.md"]
+        assert await fts(h, "ccc") == []
+        states = await h.rows("SELECT raw_text, state FROM source_revisions ORDER BY raw_text")
+        assert [(s["raw_text"], s["state"]) for s in states] == [
+            ("BBB", "indexed"),
+            ("CCC", "superseded"),
+        ]
+
+    run(db_url, tmp_path, body)
+
+
+def test_revert_to_indexed_supersedes_pending_edit(db_url: str, tmp_path: Path) -> None:
+    vault = VaultBuilder(tmp_path)
+
+    async def body(h: Harness) -> None:
+        vault.write("a.md", "alfa")
+        await observe(h.ctx, "a.md")
+        await h.drain()
+        vault.write("a.md", "beta")
+        await observe(h.ctx, "a.md")
+        vault.write("a.md", "alfa")
+        outcome = await observe(h.ctx, "a.md")
+        assert outcome is not None and outcome.action == "unchanged"
+        await h.drain()
+        assert await fts(h, "alfa") == ["a.md"]
+        assert await fts(h, "beta") == []
+        states = await h.rows("SELECT raw_text, state FROM source_revisions ORDER BY raw_text")
+        assert [(s["raw_text"], s["state"]) for s in states] == [
+            ("alfa", "indexed"),
+            ("beta", "superseded"),
+        ]
 
     run(db_url, tmp_path, body)

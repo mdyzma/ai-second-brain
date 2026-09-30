@@ -34,19 +34,19 @@ class Claimed:
 async def record_observation(conn: AsyncConnection, rel: str, note: ReadNote) -> ObserveOutcome:
     meta = {"size": note.size, "mtime_ns": note.mtime_ns}
     async with conn.cursor(row_factory=dict_row) as cur:
+        # Insert-if-missing first: FOR UPDATE alone locks nothing for a new path, and a unique
+        # violation's DETAIL would carry the note path into the logs.
+        await cur.execute(
+            "INSERT INTO sources (kind, external_ref) VALUES ('obsidian', %s)"
+            " ON CONFLICT (kind, external_ref) DO NOTHING",
+            (rel,),
+        )
         await cur.execute(
             "SELECT id, current_revision_id, deleted_at FROM sources"
             " WHERE kind = 'obsidian' AND external_ref = %s FOR UPDATE",
             (rel,),
         )
         source = await cur.fetchone()
-        if source is None:
-            await cur.execute(
-                "INSERT INTO sources (kind, external_ref) VALUES ('obsidian', %s)"
-                " RETURNING id, current_revision_id, deleted_at",
-                (rel,),
-            )
-            source = await cur.fetchone()
         if source is None:
             raise RuntimeError("source row missing after insert")
         was_deleted = source["deleted_at"] is not None
@@ -80,8 +80,19 @@ async def record_observation(conn: AsyncConnection, rel: str, note: ReadNote) ->
                 "UPDATE source_revisions SET metadata = metadata || %s WHERE id = %s",
                 (Jsonb(meta), existing["id"]),
             )
+            # The file equals the indexed revision, so any newer pending edit is stale.
+            await cur.execute(
+                "UPDATE source_revisions SET state = 'superseded'"
+                " WHERE source_id = %s AND state = 'pending' AND id <> %s",
+                (source["id"], existing["id"]),
+            )
             return ObserveOutcome(source["id"], "unchanged", False)
         if existing["state"] == "pending" and not was_deleted:
+            await cur.execute(
+                "UPDATE source_revisions SET observed_at = now(), metadata = metadata || %s"
+                " WHERE id = %s",
+                (Jsonb(meta), existing["id"]),
+            )
             return ObserveOutcome(source["id"], "new", True)
         await cur.execute(
             "UPDATE source_revisions SET state = 'pending', error = NULL, observed_at = now(),"
