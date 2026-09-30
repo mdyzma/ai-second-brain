@@ -36,9 +36,594 @@ CREATE TYPE public.chat_mode AS ENUM (
     'cloud'
 );
 
+--
+-- Name: ingest_state; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.ingest_state AS ENUM (
+    'pending',
+    'indexed',
+    'failed',
+    'superseded'
+);
+
+--
+-- Name: procrastinate_job_event_type; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.procrastinate_job_event_type AS ENUM (
+    'deferred',
+    'started',
+    'deferred_for_retry',
+    'failed',
+    'succeeded',
+    'cancelled',
+    'abort_requested',
+    'aborted',
+    'scheduled',
+    'retried'
+);
+
+--
+-- Name: procrastinate_job_status; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.procrastinate_job_status AS ENUM (
+    'todo',
+    'doing',
+    'succeeded',
+    'failed',
+    'cancelled',
+    'aborting',
+    'aborted'
+);
+
+--
+-- Name: procrastinate_job_to_defer_v1; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.procrastinate_job_to_defer_v1 AS (
+	queue_name character varying,
+	task_name character varying,
+	priority integer,
+	lock text,
+	queueing_lock text,
+	args jsonb,
+	scheduled_at timestamp with time zone
+);
+
+--
+-- Name: salience_tier; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.salience_tier AS ENUM (
+    'active',
+    'dormant',
+    'superseded',
+    'archived'
+);
+
+--
+-- Name: sensitivity; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.sensitivity AS ENUM (
+    'private',
+    'shareable'
+);
+
+--
+-- Name: source_kind; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.source_kind AS ENUM (
+    'obsidian'
+);
+
+--
+-- Name: procrastinate_cancel_job_v1(bigint, boolean, boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_cancel_job_v1(job_id bigint, abort boolean, delete_job boolean) RETURNS bigint
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    _job_id bigint;
+BEGIN
+    IF delete_job THEN
+        DELETE FROM procrastinate_jobs
+        WHERE id = job_id AND status = 'todo'
+        RETURNING id INTO _job_id;
+    END IF;
+    IF _job_id IS NULL THEN
+        IF abort THEN
+            UPDATE procrastinate_jobs
+            SET abort_requested = true,
+                status = CASE status
+                    WHEN 'todo' THEN 'cancelled'::procrastinate_job_status ELSE status
+                END
+            WHERE id = job_id AND status IN ('todo', 'doing')
+            RETURNING id INTO _job_id;
+        ELSE
+            UPDATE procrastinate_jobs
+            SET status = 'cancelled'::procrastinate_job_status
+            WHERE id = job_id AND status = 'todo'
+            RETURNING id INTO _job_id;
+        END IF;
+    END IF;
+    RETURN _job_id;
+END;
+$$;
+
+--
+-- Name: procrastinate_defer_jobs_v1(public.procrastinate_job_to_defer_v1[]); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_defer_jobs_v1(jobs public.procrastinate_job_to_defer_v1[]) RETURNS bigint[]
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    job_ids bigint[];
+BEGIN
+    WITH inserted_jobs AS (
+        INSERT INTO procrastinate_jobs (queue_name, task_name, priority, lock, queueing_lock, args, scheduled_at)
+        SELECT (job).queue_name,
+               (job).task_name,
+               (job).priority,
+               (job).lock,
+               (job).queueing_lock,
+               (job).args,
+               (job).scheduled_at
+        FROM unnest(jobs) AS job
+        RETURNING id
+    )
+    SELECT array_agg(id) FROM inserted_jobs INTO job_ids;
+
+    RETURN job_ids;
+END;
+$$;
+
+--
+-- Name: procrastinate_defer_periodic_job_v2(character varying, character varying, character varying, character varying, integer, character varying, bigint, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_defer_periodic_job_v2(_queue_name character varying, _lock character varying, _queueing_lock character varying, _task_name character varying, _priority integer, _periodic_id character varying, _defer_timestamp bigint, _args jsonb) RETURNS bigint
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+	_job_id bigint;
+	_defer_id bigint;
+BEGIN
+    INSERT
+        INTO procrastinate_periodic_defers (task_name, periodic_id, defer_timestamp)
+        VALUES (_task_name, _periodic_id, _defer_timestamp)
+        ON CONFLICT DO NOTHING
+        RETURNING id into _defer_id;
+
+    IF _defer_id IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    UPDATE procrastinate_periodic_defers
+        SET job_id = (
+            SELECT COALESCE((
+                SELECT unnest(procrastinate_defer_jobs_v1(
+                    ARRAY[
+                        ROW(
+                            _queue_name,
+                            _task_name,
+                            _priority,
+                            _lock,
+                            _queueing_lock,
+                            _args,
+                            NULL::timestamptz
+                        )
+                    ]::procrastinate_job_to_defer_v1[]
+                ))
+            ), NULL)
+        )
+        WHERE id = _defer_id
+        RETURNING job_id INTO _job_id;
+
+    DELETE
+        FROM procrastinate_periodic_defers
+        USING (
+            SELECT id
+            FROM procrastinate_periodic_defers
+            WHERE procrastinate_periodic_defers.task_name = _task_name
+            AND procrastinate_periodic_defers.periodic_id = _periodic_id
+            AND procrastinate_periodic_defers.defer_timestamp < _defer_timestamp
+            ORDER BY id
+            FOR UPDATE
+        ) to_delete
+        WHERE procrastinate_periodic_defers.id = to_delete.id;
+
+    RETURN _job_id;
+END;
+$$;
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
+
+--
+-- Name: procrastinate_jobs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.procrastinate_jobs (
+    id bigint NOT NULL,
+    queue_name character varying(128) NOT NULL,
+    task_name character varying(128) NOT NULL,
+    priority integer DEFAULT 0 NOT NULL,
+    lock text,
+    queueing_lock text,
+    args jsonb DEFAULT '{}'::jsonb NOT NULL,
+    status public.procrastinate_job_status DEFAULT 'todo'::public.procrastinate_job_status NOT NULL,
+    scheduled_at timestamp with time zone,
+    attempts integer DEFAULT 0 NOT NULL,
+    abort_requested boolean DEFAULT false NOT NULL,
+    worker_id bigint,
+    CONSTRAINT check_not_todo_abort_requested CHECK ((NOT ((status = 'todo'::public.procrastinate_job_status) AND (abort_requested = true))))
+);
+
+--
+-- Name: procrastinate_fetch_job_v2(character varying[], bigint); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_fetch_job_v2(target_queue_names character varying[], p_worker_id bigint) RETURNS public.procrastinate_jobs
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+	found_jobs procrastinate_jobs;
+BEGIN
+    WITH candidate AS (
+        SELECT jobs.*
+            FROM procrastinate_jobs AS jobs
+            WHERE
+                -- reject the job if its lock has earlier or higher priority jobs
+                NOT EXISTS (
+                    SELECT 1
+                        FROM procrastinate_jobs AS other_jobs
+                        WHERE
+                            jobs.lock IS NOT NULL
+                            AND other_jobs.lock = jobs.lock
+                            AND (
+                                -- job with same lock is already running
+                                other_jobs.status = 'doing'
+                                OR
+                                -- job with same lock is waiting and has higher priority (or same priority but was queued first)
+                                (
+                                    other_jobs.status = 'todo'
+                                    AND (
+                                        other_jobs.priority > jobs.priority
+                                        OR (
+                                        other_jobs.priority = jobs.priority
+                                        AND other_jobs.id < jobs.id
+                                        )
+                                    )
+                                )
+                            )
+                )
+                AND jobs.status = 'todo'
+                AND (target_queue_names IS NULL OR jobs.queue_name = ANY( target_queue_names ))
+                AND (jobs.scheduled_at IS NULL OR jobs.scheduled_at <= now())
+            ORDER BY jobs.priority DESC, jobs.id ASC LIMIT 1
+            FOR UPDATE OF jobs SKIP LOCKED
+    )
+    UPDATE procrastinate_jobs
+        SET status = 'doing', worker_id = p_worker_id
+        FROM candidate
+        WHERE procrastinate_jobs.id = candidate.id
+        RETURNING procrastinate_jobs.* INTO found_jobs;
+
+ RETURN found_jobs;
+END;
+$$;
+
+--
+-- Name: procrastinate_finish_job_v1(bigint, public.procrastinate_job_status, boolean); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_finish_job_v1(job_id bigint, end_status public.procrastinate_job_status, delete_job boolean) RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    _job_id bigint;
+BEGIN
+    IF end_status NOT IN ('succeeded', 'failed', 'aborted') THEN
+        RAISE 'End status should be either "succeeded", "failed" or "aborted" (job id: %)', job_id;
+    END IF;
+    IF delete_job THEN
+        DELETE FROM procrastinate_jobs
+        WHERE id = job_id AND status IN ('todo', 'doing')
+        RETURNING id INTO _job_id;
+    ELSE
+        UPDATE procrastinate_jobs
+        SET status = end_status,
+            abort_requested = false,
+            attempts = CASE status
+                WHEN 'doing' THEN attempts + 1 ELSE attempts
+            END
+        WHERE id = job_id AND status IN ('todo', 'doing')
+        RETURNING id INTO _job_id;
+    END IF;
+    IF _job_id IS NULL THEN
+        RAISE 'Job was not found or not in "doing" or "todo" status (job id: %)', job_id;
+    END IF;
+END;
+$$;
+
+--
+-- Name: procrastinate_notify_queue_abort_job_v1(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_notify_queue_abort_job_v1() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    payload TEXT;
+BEGIN
+    SELECT json_build_object('type', 'abort_job_requested', 'job_id', NEW.id)::text INTO payload;
+	PERFORM pg_notify('procrastinate_queue_v1#' || NEW.queue_name, payload);
+	PERFORM pg_notify('procrastinate_any_queue_v1', payload);
+	RETURN NEW;
+END;
+$$;
+
+--
+-- Name: procrastinate_notify_queue_job_inserted_v1(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_notify_queue_job_inserted_v1() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    payload TEXT;
+BEGIN
+    SELECT json_build_object('type', 'job_inserted', 'job_id', NEW.id)::text INTO payload;
+	PERFORM pg_notify('procrastinate_queue_v1#' || NEW.queue_name, payload);
+	PERFORM pg_notify('procrastinate_any_queue_v1', payload);
+	RETURN NEW;
+END;
+$$;
+
+--
+-- Name: procrastinate_prune_stalled_workers_v1(double precision); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_prune_stalled_workers_v1(seconds_since_heartbeat double precision) RETURNS TABLE(worker_id bigint)
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RETURN QUERY
+    DELETE FROM procrastinate_workers
+    WHERE last_heartbeat < NOW() - (seconds_since_heartbeat || 'SECOND')::INTERVAL
+    RETURNING procrastinate_workers.id;
+END;
+$$;
+
+--
+-- Name: procrastinate_register_worker_v1(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_register_worker_v1() RETURNS TABLE(worker_id bigint)
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RETURN QUERY
+    INSERT INTO procrastinate_workers DEFAULT VALUES
+    RETURNING procrastinate_workers.id;
+END;
+$$;
+
+--
+-- Name: procrastinate_retry_job_v1(bigint, timestamp with time zone, integer, character varying, character varying); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_retry_job_v1(job_id bigint, retry_at timestamp with time zone, new_priority integer, new_queue_name character varying, new_lock character varying) RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    _job_id bigint;
+    _abort_requested boolean;
+BEGIN
+    SELECT abort_requested FROM procrastinate_jobs
+    WHERE id = job_id AND status = 'doing'
+    FOR UPDATE
+    INTO _abort_requested;
+    IF _abort_requested THEN
+        UPDATE procrastinate_jobs
+        SET status = 'failed'::procrastinate_job_status
+        WHERE id = job_id AND status = 'doing'
+        RETURNING id INTO _job_id;
+    ELSE
+        UPDATE procrastinate_jobs
+        SET status = 'todo'::procrastinate_job_status,
+            attempts = attempts + 1,
+            scheduled_at = retry_at,
+            priority = COALESCE(new_priority, priority),
+            queue_name = COALESCE(new_queue_name, queue_name),
+            lock = COALESCE(new_lock, lock)
+        WHERE id = job_id AND status = 'doing'
+        RETURNING id INTO _job_id;
+    END IF;
+
+    IF _job_id IS NULL THEN
+        RAISE 'Job was not found or not in "doing" status (job id: %)', job_id;
+    END IF;
+END;
+$$;
+
+--
+-- Name: procrastinate_retry_job_v2(bigint, timestamp with time zone, integer, character varying, character varying); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_retry_job_v2(job_id bigint, retry_at timestamp with time zone, new_priority integer, new_queue_name character varying, new_lock character varying) RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    _job_id bigint;
+    _abort_requested boolean;
+    _current_status procrastinate_job_status;
+BEGIN
+    SELECT status, abort_requested FROM procrastinate_jobs
+    WHERE id = job_id AND status IN ('doing', 'failed')
+    FOR UPDATE
+    INTO _current_status, _abort_requested;
+    IF _current_status = 'doing' AND _abort_requested THEN
+        UPDATE procrastinate_jobs
+        SET status = 'failed'::procrastinate_job_status
+        WHERE id = job_id AND status = 'doing'
+        RETURNING id INTO _job_id;
+    ELSE
+        UPDATE procrastinate_jobs
+        SET status = 'todo'::procrastinate_job_status,
+            attempts = attempts + 1,
+            scheduled_at = retry_at,
+            priority = COALESCE(new_priority, priority),
+            queue_name = COALESCE(new_queue_name, queue_name),
+            lock = COALESCE(new_lock, lock)
+        WHERE id = job_id AND status IN ('doing', 'failed')
+        RETURNING id INTO _job_id;
+    END IF;
+
+    IF _job_id IS NULL THEN
+        RAISE 'Job was not found or has an invalid status to retry (job id: %)', job_id;
+    END IF;
+
+END;
+$$;
+
+--
+-- Name: procrastinate_trigger_abort_requested_events_procedure_v1(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_trigger_abort_requested_events_procedure_v1() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    INSERT INTO procrastinate_events(job_id, type)
+        VALUES (NEW.id, 'abort_requested'::procrastinate_job_event_type);
+    RETURN NEW;
+END;
+$$;
+
+--
+-- Name: procrastinate_trigger_function_scheduled_events_v1(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_trigger_function_scheduled_events_v1() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    INSERT INTO procrastinate_events(job_id, type, at)
+        VALUES (NEW.id, 'scheduled'::procrastinate_job_event_type, NEW.scheduled_at);
+
+	RETURN NEW;
+END;
+$$;
+
+--
+-- Name: procrastinate_trigger_function_status_events_insert_v1(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_trigger_function_status_events_insert_v1() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    INSERT INTO procrastinate_events(job_id, type)
+        VALUES (NEW.id, 'deferred'::procrastinate_job_event_type);
+	RETURN NEW;
+END;
+$$;
+
+--
+-- Name: procrastinate_trigger_function_status_events_update_v1(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_trigger_function_status_events_update_v1() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    WITH t AS (
+        SELECT CASE
+            WHEN OLD.status = 'todo'::procrastinate_job_status
+                AND NEW.status = 'doing'::procrastinate_job_status
+                THEN 'started'::procrastinate_job_event_type
+            WHEN OLD.status = 'doing'::procrastinate_job_status
+                AND NEW.status = 'todo'::procrastinate_job_status
+                THEN 'deferred_for_retry'::procrastinate_job_event_type
+            WHEN OLD.status = 'doing'::procrastinate_job_status
+                AND NEW.status = 'failed'::procrastinate_job_status
+                THEN 'failed'::procrastinate_job_event_type
+            WHEN OLD.status = 'doing'::procrastinate_job_status
+                AND NEW.status = 'succeeded'::procrastinate_job_status
+                THEN 'succeeded'::procrastinate_job_event_type
+            WHEN OLD.status = 'todo'::procrastinate_job_status
+                AND (
+                    NEW.status = 'cancelled'::procrastinate_job_status
+                    OR NEW.status = 'failed'::procrastinate_job_status
+                    OR NEW.status = 'succeeded'::procrastinate_job_status
+                )
+                THEN 'cancelled'::procrastinate_job_event_type
+            WHEN OLD.status = 'doing'::procrastinate_job_status
+                AND NEW.status = 'aborted'::procrastinate_job_status
+                THEN 'aborted'::procrastinate_job_event_type
+            WHEN OLD.status = 'failed'::procrastinate_job_status
+                AND NEW.status = 'todo'::procrastinate_job_status
+                THEN 'retried'::procrastinate_job_event_type
+            ELSE NULL
+        END as event_type
+    )
+    INSERT INTO procrastinate_events(job_id, type)
+        SELECT NEW.id, t.event_type
+        FROM t
+        WHERE t.event_type IS NOT NULL;
+	RETURN NEW;
+END;
+$$;
+
+--
+-- Name: procrastinate_unlink_periodic_defers_v1(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_unlink_periodic_defers_v1() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    UPDATE procrastinate_periodic_defers
+    SET job_id = NULL
+    WHERE job_id = OLD.id;
+    RETURN OLD;
+END;
+$$;
+
+--
+-- Name: procrastinate_unregister_worker_v1(bigint); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_unregister_worker_v1(worker_id bigint) RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    DELETE FROM procrastinate_workers
+    WHERE id = worker_id;
+END;
+$$;
+
+--
+-- Name: procrastinate_update_heartbeat_v1(bigint); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.procrastinate_update_heartbeat_v1(worker_id bigint) RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    UPDATE procrastinate_workers
+    SET last_heartbeat = NOW()
+    WHERE id = worker_id;
+END;
+$$;
 
 --
 -- Name: auth_sessions; Type: TABLE; Schema: public; Owner: -
@@ -84,6 +669,225 @@ CREATE TABLE public.chat_turns (
 );
 
 --
+-- Name: chunk_embeddings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.chunk_embeddings (
+    chunk_id uuid NOT NULL,
+    space_id smallint NOT NULL,
+    embedding public.halfvec NOT NULL
+);
+
+--
+-- Name: chunks; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.chunks (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    revision_id uuid NOT NULL,
+    ordinal integer NOT NULL,
+    heading_path text[] DEFAULT '{}'::text[] NOT NULL,
+    content text NOT NULL,
+    tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple'::regconfig, content)) STORED,
+    CONSTRAINT chunks_ordinal_check CHECK ((ordinal >= 0))
+);
+
+--
+-- Name: embedding_spaces; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.embedding_spaces (
+    id smallint NOT NULL,
+    model text NOT NULL,
+    dims integer NOT NULL,
+    is_default boolean DEFAULT false NOT NULL,
+    CONSTRAINT embedding_spaces_dims_check CHECK ((dims > 0))
+);
+
+--
+-- Name: ingest_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ingest_runs (
+    id bigint NOT NULL,
+    trigger text NOT NULL,
+    started_at timestamp with time zone NOT NULL,
+    finished_at timestamp with time zone,
+    outcome text,
+    counts jsonb DEFAULT '{}'::jsonb NOT NULL,
+    CONSTRAINT ingest_runs_trigger_check CHECK ((trigger = ANY (ARRAY['startup'::text, 'schedule'::text, 'manual'::text, 'cli'::text])))
+);
+
+--
+-- Name: ingest_runs_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.ingest_runs_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: ingest_runs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.ingest_runs_id_seq OWNED BY public.ingest_runs.id;
+
+--
+-- Name: procrastinate_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.procrastinate_events (
+    id bigint NOT NULL,
+    job_id bigint NOT NULL,
+    type public.procrastinate_job_event_type,
+    at timestamp with time zone DEFAULT now()
+);
+
+--
+-- Name: procrastinate_events_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.procrastinate_events_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: procrastinate_events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.procrastinate_events_id_seq OWNED BY public.procrastinate_events.id;
+
+--
+-- Name: procrastinate_jobs_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.procrastinate_jobs_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: procrastinate_jobs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.procrastinate_jobs_id_seq OWNED BY public.procrastinate_jobs.id;
+
+--
+-- Name: procrastinate_periodic_defers; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.procrastinate_periodic_defers (
+    id bigint NOT NULL,
+    task_name character varying(128) NOT NULL,
+    defer_timestamp bigint,
+    job_id bigint,
+    periodic_id character varying(128) DEFAULT ''::character varying NOT NULL
+);
+
+--
+-- Name: procrastinate_periodic_defers_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.procrastinate_periodic_defers_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+--
+-- Name: procrastinate_periodic_defers_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.procrastinate_periodic_defers_id_seq OWNED BY public.procrastinate_periodic_defers.id;
+
+--
+-- Name: procrastinate_workers; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.procrastinate_workers (
+    id bigint NOT NULL,
+    last_heartbeat timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--
+-- Name: procrastinate_workers_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE public.procrastinate_workers ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.procrastinate_workers_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+--
+-- Name: source_revisions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.source_revisions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    source_id uuid NOT NULL,
+    content_hash bytea NOT NULL,
+    raw_text text NOT NULL,
+    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+    state public.ingest_state DEFAULT 'pending'::public.ingest_state NOT NULL,
+    error text,
+    observed_at timestamp with time zone DEFAULT now() NOT NULL,
+    indexed_at timestamp with time zone
+);
+
+--
+-- Name: sources; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sources (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    kind public.source_kind NOT NULL,
+    external_ref text NOT NULL,
+    title text,
+    sensitivity public.sensitivity DEFAULT 'private'::public.sensitivity NOT NULL,
+    salience public.salience_tier DEFAULT 'active'::public.salience_tier NOT NULL,
+    current_revision_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    deleted_at timestamp with time zone
+);
+
+--
+-- Name: ingest_runs id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ingest_runs ALTER COLUMN id SET DEFAULT nextval('public.ingest_runs_id_seq'::regclass);
+
+--
+-- Name: procrastinate_events id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.procrastinate_events ALTER COLUMN id SET DEFAULT nextval('public.procrastinate_events_id_seq'::regclass);
+
+--
+-- Name: procrastinate_jobs id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.procrastinate_jobs ALTER COLUMN id SET DEFAULT nextval('public.procrastinate_jobs_id_seq'::regclass);
+
+--
+-- Name: procrastinate_periodic_defers id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.procrastinate_periodic_defers ALTER COLUMN id SET DEFAULT nextval('public.procrastinate_periodic_defers_id_seq'::regclass);
+
+--
 -- Name: auth_sessions auth_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -112,6 +916,111 @@ ALTER TABLE ONLY public.chat_turns
     ADD CONSTRAINT chat_turns_session_id_seq_key UNIQUE (session_id, seq);
 
 --
+-- Name: chunk_embeddings chunk_embeddings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chunk_embeddings
+    ADD CONSTRAINT chunk_embeddings_pkey PRIMARY KEY (chunk_id, space_id);
+
+--
+-- Name: chunks chunks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chunks
+    ADD CONSTRAINT chunks_pkey PRIMARY KEY (id);
+
+--
+-- Name: chunks chunks_revision_id_ordinal_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chunks
+    ADD CONSTRAINT chunks_revision_id_ordinal_key UNIQUE (revision_id, ordinal);
+
+--
+-- Name: embedding_spaces embedding_spaces_model_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.embedding_spaces
+    ADD CONSTRAINT embedding_spaces_model_key UNIQUE (model);
+
+--
+-- Name: embedding_spaces embedding_spaces_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.embedding_spaces
+    ADD CONSTRAINT embedding_spaces_pkey PRIMARY KEY (id);
+
+--
+-- Name: ingest_runs ingest_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ingest_runs
+    ADD CONSTRAINT ingest_runs_pkey PRIMARY KEY (id);
+
+--
+-- Name: procrastinate_events procrastinate_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.procrastinate_events
+    ADD CONSTRAINT procrastinate_events_pkey PRIMARY KEY (id);
+
+--
+-- Name: procrastinate_jobs procrastinate_jobs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.procrastinate_jobs
+    ADD CONSTRAINT procrastinate_jobs_pkey PRIMARY KEY (id);
+
+--
+-- Name: procrastinate_periodic_defers procrastinate_periodic_defers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.procrastinate_periodic_defers
+    ADD CONSTRAINT procrastinate_periodic_defers_pkey PRIMARY KEY (id);
+
+--
+-- Name: procrastinate_periodic_defers procrastinate_periodic_defers_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.procrastinate_periodic_defers
+    ADD CONSTRAINT procrastinate_periodic_defers_unique UNIQUE (task_name, periodic_id, defer_timestamp);
+
+--
+-- Name: procrastinate_workers procrastinate_workers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.procrastinate_workers
+    ADD CONSTRAINT procrastinate_workers_pkey PRIMARY KEY (id);
+
+--
+-- Name: source_revisions source_revisions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.source_revisions
+    ADD CONSTRAINT source_revisions_pkey PRIMARY KEY (id);
+
+--
+-- Name: source_revisions source_revisions_source_id_content_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.source_revisions
+    ADD CONSTRAINT source_revisions_source_id_content_hash_key UNIQUE (source_id, content_hash);
+
+--
+-- Name: sources sources_kind_external_ref_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sources
+    ADD CONSTRAINT sources_kind_external_ref_key UNIQUE (kind, external_ref);
+
+--
+-- Name: sources sources_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sources
+    ADD CONSTRAINT sources_pkey PRIMARY KEY (id);
+
+--
 -- Name: auth_sessions_expires_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -124,11 +1033,187 @@ CREATE INDEX auth_sessions_expires_idx ON public.auth_sessions USING btree (expi
 CREATE INDEX chat_sessions_updated_idx ON public.chat_sessions USING btree (updated_at DESC);
 
 --
+-- Name: chunk_emb_s1_hnsw; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX chunk_emb_s1_hnsw ON public.chunk_embeddings USING hnsw (((embedding)::public.halfvec(1024)) public.halfvec_cosine_ops) WHERE (space_id = 1);
+
+--
+-- Name: chunks_tsv_gin; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX chunks_tsv_gin ON public.chunks USING gin (tsv);
+
+--
+-- Name: embedding_spaces_one_default; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX embedding_spaces_one_default ON public.embedding_spaces USING btree (is_default) WHERE is_default;
+
+--
+-- Name: idx_procrastinate_jobs_worker_not_null; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_procrastinate_jobs_worker_not_null ON public.procrastinate_jobs USING btree (worker_id) WHERE ((worker_id IS NOT NULL) AND (status = 'doing'::public.procrastinate_job_status));
+
+--
+-- Name: idx_procrastinate_workers_last_heartbeat; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_procrastinate_workers_last_heartbeat ON public.procrastinate_workers USING btree (last_heartbeat);
+
+--
+-- Name: procrastinate_events_job_id_fkey_v1; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX procrastinate_events_job_id_fkey_v1 ON public.procrastinate_events USING btree (job_id);
+
+--
+-- Name: procrastinate_jobs_id_lock_idx_v1; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX procrastinate_jobs_id_lock_idx_v1 ON public.procrastinate_jobs USING btree (id, lock) WHERE (status = ANY (ARRAY['todo'::public.procrastinate_job_status, 'doing'::public.procrastinate_job_status]));
+
+--
+-- Name: procrastinate_jobs_lock_idx_v1; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX procrastinate_jobs_lock_idx_v1 ON public.procrastinate_jobs USING btree (lock) WHERE (status = 'doing'::public.procrastinate_job_status);
+
+--
+-- Name: procrastinate_jobs_priority_idx_v1; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX procrastinate_jobs_priority_idx_v1 ON public.procrastinate_jobs USING btree (priority DESC, id) WHERE (status = 'todo'::public.procrastinate_job_status);
+
+--
+-- Name: procrastinate_jobs_queue_name_idx_v1; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX procrastinate_jobs_queue_name_idx_v1 ON public.procrastinate_jobs USING btree (queue_name);
+
+--
+-- Name: procrastinate_jobs_queueing_lock_idx_v1; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX procrastinate_jobs_queueing_lock_idx_v1 ON public.procrastinate_jobs USING btree (queueing_lock) WHERE (status = 'todo'::public.procrastinate_job_status);
+
+--
+-- Name: procrastinate_periodic_defers_job_id_fkey_v1; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX procrastinate_periodic_defers_job_id_fkey_v1 ON public.procrastinate_periodic_defers USING btree (job_id);
+
+--
+-- Name: source_revisions_pending_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX source_revisions_pending_idx ON public.source_revisions USING btree (source_id, observed_at) WHERE (state = 'pending'::public.ingest_state);
+
+--
+-- Name: procrastinate_jobs procrastinate_jobs_notify_queue_job_aborted_v1; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER procrastinate_jobs_notify_queue_job_aborted_v1 AFTER UPDATE OF abort_requested ON public.procrastinate_jobs FOR EACH ROW WHEN (((old.abort_requested = false) AND (new.abort_requested = true) AND (new.status = 'doing'::public.procrastinate_job_status))) EXECUTE FUNCTION public.procrastinate_notify_queue_abort_job_v1();
+
+--
+-- Name: procrastinate_jobs procrastinate_jobs_notify_queue_job_inserted_v1; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER procrastinate_jobs_notify_queue_job_inserted_v1 AFTER INSERT ON public.procrastinate_jobs FOR EACH ROW WHEN ((new.status = 'todo'::public.procrastinate_job_status)) EXECUTE FUNCTION public.procrastinate_notify_queue_job_inserted_v1();
+
+--
+-- Name: procrastinate_jobs procrastinate_trigger_abort_requested_events_v1; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER procrastinate_trigger_abort_requested_events_v1 AFTER UPDATE OF abort_requested ON public.procrastinate_jobs FOR EACH ROW WHEN ((new.abort_requested = true)) EXECUTE FUNCTION public.procrastinate_trigger_abort_requested_events_procedure_v1();
+
+--
+-- Name: procrastinate_jobs procrastinate_trigger_delete_jobs_v1; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER procrastinate_trigger_delete_jobs_v1 BEFORE DELETE ON public.procrastinate_jobs FOR EACH ROW EXECUTE FUNCTION public.procrastinate_unlink_periodic_defers_v1();
+
+--
+-- Name: procrastinate_jobs procrastinate_trigger_scheduled_events_v1; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER procrastinate_trigger_scheduled_events_v1 AFTER INSERT OR UPDATE ON public.procrastinate_jobs FOR EACH ROW WHEN (((new.scheduled_at IS NOT NULL) AND (new.status = 'todo'::public.procrastinate_job_status))) EXECUTE FUNCTION public.procrastinate_trigger_function_scheduled_events_v1();
+
+--
+-- Name: procrastinate_jobs procrastinate_trigger_status_events_insert_v1; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER procrastinate_trigger_status_events_insert_v1 AFTER INSERT ON public.procrastinate_jobs FOR EACH ROW WHEN ((new.status = 'todo'::public.procrastinate_job_status)) EXECUTE FUNCTION public.procrastinate_trigger_function_status_events_insert_v1();
+
+--
+-- Name: procrastinate_jobs procrastinate_trigger_status_events_update_v1; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER procrastinate_trigger_status_events_update_v1 AFTER UPDATE OF status ON public.procrastinate_jobs FOR EACH ROW EXECUTE FUNCTION public.procrastinate_trigger_function_status_events_update_v1();
+
+--
 -- Name: chat_turns chat_turns_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.chat_turns
     ADD CONSTRAINT chat_turns_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.chat_sessions(id) ON DELETE CASCADE;
+
+--
+-- Name: chunk_embeddings chunk_embeddings_chunk_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chunk_embeddings
+    ADD CONSTRAINT chunk_embeddings_chunk_id_fkey FOREIGN KEY (chunk_id) REFERENCES public.chunks(id) ON DELETE CASCADE;
+
+--
+-- Name: chunk_embeddings chunk_embeddings_space_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chunk_embeddings
+    ADD CONSTRAINT chunk_embeddings_space_id_fkey FOREIGN KEY (space_id) REFERENCES public.embedding_spaces(id);
+
+--
+-- Name: chunks chunks_revision_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chunks
+    ADD CONSTRAINT chunks_revision_id_fkey FOREIGN KEY (revision_id) REFERENCES public.source_revisions(id) ON DELETE CASCADE;
+
+--
+-- Name: procrastinate_events procrastinate_events_job_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.procrastinate_events
+    ADD CONSTRAINT procrastinate_events_job_id_fkey FOREIGN KEY (job_id) REFERENCES public.procrastinate_jobs(id) ON DELETE CASCADE;
+
+--
+-- Name: procrastinate_jobs procrastinate_jobs_worker_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.procrastinate_jobs
+    ADD CONSTRAINT procrastinate_jobs_worker_id_fkey FOREIGN KEY (worker_id) REFERENCES public.procrastinate_workers(id) ON DELETE SET NULL;
+
+--
+-- Name: procrastinate_periodic_defers procrastinate_periodic_defers_job_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.procrastinate_periodic_defers
+    ADD CONSTRAINT procrastinate_periodic_defers_job_id_fkey FOREIGN KEY (job_id) REFERENCES public.procrastinate_jobs(id);
+
+--
+-- Name: source_revisions source_revisions_source_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.source_revisions
+    ADD CONSTRAINT source_revisions_source_id_fkey FOREIGN KEY (source_id) REFERENCES public.sources(id) ON DELETE CASCADE;
+
+--
+-- Name: sources sources_current_revision_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sources
+    ADD CONSTRAINT sources_current_revision_fk FOREIGN KEY (current_revision_id) REFERENCES public.source_revisions(id);
 
 --
 -- PostgreSQL database dump complete
