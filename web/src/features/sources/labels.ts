@@ -58,9 +58,9 @@ export function relativeTime(iso: string, now: number = Date.now()): string {
   return hours < 24 ? `${hours} h ago` : `${Math.floor(hours / 24)} d ago`;
 }
 
-const DB_DOWN = "The database is unavailable. Try again in a moment.";
-const UNREACHABLE = "Can't reach the server.";
-const SESSION_ENDED = "Your session ended. Sign in again.";
+export const DB_DOWN = "The database is unavailable. Try again in a moment.";
+export const UNREACHABLE = "Can't reach the server.";
+export const SESSION_ENDED = "Your session ended. Sign in again.";
 
 /** Plain-language text for a failed Retry; never shows server text. Status 0 = network failure. */
 export function retryMessage(status: number): string {
