@@ -39,6 +39,7 @@ def test_openapi_writes_file_with_lf_and_sorted_keys(tmp_path: Path) -> None:
         "reconcileVault",
         "searchNotes",
         "searchFacets",
+        "captureNote",
     }
 
 

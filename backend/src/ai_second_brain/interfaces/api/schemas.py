@@ -176,3 +176,13 @@ class TagFacet(BaseModel):
 class SearchFacets(BaseModel):
     folders: list[FolderFacet]
     tags: list[TagFacet]
+
+
+class CaptureRequest(BaseModel):
+    text: str = Field(max_length=20_000)
+
+
+class CaptureResponse(BaseModel):
+    path: str
+    title: str
+    obsidian_url: str | None

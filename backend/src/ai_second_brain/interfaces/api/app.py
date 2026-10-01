@@ -29,7 +29,7 @@ from ai_second_brain.chat.service import ChatService
 from ai_second_brain.chat.wiring import make_cloud_factory
 from ai_second_brain.config import Settings, get_settings
 from ai_second_brain.db import create_pool
-from ai_second_brain.interfaces.api.routes import auth, chat, health, search, sources
+from ai_second_brain.interfaces.api.routes import auth, capture, chat, health, search, sources
 from ai_second_brain.knowledge.embedder import Embedder
 from ai_second_brain.knowledge.jobs import create_job_app
 from ai_second_brain.knowledge.queue import JobQueue, ProcrastinateQueue
@@ -217,6 +217,7 @@ def create_app(
     app.include_router(chat.router, prefix="/api")
     app.include_router(sources.router, prefix="/api")
     app.include_router(search.router, prefix="/api")
+    app.include_router(capture.router, prefix="/api")
     return app
 
 
