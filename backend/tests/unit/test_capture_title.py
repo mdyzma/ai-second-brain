@@ -64,3 +64,30 @@ def test_symlinked_capture_dir_outside_vault_is_refused(tmp_path: Path) -> None:
     with pytest.raises(OSError):
         write_capture(vault, vault / "Inbox", "x", NOW)
     assert not any(outside.iterdir())
+
+
+def test_symlinked_parent_never_creates_dirs_outside_vault(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    try:
+        (vault / "link").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks need extra privileges on this platform")
+    with pytest.raises(OSError):
+        write_capture(vault, vault / "link" / "Inbox", "x", NOW)
+    assert not any(outside.iterdir())
+
+
+def test_title_cut_keeps_sixty_chars_when_next_is_space() -> None:
+    title = "ab " + "c" * 57 + " d"
+    assert capture_title(title) == "ab " + "c" * 57
+    assert capture_title("x" * 80) == "x" * 60
+
+
+def test_content_preserves_text_but_one_trailing_newline(tmp_path: Path) -> None:
+    text = "Idea  \r\nline two  \r\n\r\n"
+    rel = write_capture(tmp_path, tmp_path / "Inbox", text, NOW)
+    content = (tmp_path / rel).read_bytes().decode("utf-8")
+    assert content.endswith("---\nIdea  \r\nline two  \n")

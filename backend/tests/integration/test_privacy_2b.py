@@ -96,10 +96,16 @@ def test_search_retrieval_and_capture_log_nothing_private(
         headers=SAME_ORIGIN,
     )
     assert created.status_code == 201
-    # httpx/httpcore log the TestClient's own outgoing URLs (test harness, not the app).
-    app_log = "\n".join(
-        r.getMessage() for r in caplog.records if not r.name.startswith(("httpx", "httpcore"))
-    )
+
+    # Format every record, tracebacks included, so an exception naming a path fails the test.
+    # Only the test client's own request lines (httpx logging "http://testserver/...?q=...")
+    # are excluded; the app's outbound httpx2/httpcore2 records stay in.
+    def is_test_client(r: logging.LogRecord) -> bool:
+        return r.name.split(".")[0] in {"httpx", "httpcore"} or (
+            r.name.startswith("httpx") and "//testserver/" in r.getMessage()
+        )
+
+    app_log = "\n".join(caplog.handler.format(r) for r in caplog.records if not is_test_client(r))
     assert "search q_len=" in app_log and "capture outcome=ok" in app_log  # the scenario did log
     secrets = [
         "SecretTitleQX",
