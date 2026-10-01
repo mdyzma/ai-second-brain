@@ -30,7 +30,8 @@ test("a private question shows sources first, then the saved answer", async ({ p
   // notes; either way the sources block must come before the answer.
   const sources = page
     .getByText("No matching local sources — this answer is not based on your notes.")
-    .or(page.getByRole("region", { name: "Sources" }));
+    .or(page.getByRole("region", { name: "Sources" }))
+    .first();
   const answer = page.getByText("This is the fake e2e answer.");
   await expect(sources).toBeVisible();
   await expect(answer).toBeVisible();

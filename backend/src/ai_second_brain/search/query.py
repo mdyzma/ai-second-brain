@@ -162,7 +162,10 @@ async def query(
         ef_search = sql.SQL("SET LOCAL hnsw.ef_search = {}").format(sql.Literal(VECTOR_CANDIDATES))
         await conn.execute(ef_search)
         async with conn.cursor(row_factory=dict_row) as cur:
-            await cur.execute(statement, params)
+            # prepare=False: psycopg auto-prepares after 5 runs and Postgres then switches to a
+            # generic plan, about 4x slower here (the custom plan uses the literal tsquery and
+            # vector).
+            await cur.execute(statement, params, prepare=False)
             rows = await cur.fetchall()
     hits = [
         Hit(

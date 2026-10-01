@@ -344,14 +344,13 @@ Measured once with `backend/scripts/search_bench.py` (`uv run python scripts/sea
 50,000 synthetic chunks (5,000 notes), random 1024-dimension vectors, 200 mixed queries (half two-word, half identifier), against a
 scratch database that was dropped afterwards. Machine: AMD Ryzen 9 9900X (12 cores), 62 GB RAM, Windows 11, PostgreSQL 17 + pgvector in Docker.
 
-| Run | p50 | p95 |
-| --- | --- | --- |
-| As shipped (psycopg's default automatic prepared statements) | 429 ms | 769 ms |
-| Same queries with automatic preparation off (`prepare_threshold=None`) | 95 ms | 197 ms |
+| p50 | p95 |
+| --- | --- |
+| 91 ms | 169 ms |
 
-The target is p95 < 400 ms, and as shipped the benchmark misses it. After a statement has run five times psycopg prepares it,
-and PostgreSQL can then switch to a generic plan that is much slower for both text and identifier queries. A two-word query
-over this synthetic set matches about every chunk, so full text alone ranks around 50,000 rows (about 180 ms). Real notes are
+This meets the target of p95 < 400 ms. The first run missed it (p50 429 ms, p95 769 ms) because psycopg auto-prepares a statement after five
+runs and PostgreSQL then uses a generic plan, about 4x slower for this query, so the hybrid query now runs with `prepare=False`.
+A two-word query over this synthetic set matches about every chunk, so full text alone ranks around 50,000 rows (about 180 ms). Real notes are
 less uniform, so treat these numbers as an upper bound for a vault of this size.
 
 ## Commit messages and releases
