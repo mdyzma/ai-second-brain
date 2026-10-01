@@ -141,6 +141,8 @@ class Settings(BaseSettings):
         if _excluded(f"{rel}/x.md", self.vault_excludes):
             raise ValueError("SB_CAPTURE_DIR must not be excluded by SB_VAULT_EXCLUDE")
         self.capture_dir_name = rel
+        if (capture_dir := self.capture_dir) is not None and capture_dir.is_file():
+            raise ValueError("SB_CAPTURE_DIR must not be an existing file")
         return self
 
     @field_validator("owner_password_hash")

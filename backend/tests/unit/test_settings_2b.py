@@ -44,6 +44,17 @@ def test_capture_dir_nested_ok(tmp_path: Path) -> None:
     )
 
 
+def test_capture_dir_must_not_be_an_existing_file(tmp_path: Path) -> None:
+    (tmp_path / "Inbox").write_text("not a folder", encoding="utf-8")
+    with pytest.raises(ValidationError) as error:
+        make(vault_path=str(tmp_path), SB_CAPTURE_DIR="Inbox")
+    assert "must not be an existing file" in str(error.value)
+
+
+def test_capture_dir_file_check_needs_a_vault(tmp_path: Path) -> None:
+    assert make(SB_CAPTURE_DIR="Inbox").capture_dir is None
+
+
 def test_obsidian_vault_override(tmp_path: Path) -> None:
     assert make(vault_path=str(tmp_path), obsidian_vault="Brain").obsidian_vault_name == "Brain"
 
