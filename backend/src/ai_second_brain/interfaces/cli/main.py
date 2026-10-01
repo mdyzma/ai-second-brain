@@ -120,7 +120,7 @@ async def _chat_smoke(settings: Any) -> int:
         retriever: Retriever = NullRetriever()
         if settings.vault_path is not None:
             db_pool = create_pool(settings.database_url)
-            await db_pool.open(wait=True, timeout=30)
+            await db_pool.open(wait=False)  # a down DB surfaces as retrieval_error
             embedder = (
                 Embedder(settings.embed_url, settings.embed_model, 1024, client, ChatTimeouts())
                 if settings.embed_url

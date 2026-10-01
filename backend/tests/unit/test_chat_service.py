@@ -18,7 +18,7 @@ from ai_second_brain.chat.events import (
 from ai_second_brain.chat.models import ChatMode, ChatSession, Source, TurnDraft
 from ai_second_brain.chat.prompts import CLOUD_SYSTEM, PRIVATE_SYSTEM
 from ai_second_brain.chat.repository import InMemoryChatRepository
-from ai_second_brain.chat.retrieval import NullRetriever, Retriever
+from ai_second_brain.chat.retrieval import NullRetriever, Retrieval, Retriever
 from ai_second_brain.chat.service import ChatService
 
 from ..conftest import run_async
@@ -58,6 +58,23 @@ def make_service(
 
 async def drain(service: ChatService, session: ChatSession, question: str) -> list[TurnEvent]:
     return [event async for event in service.run_turn(session, question)]
+
+
+class TextOnlyRetriever:
+    async def retrieve(self, question: str, limit: int) -> Retrieval:
+        return Retrieval([], "text_only")
+
+
+def test_receipt_reports_text_only_retrieval() -> None:
+    service, repo = make_service(local=StubPool(ScriptedProvider()), retriever=TextOnlyRetriever())
+
+    async def scenario() -> None:
+        session = await repo.create_session(ChatMode.PRIVATE)
+        events = await drain(service, session, "When do backups run?")
+        receipt = next(e for e in events if isinstance(e, ReceiptEvent))
+        assert receipt.retrieval == "text_only"
+
+    run_async(scenario())
 
 
 def test_private_turn_streams_in_order_and_saves() -> None:
