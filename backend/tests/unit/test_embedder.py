@@ -14,10 +14,13 @@ FAST = ChatTimeouts(connect=1.0, read=0.5, probe=0.5)
 MakeFake = Callable[[], FakeOllama]
 
 
-def embed(url: str, texts: list[str]) -> list[list[float]]:
+def embed(url: str, texts: list[str], keep_alive: str | None = None) -> list[list[float]]:
     async def scenario() -> list[list[float]]:
         async with create_http_client() as client:
-            return await Embedder(url, "bge-m3", 1024, client, FAST).embed(texts)
+            embedder = Embedder(url, "bge-m3", 1024, client, FAST)
+            if keep_alive is None:
+                return await embedder.embed(texts)
+            return await embedder.embed(texts, keep_alive=keep_alive)
 
     return run_async(scenario())
 
@@ -28,6 +31,13 @@ def test_embeds_batch_in_order(make_fake_ollama: MakeFake) -> None:
     assert vectors == [fake_vector("a"), fake_vector("b")]
     [request] = fake.embed_requests()
     assert request.body == {"model": "bge-m3", "input": ["a", "b"]}
+
+
+def test_keep_alive_is_sent_when_set(make_fake_ollama: MakeFake) -> None:
+    fake = make_fake_ollama()
+    embed(fake.url, ["a"], keep_alive="30m")
+    [request] = fake.embed_requests()
+    assert request.body == {"model": "bge-m3", "input": ["a"], "keep_alive": "30m"}
 
 
 @pytest.mark.parametrize(

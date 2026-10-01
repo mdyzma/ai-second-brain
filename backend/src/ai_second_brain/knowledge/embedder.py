@@ -40,11 +40,16 @@ class Embedder:
             return False
         return 200 <= response.status_code < 300
 
-    async def embed(self, texts: Sequence[str]) -> list[list[float]]:
+    async def embed(
+        self, texts: Sequence[str], *, keep_alive: str | None = None
+    ) -> list[list[float]]:
+        body: dict[str, object] = {"model": self.model, "input": list(texts)}
+        if keep_alive is not None:
+            body["keep_alive"] = keep_alive
         try:
             response = await self._client.post(
                 f"{self.url}/api/embed",
-                json={"model": self.model, "input": list(texts)},
+                json=body,
                 timeout=self._timeouts.http(),
             )
         except (httpx2.TimeoutException, httpx2.TransportError):

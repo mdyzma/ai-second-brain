@@ -43,3 +43,31 @@ def test_retriever_cutoff_cap_and_links(
             assert [s.path for s in text_only.sources] == ["NAS.md"]
 
     run_async(scenario())
+
+
+class RecordingQueryEmbedder(QueryEmbedder):
+    def __init__(self) -> None:
+        super().__init__(None)
+        self.timeouts: list[float | None] = []
+
+    async def embed(self, text: str, *, timeout: float | None = None) -> list[float] | None:  # noqa: ASYNC109
+        self.timeouts.append(timeout)
+        return None
+
+
+def test_retriever_gives_a_cold_model_eight_seconds(
+    db_url: str, tmp_path: Path, make_fake_ollama: Callable[[], FakeOllama]
+) -> None:
+    fake = make_fake_ollama()
+    VaultBuilder(tmp_path / "Brain").write("NAS.md", "# NAS\nKopie zapasowe co noc.")
+
+    async def scenario() -> None:
+        async with ingest_harness(db_url, tmp_path / "Brain", fake.url) as h:
+            embedder = RecordingQueryEmbedder()
+            result = await HybridRetriever(h.pool, embedder, h.ctx.settings).retrieve(
+                "kopie zapasowe", 8
+            )
+            assert result.mode == "text_only"
+            assert embedder.timeouts == [8.0]
+
+    run_async(scenario())

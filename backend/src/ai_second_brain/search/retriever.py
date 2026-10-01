@@ -17,6 +17,9 @@ from ai_second_brain.search.terms import chat_terms
 
 logger = logging.getLogger("ai_second_brain.search")
 
+# Chat already waits for an LLM; a cold embedding model must not throw away retrieval.
+CHAT_EMBED_TIMEOUT = 8.0
+
 
 class HybridRetriever:
     def __init__(
@@ -26,7 +29,7 @@ class HybridRetriever:
 
     async def retrieve(self, question: str, limit: int) -> Retrieval:
         started = time.perf_counter()
-        vector = await self._embedder.embed(question)
+        vector = await self._embedder.embed(question, timeout=CHAT_EMBED_TIMEOUT)
         terms = chat_terms(question)
         async with self._pool.connection() as conn:
             result = await query(

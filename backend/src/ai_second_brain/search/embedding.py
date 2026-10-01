@@ -1,4 +1,9 @@
-"""Embed one query for search or chat: 1.5 s cap, then a 30 s breaker. Logs codes only."""
+"""Embed one query for search or chat: a time cap, then a breaker. Logs codes only.
+
+A timeout opens the breaker briefly (the model may still be loading); an embed error
+(host unreachable, model missing, bad response) opens it for longer. Query embeds ask
+Ollama to keep the model loaded so the owner's next search is not a cold load.
+"""
 
 import asyncio
 import html
@@ -11,9 +16,13 @@ from ai_second_brain.knowledge.embedder import EmbedError
 
 logger = logging.getLogger("ai_second_brain.search")
 
+QUERY_KEEP_ALIVE = "30m"
+
 
 class _Embeds(Protocol):
-    async def embed(self, texts: list[str]) -> list[list[float]]: ...
+    async def embed(
+        self, texts: list[str], *, keep_alive: str | None = None
+    ) -> list[list[float]]: ...
 
 
 class QueryEmbedder:
@@ -23,24 +32,25 @@ class QueryEmbedder:
         *,
         timeout: float = 1.5,
         cooldown: float = 30.0,
+        timeout_cooldown: float = 5.0,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._embedder, self._timeout, self._cooldown, self._clock = (
-            embedder,
-            timeout,
-            cooldown,
-            clock,
-        )
+        self._embedder, self._timeout, self._clock = embedder, timeout, clock
+        self._cooldown, self._timeout_cooldown = cooldown, timeout_cooldown
         self._down_until = 0.0
 
-    async def embed(self, text: str) -> list[float] | None:
+    async def embed(self, text: str, *, timeout: float | None = None) -> list[float] | None:  # noqa: ASYNC109 - a cap applied with asyncio.timeout inside
         if self._embedder is None or self._clock() < self._down_until:
             return None
         try:
-            async with asyncio.timeout(self._timeout):
-                [vector] = await self._embedder.embed([text])
-        except (EmbedError, TimeoutError, ValueError) as error:
-            code = error.code if isinstance(error, EmbedError) else "embed_timeout"
+            async with asyncio.timeout(self._timeout if timeout is None else timeout):
+                [vector] = await self._embedder.embed([text], keep_alive=QUERY_KEEP_ALIVE)
+        except TimeoutError:
+            logger.warning("query_embed_unavailable code=embed_timeout")
+            self._down_until = self._clock() + self._timeout_cooldown
+            return None
+        except (EmbedError, ValueError) as error:
+            code = error.code if isinstance(error, EmbedError) else "embed_bad_response"
             logger.warning("query_embed_unavailable code=%s", code)
             self._down_until = self._clock() + self._cooldown
             return None
