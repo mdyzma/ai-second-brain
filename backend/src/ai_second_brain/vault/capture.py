@@ -44,11 +44,17 @@ def write_capture(vault_root: Path, capture_dir: Path, text: str, now: datetime)
         name = f"{stem}.md" if n == 1 else f"{stem} ({n}).md"
         path = target_dir / name
         try:
-            with open(path, "x", encoding="utf-8", newline="\n") as handle:
+            handle = open(path, "x", encoding="utf-8", newline="\n")  # noqa: SIM115
+        except FileExistsError:
+            continue
+        try:
+            with handle:
                 handle.write(body)
                 handle.flush()
                 os.fsync(handle.fileno())
-        except FileExistsError:
-            continue
+        except BaseException:
+            # Never leave an empty or partial capture behind for the watcher to index.
+            path.unlink(missing_ok=True)
+            raise
         return path.relative_to(root).as_posix()
     raise CaptureNameTaken

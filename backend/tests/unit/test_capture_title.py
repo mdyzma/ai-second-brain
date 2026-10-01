@@ -80,6 +80,22 @@ def test_symlinked_parent_never_creates_dirs_outside_vault(tmp_path: Path) -> No
     assert not any(outside.iterdir())
 
 
+def test_failed_write_leaves_no_empty_file(tmp_path: Path) -> None:
+    with pytest.raises(UnicodeEncodeError):
+        write_capture(tmp_path, tmp_path / "Inbox", "Idea\nbad \ud800 text", NOW)
+    assert list((tmp_path / "Inbox").iterdir()) == []
+
+
+def test_failed_fsync_leaves_no_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(fd: int) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("ai_second_brain.vault.capture.os.fsync", boom)
+    with pytest.raises(OSError):
+        write_capture(tmp_path, tmp_path / "Inbox", "Idea", NOW)
+    assert list((tmp_path / "Inbox").iterdir()) == []
+
+
 def test_title_cut_keeps_sixty_chars_when_next_is_space() -> None:
     title = "ab " + "c" * 57 + " d"
     assert capture_title(title) == "ab " + "c" * 57

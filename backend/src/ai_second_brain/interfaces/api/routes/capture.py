@@ -32,6 +32,10 @@ async def capture_note(body: CaptureRequest, request: Request) -> CaptureRespons
     if not body.text.strip() or "\x00" in body.text:
         raise HTTPException(422, detail="invalid_text")
     try:
+        size = len(body.text.encode("utf-8"))
+    except UnicodeEncodeError:  # a lone surrogate from a JSON \ud800 escape
+        raise HTTPException(422, detail="invalid_text") from None
+    try:
         rel = await asyncio.to_thread(
             capture_module.write_capture,
             settings.vault_path,
@@ -40,14 +44,14 @@ async def capture_note(body: CaptureRequest, request: Request) -> CaptureRespons
             datetime.now().astimezone(),
         )
     except capture_module.CaptureNameTaken:
-        logger.info("capture outcome=capture_name_taken bytes=%d", len(body.text.encode()))
+        logger.info("capture outcome=capture_name_taken bytes=%d", size)
         raise HTTPException(status.HTTP_409_CONFLICT, detail="capture_name_taken") from None
     except OSError as error:
         logger.warning("capture outcome=vault_unwritable type=%s", type(error).__name__)
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, detail="vault_unwritable"
         ) from None
-    logger.info("capture outcome=ok bytes=%d", len(body.text.encode()))
+    logger.info("capture outcome=ok bytes=%d", size)
     return CaptureResponse(
         path=rel,
         title=capture_module.capture_title(body.text),

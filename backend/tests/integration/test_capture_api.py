@@ -84,6 +84,13 @@ def test_capture_errors(make_api: Callable[..., TestClient], db_url: str, tmp_pa
     assert client.post("/api/capture", json={"text": "  "}, headers=SAME_ORIGIN).status_code == 422
     bad = client.post("/api/capture", json={"text": "a\x00"}, headers=SAME_ORIGIN)
     assert bad.json() == {"detail": "invalid_text"}
+    surrogate = client.post(
+        "/api/capture",
+        content=b'{"text": "note \\ud800 text"}',
+        headers={**SAME_ORIGIN, "Content-Type": "application/json"},
+    )
+    assert surrogate.status_code == 422  # Pydantic refuses it before the route runs
+    assert not any(tmp_path.rglob("*.md"))
     long = client.post("/api/capture", json={"text": "x" * 20001}, headers=SAME_ORIGIN)
     assert long.status_code == 422
     evil = client.post(
