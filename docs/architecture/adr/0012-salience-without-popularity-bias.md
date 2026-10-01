@@ -4,6 +4,8 @@
 **Date:** 2026-09-29
 **Deciders:** Michal Dyzma
 
+> **Status note (Phase 2b):** search ranks by reciprocal rank fusion of full text and vector similarity only. No salience prior is applied yet; it arrives with Phase 7, after the evaluation set described below exists.
+
 ## Context
 
 The prompt's "synaptic plasticity + limbo" became, in the first draft: *score = Σ event weight × time decay; below a threshold → Dormant; Dormant excluded from default search.* The owner asked whether this promotes the most popular, most frequently mentioned material and lets one-time ideas be forgotten.

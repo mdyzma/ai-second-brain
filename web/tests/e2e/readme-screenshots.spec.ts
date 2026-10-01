@@ -39,3 +39,33 @@ test("sources screen", async ({ page }) => {
   await expect(page.getByRole("table").getByText("Searchable")).toHaveCount(5, { timeout: 60_000 });
   await page.screenshot({ path: "../docs/images/readme/sources.jpg", type: "jpeg", quality: 85 });
 });
+
+test("search screen", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/search?q=dyski");
+  await page.getByLabel("Password").fill("e2e-test-password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(
+    page.getByRole("list", { name: "Search results" }).getByText("Projects/NAS.md"),
+  ).toBeVisible({ timeout: 60_000 });
+  await page.screenshot({ path: "../docs/images/readme/search.jpg", type: "jpeg", quality: 85 });
+});
+
+test("ask screen with sources", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/ask");
+  await page.getByLabel("Password").fill("e2e-test-password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByLabel("Ask privately").fill("Kiedy są kopie zapasowe na NAS?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page).toHaveURL(/\/ask\/[0-9a-f-]{36}$/);
+  await expect(
+    page.getByRole("region", { name: "Sources" }).getByText("Projects/NAS.md"),
+  ).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("This is the fake e2e answer.").first()).toBeVisible();
+  await page.screenshot({
+    path: "../docs/images/readme/ask-sources.jpg",
+    type: "jpeg",
+    quality: 85,
+  });
+});

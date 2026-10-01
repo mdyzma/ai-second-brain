@@ -593,7 +593,7 @@ Aligns with the assessment's decomposition; each phase ends with a usable system
 | 1a | Foundation | Monorepo skeleton; `just setup/dev/check` work on a clean machine; dbmate schema; FastAPI health; SPA shell with design tokens, login and layout; CI | — |
 | 1b | Private chat (web) | Routing rules from the [routing spec](../superpowers/specs/2026-09-29-private-chat-routing-design.md) §4–§8 reimplemented behind `/api/sessions` with SSE; chat screen with mode badge and source list; egress tests pass — **delivered** ([spec](../superpowers/specs/2026-09-29-phase-1b-private-chat-design.md)) | 1a |
 | 2a | Durable vault ingestion | Initial vault scan + watcher + reconcile; crash/retry/delete fixtures pass; Sources screen — **delivered** ([spec](../superpowers/specs/2026-09-30-phase-2a-vault-ingestion-design.md)) | 1a |
-| 2b | Search + chat retrieval + capture | Hybrid FTS + vector search API and page; the real Retriever in private chat; the capture box | 2a |
+| 2b | Search + chat retrieval + capture | Hybrid FTS + vector search API and page; the real Retriever in private chat; the capture box — **delivered** ([spec](../superpowers/specs/2026-10-01-phase-2b-search-retrieval-capture-design.md)) | 2a |
 | 3 | Embedding evaluation (bake-off vs bge-m3; add a space only if it wins) | recall@10 on the eval set compares MiniLM/e5 against the bge-m3 default; a second space is built only if it wins | 2b |
 | 4 | Knowledge graph + sleep cycle | Entities/edges from nightly job; digest; review queue; idempotent reruns | 2a, 2b |
 | 5 | Hardware observe/wake | Truthful state fixtures; WoL measured per node; sleep cycle uses workstation | 1 |

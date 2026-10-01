@@ -25,9 +25,9 @@ questions and it answers with sources. That is the goal; today the platform and 
 Private content is processed only by the Ollama endpoints you configure (on your own machines or LAN), and a
 cloud model is used only when you explicitly choose it. It never reads your notes.
 
-> **Status: Phase 2a "vault ingestion" (see the latest release badge above).** The platform is in place: a secure single-user
+> **Status: Phase 2b "search, retrieval and capture" (see the latest release badge above).** The platform is in place: a secure single-user
 > login, the web app shell, the API, the database, CI and automated releases, plus the Ask screen
-> for chatting with a local model. Your Obsidian vault is indexed in the background, but you can't search it or use it in chat yet (Phase 2b). The knowledge
+> for chatting with a local model. Your Obsidian vault is indexed in the background, you can search it, private chat answers cite it, and you can capture a thought into it. The remaining knowledge
 > features arrive phase by phase; see the [roadmap](#roadmap). The screens show what each one
 > will do.
 
@@ -50,8 +50,10 @@ cloud model is used only when you explicitly choose it. It never reads your note
 
 | | |
 | --- | --- |
-| 💬 **Ask (private by default)** | Chat with a local Ollama model on your LAN; sources are shown before the answer; nothing is sent to the cloud. Cloud sessions (Anthropic) are an explicit, per-conversation opt-in and never read your notes. Retrieval arrives with Phase 2b, so answers currently say "No matching local sources". |
-| 📚 **Vault ingestion** | The worker keeps an index of your Obsidian vault in Postgres (full-text immediately, bge-m3 vectors in the background), survives crashes and offline edits, and shows its state on the Sources screen. Search and using your notes in chat arrive in Phase 2b. |
+| 💬 **Ask (private by default)** | Chat with a local Ollama model on your LAN; sources are shown before the answer; nothing is sent to the cloud. Cloud sessions (Anthropic) are an explicit, per-conversation opt-in and never read your notes. Private answers cite your notes: the matching notes are shown first, and each source opens in Obsidian. |
+| 🔎 **Search** | Hybrid search over your vault: exact identifiers and words (full text) plus meaning (bge-m3 vectors), fused by reciprocal rank. Folder and tag filters, highlighted snippets, and results that open in Obsidian. Press `/` to focus the search box. |
+| ✍️ **Capture** | The `c` key or the Capture button opens a box; `Ctrl+Enter` saves it as `Inbox/{date time} {title}.md` in your vault, and the worker indexes it like any other note. |
+| 📚 **Vault ingestion** | The worker keeps an index of your Obsidian vault in Postgres (full-text immediately, bge-m3 vectors in the background), survives crashes and offline edits, and shows its state on the Sources screen. |
 | 🔐 **Single-owner login** | argon2id password hash, server-side sessions (only a SHA-256 of the token is stored), HttpOnly `SameSite=Strict` cookie, same-origin check on every write, lockout after 5 failed attempts, and protection against open redirects. |
 | 🧭 **Web app shell** | React + TypeScript app with a sidebar on desktop and a bottom bar on phones. It has the eight screens of the product (Ask, Search, Projects, Digest, Review, Nodes, Sources, Settings) and a skip link, and it can be used from the keyboard alone. |
 | 🌗 **Light and dark themes** | Follows your system or your choice. Every colour comes from design tokens, a check keeps all text at WCAG AA contrast in both themes, and another check blocks hard-coded colours. |
@@ -64,6 +66,10 @@ cloud model is used only when you explicitly choose it. It never reads your note
 ## Screenshots
 
 ![Ask screen](docs/images/readme/ask.jpg)
+
+![Search for "dyski" with text and meaning matches, folder and tag filters](docs/images/readme/search.jpg)
+
+![A private answer with the notes it cites shown first](docs/images/readme/ask-sources.jpg)
 
 ![Sources screen showing five indexed notes, all searchable, with embedding at 100%](docs/images/readme/sources.jpg)
 
@@ -107,7 +113,7 @@ Each phase gets its own spec and plan before any code is written, in
 | 1a | Foundation: monorepo, login, app shell, database, CI, releases | ✅ v0.2.0 |
 | 1b | **Ask** privately: chat answered by a local model (Ollama), with sources shown first; settings | ✅ Done |
 | 2a | **Sources**: durable Obsidian ingestion (watcher, reconcile, bge-m3 embeddings), with its state on the Sources screen | ✅ Done |
-| 2b | **Search**, chat retrieval and quick capture: hybrid full-text and vector search, your notes in private chat, a capture box | Planned |
+| 2b | **Search**, chat retrieval and quick capture: hybrid full-text and vector search, your notes in private chat, a capture box | ✅ Done |
 | 3 | Embedding evaluation: bge-m3 against MiniLM/e5 on a Polish/English retrieval set; a new space only if it wins | Planned |
 | 4 | **Digest** and **Review**: nightly consolidation links notes to projects, people and machines; a morning digest; a review queue | Planned |
 | 5 | **Nodes**: see and wake your machines (RTX workstation, MacBook, Proxmox) with truthful online, offline and unknown states | Planned |
@@ -180,17 +186,19 @@ ai-second-brain/
 │   │   ├── auth/               Password hashing, login throttle, server-side sessions
 │   │   ├── chat/               Private/cloud routing, Ollama and Anthropic clients, conversations
 │   │   ├── vault/              Reading the vault: observe, parse, chunk, watcher, reconcile, moves and deletions
+│   │   ├── search/             Hybrid query (full text + vectors, fused by RRF), query terms, the chat retriever, the capture writer
 │   │   ├── knowledge/          Sources, revisions, chunks and embeddings in Postgres; the index and embed jobs and the status summary
 │   │   ├── ingest/             The worker process (procrastinate queues, watcher, scheduled reconcile)
 │   │   └── interfaces/
 │   │       ├── api/            FastAPI app, routes (health, auth), cross-site check, API schemas
 │   │       └── cli/            `ai-second-brain serve | openapi | hash-password | chat-smoke | worker | vault reconcile|status`
+│   ├── scripts/                search_bench.py, the one-off search benchmark (see Search performance)
 │   └── tests/                  unit/ (no database) and integration/ (real Postgres)
 ├── web/                        React + TypeScript single-page app (pnpm, Vite)
 │   ├── src/
 │   │   ├── api/                Generated OpenAPI schema and client (never edited by hand)
 │   │   ├── design-system/      tokens.css (colours, fonts, radii), theme, UI primitives, app shell
-│   │   ├── features/           auth (session, login form, route guard), chat (Ask screen), sources (Sources screen) and screens (placeholders)
+│   │   ├── features/           auth (session, login form, route guard), chat (Ask screen), search (Search screen), capture (Capture dialog), sources (Sources screen) and screens (placeholders)
 │   │   └── routes/             File-based routes: /login and the protected app screens
 │   ├── scripts/                Contrast checker and hard-coded-colour guard for the design tokens
 │   └── tests/e2e/              Playwright browser tests
@@ -229,7 +237,7 @@ Browser ──HTTP (localhost)──▶ Web app (React SPA) ──/api──▶ 
 - **The API contract drives the UI.** Pydantic models produce the OpenAPI schema, which produces
   the TypeScript types. A change on one side that isn't regenerated fails the check.
 - **Endpoints today:** `GET /api/health`, `GET /api/health/ready`, `POST /api/auth/login`,
-  `POST /api/auth/logout`, `GET /api/auth/me`, `GET /api/chat/status` and the conversation
+  `POST /api/auth/logout`, `GET /api/auth/me`, `GET /api/search`, `GET /api/search/facets`, `POST /api/capture`, `GET /api/chat/status` and the conversation
   endpoints under `/api/sessions` (answers stream as server-sent events). Errors are always `{"detail": "<code>"}`, where
   `<code>` is a snake_case error name.
 
@@ -269,7 +277,7 @@ The app enforces routing, not the physical location of a URL: a "local" endpoint
 
 ### Vault ingestion
 
-The worker indexes the Markdown notes of an Obsidian vault. It only reads the vault and never writes to it.
+The worker indexes the Markdown notes of an Obsidian vault. It only reads the vault and never writes to it; the one thing the API writes there is a capture (see [Search, chat and capture](#search-chat-and-capture)).
 Details are in the [Phase 2a spec](docs/superpowers/specs/2026-09-30-phase-2a-vault-ingestion-design.md).
 
 1. Set `SB_VAULT_PATH` (an absolute path) and, if needed, `SB_VAULT_EXCLUDE` in `.env`.
@@ -304,6 +312,47 @@ Details are in the [Phase 2a spec](docs/superpowers/specs/2026-09-30-phase-2a-va
 
 `.env` is never committed. `.env.test` is committed on purpose and contains only test values
 (the e2e password is `e2e-test-password`).
+
+### Search, chat and capture
+
+Phase 2b builds on the index above. Details are in the [Phase 2b spec](docs/superpowers/specs/2026-10-01-phase-2b-search-retrieval-capture-design.md).
+
+- **Search** (`/search`) runs one query that combines full text (exact words and identifiers such as `host00042`) with
+  vector similarity (meaning), fused by reciprocal rank fusion. Filter by folder and tags; each result opens the note in Obsidian.
+  If the embedding host is unreachable the page says "Matching by meaning is unavailable" and shows full-text results only.
+- **Private chat** retrieves the best chunks of your notes (about 8,000 characters, at most 2 chunks per note, at most 8 sources)
+  and shows them before the answer. Cloud conversations never read your notes.
+- **Capture** writes a new Markdown file to `SB_VAULT_PATH/SB_CAPTURE_DIR` (default `Inbox`). It is the only place the app writes to your vault.
+- **The Obsidian link** (`obsidian://open?vault=...&file=...`) needs Obsidian installed on the device that opens it.
+
+| Key | Action |
+| --- | --- |
+| `/` | Focus the search box |
+| `c` | Open the capture box |
+| `Ctrl+Enter` | Save the capture |
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SB_CAPTURE_DIR` | `Inbox` | Vault-relative folder that captures are written to. It must be inside the vault and not excluded by `SB_VAULT_EXCLUDE` |
+| `SB_OBSIDIAN_VAULT` | basename of `SB_VAULT_PATH` | The vault name used in `obsidian://` links. Set it if your vault is registered in Obsidian under another name |
+| `SB_CHAT_NUM_CTX` | `8192` | Context window requested from Ollama for chat (2048 to 131072) |
+| `SB_RETRIEVAL_MIN_SIMILARITY` | `0.45` | Vector matches below this similarity are not used as chat sources (0 to 1) |
+
+#### Search performance
+
+Measured once with `backend/scripts/search_bench.py` (`uv run python scripts/search_bench.py <scratch database URL>`):
+50,000 synthetic chunks (5,000 notes), random 1024-dimension vectors, 200 mixed queries (half two-word, half identifier), against a
+scratch database that was dropped afterwards. Machine: AMD Ryzen 9 9900X (12 cores), 62 GB RAM, Windows 11, PostgreSQL 17 + pgvector in Docker.
+
+| Run | p50 | p95 |
+| --- | --- | --- |
+| As shipped (psycopg's default automatic prepared statements) | 429 ms | 769 ms |
+| Same queries with automatic preparation off (`prepare_threshold=None`) | 95 ms | 197 ms |
+
+The target is p95 < 400 ms, and as shipped the benchmark misses it. After a statement has run five times psycopg prepares it,
+and PostgreSQL can then switch to a generic plan that is much slower for both text and identifier queries. A two-word query
+over this synthetic set matches about every chunk, so full text alone ranks around 50,000 rows (about 180 ms). Real notes are
+less uniform, so treat these numbers as an upper bound for a vault of this size.
 
 ## Commit messages and releases
 
@@ -357,6 +406,12 @@ version files, commits `chore(release): vX.Y.Z [skip ci]`, tags `vX.Y.Z` and pub
   (`bge-m3`).
 - **"Configuration error" naming a hosted model:** `SB_EMBED_MODEL` (or a chat model) ends in `:cloud` or
   `-cloud`. Hosted models are refused at settings validation; use a local tag.
+- **Search says "Matching by meaning is unavailable":** the embedding host is unreachable or the model isn't installed,
+  so only full-text results are shown. See "The embedding host is unreachable" and "The embedding model isn't installed" above.
+- **Capture says "Couldn't write to the vault folder":** the API process needs write access to
+  `SB_VAULT_PATH/SB_CAPTURE_DIR`. Check the folder's permissions (and that the drive isn't read-only).
+- **An Obsidian link does nothing:** Obsidian must be installed on the device where you click it, and the vault name
+  must match (`SB_OBSIDIAN_VAULT`).
 - **The dbmate binary can't be downloaded (proxy or offline):** install dbmate with scoop/winget or
   `brew install dbmate`, and set `DBMATE=dbmate` in `.env`.
 
@@ -367,6 +422,7 @@ version files, commits `chore(release): vX.Y.Z [skip ci]`, tags `vX.Y.Z` and pub
 - [Tech stack evaluation](docs/architecture/tech-stack-evaluation.md), including why the backend is Python and the UI is TypeScript
 - [Architecture decision records](docs/architecture/adr/)
 - [Design system](docs/architecture/design-system-audit.md): tokens, components and the accessibility bar
+- [Phase 2b spec (search, retrieval, capture)](docs/superpowers/specs/2026-10-01-phase-2b-search-retrieval-capture-design.md)
 - [Phase 2a spec (vault ingestion)](docs/superpowers/specs/2026-09-30-phase-2a-vault-ingestion-design.md)
 - [Phase 1a spec](docs/superpowers/specs/2026-09-29-phase-1a-foundation-design.md) and
   [implementation plan](docs/superpowers/plans/2026-09-29-phase-1a-foundation.md)
