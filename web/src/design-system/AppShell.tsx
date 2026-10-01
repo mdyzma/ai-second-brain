@@ -57,7 +57,16 @@ export function AppShell({ children, onLogout }: { children: ReactNode; onLogout
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key !== "c" || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      if (
+        e.defaultPrevented ||
+        e.isComposing ||
+        e.key !== "c" ||
+        e.ctrlKey ||
+        e.metaKey ||
+        e.altKey ||
+        e.shiftKey
+      )
+        return;
       if (openRef.current) return;
       const t = e.target as HTMLElement | null;
       const typing =

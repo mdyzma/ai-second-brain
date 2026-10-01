@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/design-system/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design-system/ui/dialog";
 import { type Captured, captureNote } from "./api";
@@ -15,26 +15,43 @@ export function CaptureDialog({ open, onOpenChange, onSaved }: Props) {
   const [text, setText] = useState(loadDraft);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
+  const current = useRef(text);
   const canSave = text.trim().length > 0 && !saving;
 
+  useEffect(() => {
+    if (open) setError(null);
+  }, [open]);
+
   function change(value: string) {
+    current.current = value;
     setText(value);
+    setError(null);
     saveDraft(value);
   }
 
   async function save() {
-    if (!canSave) return;
+    if (inFlight.current || text.trim().length === 0) return;
+    inFlight.current = true;
+    const sent = text;
     setSaving(true);
     setError(null);
-    const result = await captureNote(text);
-    setSaving(false);
-    if (result.ok) {
-      saveDraft("");
-      setText("");
-      onOpenChange(false);
-      onSaved?.(result);
-    } else {
-      setError(captureErrorCopy(result.status, result.detail));
+    try {
+      const result = await captureNote(sent);
+      if (result.ok) {
+        if (current.current === sent) {
+          saveDraft("");
+          current.current = "";
+          setText("");
+        }
+        onOpenChange(false);
+        onSaved?.(result);
+      } else {
+        setError(captureErrorCopy(result.status, result.detail));
+      }
+    } finally {
+      inFlight.current = false;
+      setSaving(false);
     }
   }
 
@@ -47,6 +64,7 @@ export function CaptureDialog({ open, onOpenChange, onSaved }: Props) {
           aria-label="Note"
           autoFocus
           rows={8}
+          readOnly={saving}
           value={text}
           onChange={(e) => change(e.target.value)}
           onKeyDown={(e) => {

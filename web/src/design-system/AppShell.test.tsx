@@ -6,7 +6,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { captureNote } from "@/features/capture/api";
@@ -91,6 +91,17 @@ describe("AppShell", () => {
       await screen.findAllByRole("navigation", { name: "Primary" });
       await userEvent.setup().keyboard("c");
       expect(await screen.findByRole("textbox", { name: "Note" })).toBeInTheDocument();
+    });
+
+    it("ignores c when composing or already handled", async () => {
+      await renderShell(vi.fn());
+      await screen.findAllByRole("navigation", { name: "Primary" });
+      fireEvent.keyDown(document.body, { key: "c", isComposing: true });
+      const handled = (e: KeyboardEvent) => e.preventDefault();
+      document.addEventListener("keydown", handled, true);
+      fireEvent.keyDown(document.body, { key: "c" });
+      document.removeEventListener("keydown", handled, true);
+      expect(screen.queryByRole("textbox", { name: "Note" })).not.toBeInTheDocument();
     });
 
     it("ignores c inside a field, with a modifier, or while open", async () => {

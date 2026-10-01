@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CaptureDialog } from "./CaptureDialog";
@@ -67,5 +67,71 @@ describe("CaptureDialog", () => {
     expect(screen.queryByRole("textbox", { name: "Note" })).not.toBeInTheDocument();
     rerender(<CaptureDialog open onOpenChange={vi.fn()} />);
     expect(screen.getByRole("textbox", { name: "Note" })).toHaveValue("draft");
+  });
+
+  it("does not accept typing while a save is in flight and keeps the text", async () => {
+    let resolve: (r: Awaited<ReturnType<typeof captureNote>>) => void = () => {};
+    mocked.mockReturnValue(new Promise((r) => (resolve = r)));
+    render(<Harness />);
+    const box = screen.getByRole("textbox", { name: "Note" });
+    await userEvent.type(box, "one");
+    await userEvent.keyboard("{Control>}{Enter}{/Control}");
+    expect(box).toHaveAttribute("readonly");
+    await userEvent.type(box, "more");
+    expect(box).toHaveValue("one");
+    await act(async () => {
+      resolve({ ok: true, path: "p", title: "t", obsidian_url: null });
+    });
+    expect(localStorage.getItem(KEY)).toBeNull();
+  });
+
+  it("keeps text that differs from what was sent", async () => {
+    let resolve: (r: Awaited<ReturnType<typeof captureNote>>) => void = () => {};
+    mocked.mockReturnValue(new Promise((r) => (resolve = r)));
+    render(<Harness />);
+    const box = screen.getByRole("textbox", { name: "Note" });
+    await userEvent.type(box, "one");
+    await userEvent.keyboard("{Control>}{Enter}{/Control}");
+    fireEvent.change(box, { target: { value: "one two" } });
+    await act(async () => {
+      resolve({ ok: true, path: "p", title: "t", obsidian_url: null });
+    });
+    expect(box).toHaveValue("one two");
+    expect(localStorage.getItem(KEY)).toBe("one two");
+  });
+
+  it("submits once for repeated Ctrl+Enter and a Save click", async () => {
+    mocked.mockReturnValue(new Promise(() => {}));
+    render(<Harness />);
+    await userEvent.type(screen.getByRole("textbox", { name: "Note" }), "x");
+    await userEvent.keyboard("{Control>}{Enter}{Enter}{/Control}");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(mocked).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the session-ended copy for a 401 and keeps the text", async () => {
+    mocked.mockResolvedValue({ ok: false, status: 401 });
+    render(<Harness />);
+    await userEvent.type(screen.getByRole("textbox", { name: "Note" }), "keep");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Your session ended. Sign in again.",
+    );
+    expect(screen.getByRole("textbox", { name: "Note" })).toHaveValue("keep");
+  });
+
+  it("clears the error on edit and on reopen", async () => {
+    mocked.mockResolvedValue({ ok: false, status: 500 });
+    const { rerender } = render(<CaptureDialog open onOpenChange={vi.fn()} />);
+    await userEvent.type(screen.getByRole("textbox", { name: "Note" }), "a");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByRole("alert");
+    await userEvent.type(screen.getByRole("textbox", { name: "Note" }), "b");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByRole("alert");
+    rerender(<CaptureDialog open={false} onOpenChange={vi.fn()} />);
+    rerender(<CaptureDialog open onOpenChange={vi.fn()} />);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
