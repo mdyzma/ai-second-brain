@@ -38,7 +38,7 @@ test("a capture becomes searchable", async ({ page }) => {
 
 test("private chat cites the NAS note", async ({ page }) => {
   await page.goto("/ask");
-  await page.getByLabel("Ask privately").fill("Kiedy s� kopie zapasowe na NAS?");
+  await page.getByLabel("Ask privately").fill("Kiedy są kopie zapasowe na NAS?");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page).toHaveURL(/\/ask\/[0-9a-f-]{36}$/);
   await expect(
