@@ -1,6 +1,9 @@
 import { Link } from "@tanstack/react-router";
-import { LogOut } from "lucide-react";
-import type { ReactNode } from "react";
+import { LogOut, PenLine } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { isObsidianUrl } from "@/api/obsidian";
+import type { Captured } from "@/features/capture/api";
+import { CaptureDialog } from "@/features/capture/CaptureDialog";
 import { NAV_ORDER, SCREENS } from "@/features/screens/screens";
 import { cn } from "./cn";
 import { ThemeToggle } from "./theme";
@@ -43,7 +46,38 @@ function NavLinks({ layout }: { layout: "sidebar" | "bar" }) {
   );
 }
 
+const STATUS_MS = 6000;
+
 export function AppShell({ children, onLogout }: { children: ReactNode; onLogout: () => void }) {
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const [saved, setSaved] = useState<Captured | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const openRef = useRef(captureOpen);
+  openRef.current = captureOpen;
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "c" || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      if (openRef.current) return;
+      const t = e.target as HTMLElement | null;
+      const typing =
+        t !== null && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName));
+      if (typing) return;
+      e.preventDefault();
+      setCaptureOpen(true);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  function onSaved(result: Captured) {
+    clearTimeout(timer.current);
+    setSaved(result);
+    timer.current = setTimeout(() => setSaved(null), STATUS_MS);
+  }
+
   return (
     <div className="min-h-dvh bg-bg text-fg md:grid md:grid-cols-[14rem_1fr]">
       <a
@@ -62,6 +96,25 @@ export function AppShell({ children, onLogout }: { children: ReactNode; onLogout
         <header className="flex items-center justify-between border-b border-border px-4 py-2">
           <span className="font-semibold md:invisible">Second Brain</span>
           <div className="flex items-center gap-1">
+            <div role="status" className="text-sm text-fg-muted">
+              {saved ? (
+                <>
+                  <span>Saved to Inbox</span>
+                  {isObsidianUrl(saved.obsidian_url) ? (
+                    <>
+                      {" · "}
+                      <a href={saved.obsidian_url} className="text-accent underline">
+                        Open in Obsidian
+                      </a>
+                    </>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setCaptureOpen(true)}>
+              <PenLine aria-hidden />
+              Capture
+            </Button>
             <ThemeToggle />
             <Button variant="ghost" size="sm" onClick={onLogout}>
               <LogOut aria-hidden />
@@ -79,6 +132,7 @@ export function AppShell({ children, onLogout }: { children: ReactNode; onLogout
       >
         <NavLinks layout="bar" />
       </nav>
+      <CaptureDialog open={captureOpen} onOpenChange={setCaptureOpen} onSaved={onSaved} />
     </div>
   );
 }

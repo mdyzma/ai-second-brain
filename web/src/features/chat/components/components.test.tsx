@@ -8,6 +8,7 @@ import { ModeSwitcher } from "./ModeSwitcher";
 import { SourceList } from "./SourceList";
 import { SystemBanner } from "./SystemBanner";
 import { TierBadge } from "./TierBadge";
+import { TurnView } from "./TurnView";
 
 const SOURCE: Source = {
   n: 1,
@@ -50,6 +51,53 @@ describe("ModeSwitcher", () => {
     render(<ModeSwitcher value="private" onChange={vi.fn()} cloudAvailable={false} />);
     expect(screen.getByRole("radio", { name: /Cloud/ })).toBeDisabled();
     expect(screen.getByText("Cloud mode needs SB_ANTHROPIC_API_KEY.")).toBeInTheDocument();
+  });
+});
+
+describe("SourceList links", () => {
+  const render1 = (over: Partial<Source>) =>
+    render(<SourceList sources={[{ ...SOURCE, ...over }]} disabled={false} anchorPrefix="t" />);
+
+  it("links the path to an obsidian:// URL", () => {
+    render1({ obsidian_url: "obsidian://open?vault=B&file=nas" });
+    expect(screen.getByRole("link", { name: "notes/nas.md" })).toHaveAttribute(
+      "href",
+      "obsidian://open?vault=B&file=nas",
+    );
+  });
+
+  it("renders no link without a URL or for a non-obsidian scheme", () => {
+    const { unmount } = render1({});
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    unmount();
+    render1({ obsidian_url: "javascript:alert(1)" });
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByText("notes/nas.md")).toBeInTheDocument();
+  });
+});
+
+describe("TurnView receipt note", () => {
+  const view = (retrieval: "hybrid" | "text_only" | "none") =>
+    render(
+      <TurnView
+        question="q"
+        sources={[]}
+        sourcesDisabled={false}
+        answer="a"
+        state="done"
+        retrieval={retrieval}
+        anchorPrefix="t"
+      />,
+    );
+
+  it("says when retrieval was text only", () => {
+    view("text_only");
+    expect(screen.getByText("Searched your notes (text only)")).toBeInTheDocument();
+  });
+
+  it("stays silent for hybrid retrieval", () => {
+    view("hybrid");
+    expect(screen.queryByText("Searched your notes (text only)")).not.toBeInTheDocument();
   });
 });
 

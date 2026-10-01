@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { isObsidianUrl } from "@/api/obsidian";
 import type { Source } from "../types";
 
 type Props = { sources: Source[] | null; disabled: boolean; anchorPrefix: string };
@@ -24,7 +25,16 @@ export function SourceList({ sources, disabled, anchorPrefix }: Props) {
           >
             <div className="flex flex-wrap items-baseline gap-2">
               <span className="font-semibold">[{source.n}]</span>
-              <span className="font-mono break-all">{source.path}</span>
+              {isObsidianUrl(source.obsidian_url) ? (
+                <a
+                  href={source.obsidian_url}
+                  className="font-mono break-all underline-offset-2 hover:underline"
+                >
+                  {source.path}
+                </a>
+              ) : (
+                <span className="font-mono break-all">{source.path}</span>
+              )}
               {source.heading ? <span className="text-fg-muted">› {source.heading}</span> : null}
               <span className="ml-auto text-xs text-fg-muted" title="Relevance score">
                 {source.score.toFixed(2)}

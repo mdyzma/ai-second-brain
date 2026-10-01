@@ -13,6 +13,7 @@ type Props = {
   errorMessage?: string | undefined;
   placeholder?: string | undefined;
   tier?: TierDisplay | undefined;
+  retrieval?: "hybrid" | "text_only" | "none" | undefined;
   anchorPrefix: string;
 };
 
@@ -41,6 +42,9 @@ export function TurnView(props: Props) {
         anchorPrefix={props.anchorPrefix}
       />
       {props.tier ? <TierBadge tier={props.tier} className="self-start" /> : null}
+      {props.retrieval === "text_only" ? (
+        <p className="text-xs text-fg-muted">Searched your notes (text only)</p>
+      ) : null}
     </article>
   );
 }

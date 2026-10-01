@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { isObsidianUrl } from "@/api/obsidian";
 import { cn } from "@/design-system/cn";
 import { Button } from "@/design-system/ui/button";
 import { Card } from "@/design-system/ui/card";
@@ -23,7 +24,6 @@ type Props = {
   onClearRecent: () => void;
 };
 
-const OBSIDIAN_URL = /^obsidian:\/\//;
 const BADGE = "rounded-sm border border-border bg-surface px-1.5 py-0.5 text-xs text-fg-muted";
 const CHIP =
   "rounded-md border px-2 py-1 text-xs transition-colors aria-pressed:border-accent aria-pressed:bg-accent aria-pressed:text-accent-fg border-border-input bg-surface-raised text-fg hover:bg-surface";
@@ -52,7 +52,7 @@ function Result({ hit }: { hit: SearchHit }) {
   return (
     <li className="rounded-lg border border-border bg-surface-raised p-4">
       <div className="flex flex-wrap items-center gap-2">
-        {hit.obsidian_url && OBSIDIAN_URL.test(hit.obsidian_url) ? (
+        {isObsidianUrl(hit.obsidian_url) ? (
           <a
             href={hit.obsidian_url}
             className="font-medium text-accent underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-ring"

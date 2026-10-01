@@ -69,6 +69,7 @@ export function Conversation({ session, status, turn, busy, onSend, onStop, head
               errorMessage={turn.error?.message}
               placeholder={PLACEHOLDERS[turn.phase]}
               tier={turn.served ? tierForServed(turn.served) : undefined}
+              retrieval={turn.receipt?.retrieval}
               anchorPrefix="turn-current"
             />
           </li>

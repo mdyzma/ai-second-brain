@@ -6,11 +6,14 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { captureNote } from "@/features/capture/api";
 import { AppShell } from "./AppShell";
 import { ThemeProvider } from "./theme";
+
+vi.mock("@/features/capture/api", () => ({ captureNote: vi.fn() }));
 
 async function renderShell(onLogout: () => void) {
   const rootRoute = createRootRoute({
@@ -74,5 +77,89 @@ describe("AppShell", () => {
     expect(active.className).not.toContain("text-fg-muted");
     expect(inactive.className).toContain("text-fg-muted");
     expect(inactive.className).not.toContain("bg-accent");
+  });
+
+  describe("capture", () => {
+    it("opens from the Capture button", async () => {
+      await renderShell(vi.fn());
+      await userEvent.setup().click(await screen.findByRole("button", { name: "Capture" }));
+      expect(await screen.findByRole("textbox", { name: "Note" })).toBeInTheDocument();
+    });
+
+    it("opens on c from the page body", async () => {
+      await renderShell(vi.fn());
+      await screen.findAllByRole("navigation", { name: "Primary" });
+      await userEvent.setup().keyboard("c");
+      expect(await screen.findByRole("textbox", { name: "Note" })).toBeInTheDocument();
+    });
+
+    it("ignores c inside a field, with a modifier, or while open", async () => {
+      await renderShell(vi.fn());
+      await screen.findAllByRole("navigation", { name: "Primary" });
+      const input = document.createElement("input");
+      document.body.append(input);
+      const user = userEvent.setup();
+      input.focus();
+      await user.keyboard("c");
+      input.blur();
+      await user.keyboard("{Control>}c{/Control}");
+      input.remove();
+      expect(screen.queryByRole("textbox", { name: "Note" })).not.toBeInTheDocument();
+      await user.keyboard("c");
+      const box = await screen.findByRole("textbox", { name: "Note" });
+      await user.type(box, "c");
+      expect(box).toHaveValue("c");
+    });
+
+    it("shows the saved status with an Obsidian link, then clears it after 6 s", async () => {
+      vi.mocked(captureNote).mockResolvedValue({
+        ok: true,
+        path: "Inbox/x.md",
+        title: "x",
+        obsidian_url: "obsidian://open?vault=B&file=x",
+      });
+      localStorage.clear();
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        await renderShell(vi.fn());
+        const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+        await user.click(await screen.findByRole("button", { name: "Capture" }));
+        await user.type(await screen.findByRole("textbox", { name: "Note" }), "hi");
+        await user.click(screen.getByRole("button", { name: "Save" }));
+        const status = await screen.findByRole("status");
+        expect(await within(status).findByText("Saved to Inbox")).toBeInTheDocument();
+        expect(within(status).getByRole("link", { name: "Open in Obsidian" })).toHaveAttribute(
+          "href",
+          "obsidian://open?vault=B&file=x",
+        );
+        act(() => {
+          vi.advanceTimersByTime(5000);
+        });
+        expect(within(status).getByText("Saved to Inbox")).toBeInTheDocument();
+        act(() => {
+          vi.advanceTimersByTime(1500);
+        });
+        expect(within(status).queryByText("Saved to Inbox")).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("omits the link for a non-obsidian URL", async () => {
+      vi.mocked(captureNote).mockResolvedValue({
+        ok: true,
+        path: "Inbox/x.md",
+        title: "x",
+        obsidian_url: "javascript:alert(1)",
+      });
+      await renderShell(vi.fn());
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Capture" }));
+      await user.type(await screen.findByRole("textbox", { name: "Note" }), "hi");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      const status = await screen.findByRole("status");
+      expect(await within(status).findByText("Saved to Inbox")).toBeInTheDocument();
+      expect(within(status).queryByRole("link")).not.toBeInTheDocument();
+    });
   });
 });
