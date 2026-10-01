@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .vault.paths import _excluded
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ENV_FILE = REPO_ROOT / ".env"
@@ -101,6 +103,10 @@ class Settings(BaseSettings):
     embed_batch: int = Field(default=16, ge=1, le=128)
     reconcile_minutes: int = Field(default=15, ge=1, le=1440)
     max_note_bytes: int = Field(default=2_000_000, ge=1_000, le=50_000_000)
+    capture_dir_name: str = Field(default="Inbox", validation_alias="SB_CAPTURE_DIR")
+    obsidian_vault: str = ""
+    chat_num_ctx: int = Field(default=8192, ge=2048, le=131072)
+    retrieval_min_similarity: float = Field(default=0.45, ge=0.0, le=1.0)
 
     @field_validator("vault_path")
     @classmethod
@@ -118,6 +124,24 @@ class Settings(BaseSettings):
     @classmethod
     def _local_embed_model(cls, value: str) -> str:
         return local_model_name(value)
+
+    @model_validator(mode="after")
+    def _capture_dir_inside_vault(self) -> Settings:
+        raw = self.capture_dir_name.strip()
+        parts = PurePosixPath(raw.replace("\\", "/")).parts
+        if (
+            not raw
+            or PureWindowsPath(raw).is_absolute()
+            or raw.startswith(("/", "\\"))
+            or ".." in parts
+            or ":" in raw
+        ):
+            raise ValueError("SB_CAPTURE_DIR must be a relative folder inside the vault")
+        rel = "/".join(parts)
+        if _excluded(f"{rel}/x.md", self.vault_excludes):
+            raise ValueError("SB_CAPTURE_DIR must not be excluded by SB_VAULT_EXCLUDE")
+        self.capture_dir_name = rel
+        return self
 
     @field_validator("owner_password_hash")
     @classmethod
@@ -143,6 +167,18 @@ class Settings(BaseSettings):
     @property
     def vault_excludes(self) -> tuple[str, ...]:
         return tuple(p.strip() for p in self.vault_exclude.split(",") if p.strip())
+
+    @property
+    def capture_dir(self) -> Path | None:
+        if self.vault_path is None:
+            return None
+        return self.vault_path.joinpath(*PurePosixPath(self.capture_dir_name).parts)
+
+    @property
+    def obsidian_vault_name(self) -> str:
+        if self.obsidian_vault.strip():
+            return self.obsidian_vault.strip()
+        return self.vault_path.name if self.vault_path is not None else ""
 
     @property
     def embed_url(self) -> str | None:
