@@ -688,7 +688,8 @@ CREATE TABLE public.chunks (
     ordinal integer NOT NULL,
     heading_path text[] DEFAULT '{}'::text[] NOT NULL,
     content text NOT NULL,
-    tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple'::regconfig, content)) STORED,
+    heading_text text DEFAULT ''::text NOT NULL,
+    tsv tsvector GENERATED ALWAYS AS ((setweight(to_tsvector('simple'::regconfig, heading_text), 'A'::"char") || to_tsvector('simple'::regconfig, content))) STORED,
     CONSTRAINT chunks_ordinal_check CHECK ((ordinal >= 0))
 );
 
@@ -845,7 +846,8 @@ CREATE TABLE public.source_revisions (
     state public.ingest_state DEFAULT 'pending'::public.ingest_state NOT NULL,
     error text,
     observed_at timestamp with time zone DEFAULT now() NOT NULL,
-    indexed_at timestamp with time zone
+    indexed_at timestamp with time zone,
+    tags text[] DEFAULT '{}'::text[] NOT NULL
 );
 
 --
@@ -1110,6 +1112,18 @@ CREATE INDEX procrastinate_periodic_defers_job_id_fkey_v1 ON public.procrastinat
 --
 
 CREATE INDEX source_revisions_pending_idx ON public.source_revisions USING btree (source_id, observed_at) WHERE (state = 'pending'::public.ingest_state);
+
+--
+-- Name: source_revisions_tags_gin; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX source_revisions_tags_gin ON public.source_revisions USING gin (tags);
+
+--
+-- Name: sources_external_ref_prefix; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX sources_external_ref_prefix ON public.sources USING btree (external_ref text_pattern_ops) WHERE (deleted_at IS NULL);
 
 --
 -- Name: procrastinate_jobs procrastinate_jobs_notify_queue_job_aborted_v1; Type: TRIGGER; Schema: public; Owner: -

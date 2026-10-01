@@ -144,14 +144,32 @@ async def claim_pending(conn: AsyncConnection, source_id: UUID) -> Claimed | Non
         )
 
 
-async def insert_chunks(conn: AsyncConnection, revision_id: UUID, chunks: Sequence[Chunk]) -> None:
+def heading_text(title: str, heading_path: Sequence[str]) -> str:
+    parts = list(heading_path)
+    if title and (not parts or parts[0] != title):
+        parts.insert(0, title)
+    return " ".join(parts)
+
+
+async def insert_chunks(
+    conn: AsyncConnection, revision_id: UUID, chunks: Sequence[Chunk], title: str
+) -> None:
     async with conn.cursor() as cur:
         await cur.execute("DELETE FROM chunks WHERE revision_id = %s", (revision_id,))
         if chunks:
             await cur.executemany(
-                "INSERT INTO chunks (revision_id, ordinal, heading_path, content)"
-                " VALUES (%s, %s, %s, %s)",
-                [(revision_id, c.ordinal, list(c.heading_path), c.content) for c in chunks],
+                "INSERT INTO chunks (revision_id, ordinal, heading_path, heading_text, content)"
+                " VALUES (%s, %s, %s, %s, %s)",
+                [
+                    (
+                        revision_id,
+                        c.ordinal,
+                        list(c.heading_path),
+                        heading_text(title, c.heading_path),
+                        c.content,
+                    )
+                    for c in chunks
+                ],
             )
 
 
@@ -167,12 +185,17 @@ async def supersede_revision(conn: AsyncConnection, revision_id: UUID) -> None:
 
 
 async def finish_index(
-    conn: AsyncConnection, source_id: UUID, revision_id: UUID, title: str, metadata: dict[str, Any]
+    conn: AsyncConnection,
+    source_id: UUID,
+    revision_id: UUID,
+    title: str,
+    metadata: dict[str, Any],
+    tags: list[str],
 ) -> None:
     await conn.execute(
         "UPDATE source_revisions SET state = 'indexed', indexed_at = now(), error = NULL,"
-        " metadata = (metadata - 'embed_error') || %s WHERE id = %s",
-        (Jsonb(metadata), revision_id),
+        " tags = %s, metadata = (metadata - 'embed_error') || %s WHERE id = %s",
+        (tags, Jsonb(metadata), revision_id),
     )
     await conn.execute(
         "UPDATE sources SET current_revision_id = %s, title = %s WHERE id = %s",
