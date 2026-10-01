@@ -103,7 +103,8 @@ describe("SearchScreen", () => {
       "obsidian://open?vault=Brain&file=Projects%2FNAS.md",
     );
     expect(within(first).getByText("Projects/NAS.md")).toBeInTheDocument();
-    expect(within(first).getByText("NAS › Dyski")).toBeInTheDocument();
+    expect(within(first).getByText("Dyski")).toBeInTheDocument();
+    expect(within(first).queryByText(/NAS ›/)).toBeNull();
     expect(within(first).getByText("dyski").tagName).toBe("MARK");
     expect(within(first).getByText("Text")).toBeInTheDocument();
     expect(within(first).getByText("Meaning")).toBeInTheDocument();
@@ -168,6 +169,20 @@ describe("SearchScreen", () => {
     screen.getByLabelText("Search your notes").focus();
     await userEvent.keyboard("{ArrowDown}");
     expect(a).toHaveFocus();
+  });
+
+  it("renders no link for a non-obsidian URL", () => {
+    setup({
+      state: { q: "nas", tags: [] },
+      response: { vector: "ok", results: [hit({ obsidian_url: "javascript:alert(1)" })] },
+    });
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.getByText("NAS")).toBeInTheDocument();
+  });
+
+  it("does not announce a count while refreshing", () => {
+    setup({ state: { q: "nas", tags: [] }, response: two, loading: true });
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
   });
 
   it("announces the result count", () => {

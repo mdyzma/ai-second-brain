@@ -1,10 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
 import { facetsQueryOptions, SearchHttpError, searchQueryOptions } from "@/features/search/api";
-import { clearRecent, recentQueries, rememberQuery } from "@/features/search/labels";
 import { SearchScreen } from "@/features/search/SearchScreen";
 import { parseSearch, toSearchParams } from "@/features/search/url";
+import { useRememberQuery } from "@/features/search/useRememberQuery";
 import { statusOf } from "@/features/sources/api";
 
 export const Route = createFileRoute("/_app/search")({
@@ -17,13 +16,7 @@ function SearchRoute() {
   const navigate = useNavigate({ from: Route.fullPath });
   const search = useQuery(searchQueryOptions(state));
   const facets = useQuery(facetsQueryOptions);
-  const [recent, setRecent] = useState(recentQueries);
-  useEffect(() => {
-    if (search.data && state.q.trim()) {
-      rememberQuery(state.q.trim());
-      setRecent(recentQueries());
-    }
-  }, [search.data, state.q]);
+  const { recent, clear } = useRememberQuery(state.q, search);
   const error = search.error;
   return (
     <SearchScreen
@@ -35,10 +28,7 @@ function SearchRoute() {
       error={error ? statusOf(error) : undefined}
       errorDetail={error instanceof SearchHttpError ? error.detail : undefined}
       recent={recent}
-      onClearRecent={() => {
-        clearRecent();
-        setRecent([]);
-      }}
+      onClearRecent={clear}
     />
   );
 }
