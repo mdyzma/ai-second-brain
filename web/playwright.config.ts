@@ -31,6 +31,8 @@ const serverEnv = {
   SB_CHAT_STATUS_TTL_SECONDS: "0",
   SB_ANTHROPIC_API_KEY: "",
   SB_VAULT_PATH: fixtureVault,
+  // Pinned so the owner's .env value never reaches the e2e reset or capture tests.
+  SB_CAPTURE_DIR: "Inbox",
   SB_EMBED_URL: fakeOllamaURL,
   SB_RECONCILE_MINUTES: "60",
   FAKE_OLLAMA_PORT: fakeOllamaPort,
