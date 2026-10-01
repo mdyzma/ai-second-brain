@@ -26,9 +26,11 @@ test("a private question shows sources first, then the saved answer", async ({ p
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page).toHaveURL(/\/ask\/[0-9a-f-]{36}$/);
 
-  const sources = page.getByText(
-    "No matching local sources — this answer is not based on your notes.",
-  );
+  // The worker has indexed the fixture vault, so the generic question may or may not match
+  // notes; either way the sources block must come before the answer.
+  const sources = page
+    .getByText("No matching local sources — this answer is not based on your notes.")
+    .or(page.getByRole("region", { name: "Sources" }));
   const answer = page.getByText("This is the fake e2e answer.");
   await expect(sources).toBeVisible();
   await expect(answer).toBeVisible();

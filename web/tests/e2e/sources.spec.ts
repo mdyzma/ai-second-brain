@@ -9,10 +9,21 @@ test("the worker indexes the fixture vault and Sources shows it", async ({ page 
   await expect(page).toHaveURL(/\/sources$/);
   const table = page.getByRole("table");
   await expect(table.getByText("Projects/NAS.md")).toBeVisible({ timeout: 30_000 });
-  await expect(table.getByText("Searchable")).toHaveCount(5, { timeout: 60_000 });
+  // Other specs may add notes (a capture lands in Inbox/), so check each fixture note, not a count.
+  for (const path of [
+    "Projects/NAS.md",
+    "Projects/Proxmox.md",
+    "Ideas/Second brain.md",
+    "Journal/2026-09-30.md",
+    "Reading/Designing Data-Intensive Applications.md",
+  ]) {
+    const row = table.getByRole("row").filter({ hasText: path });
+    await expect(row).toBeVisible({ timeout: 60_000 });
+    await expect(row.getByText("Searchable")).toBeVisible({ timeout: 60_000 });
+  }
   await expect(table.getByText(".obsidian/workspace.md")).toHaveCount(0);
   const embedded = page.getByText("Embedded", { exact: true }).locator("xpath=..");
-  await expect(embedded.getByText("100%", { exact: true })).toBeVisible();
+  await expect(embedded.getByText("100%", { exact: true })).toBeVisible({ timeout: 60_000 });
 
   // A scan of 5 notes can finish before the UI shows "Scan queued…", so assert the
   // round trip by its outcome: the POST is accepted and the screen's own polling
