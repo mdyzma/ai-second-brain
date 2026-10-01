@@ -201,7 +201,8 @@ Both routes live in `interfaces/api/routes/search.py`. The generated web client 
 **Changes to the 1b models and events:**
 - `Source` gains `obsidian_url: str | None = None`.
 - The `receipt` event gains `retrieval: "hybrid" | "text_only" | "none"`:
-  - `none`: cloud tier, no vault, or zero sources;
+  - `none`: cloud tier or no vault;
+  - `hybrid`: the question was embedded, even if nothing matched;
   - `text_only`: the question could not be embedded.
 - Both are optional or defaulted, so stored 1b turns still load.
 
