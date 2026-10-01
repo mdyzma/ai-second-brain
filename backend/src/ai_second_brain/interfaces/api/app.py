@@ -29,10 +29,11 @@ from ai_second_brain.chat.service import ChatService
 from ai_second_brain.chat.wiring import make_cloud_factory
 from ai_second_brain.config import Settings, get_settings
 from ai_second_brain.db import create_pool
-from ai_second_brain.interfaces.api.routes import auth, chat, health, sources
+from ai_second_brain.interfaces.api.routes import auth, chat, health, search, sources
 from ai_second_brain.knowledge.embedder import Embedder
 from ai_second_brain.knowledge.jobs import create_job_app
 from ai_second_brain.knowledge.queue import JobQueue, ProcrastinateQueue
+from ai_second_brain.search.embedding import QueryEmbedder
 
 logger = logging.getLogger("ai_second_brain.api")
 
@@ -167,6 +168,7 @@ def create_app(
             if settings.embed_url
             else None
         )
+        app.state.query_embedder = QueryEmbedder(embedder)
         job_app = create_job_app(settings.database_url, open_timeout=2.0)
         # space 1 is seeded by the migration
         app.state.ingest = IngestAccess(job_app, 1, embedder)
@@ -207,6 +209,7 @@ def create_app(
     app.include_router(auth.router, prefix="/api/auth")
     app.include_router(chat.router, prefix="/api")
     app.include_router(sources.router, prefix="/api")
+    app.include_router(search.router, prefix="/api")
     return app
 
 

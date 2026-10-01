@@ -145,3 +145,34 @@ class SourceList(BaseModel):
 
 class ReconcileQueued(BaseModel):
     run_id: int
+
+
+class SearchHit(BaseModel):
+    source_id: UUID
+    path: str
+    title: str | None
+    heading_path: list[str]
+    snippet: str
+    matched: list[Literal["text", "vector"]]
+    score: float
+    obsidian_url: str | None
+
+
+class SearchResponse(BaseModel):
+    vector: Literal["ok", "unavailable"]
+    results: list[SearchHit]
+
+
+class FolderFacet(BaseModel):
+    path: str
+    count: int
+
+
+class TagFacet(BaseModel):
+    tag: str
+    count: int
+
+
+class SearchFacets(BaseModel):
+    folders: list[FolderFacet]
+    tags: list[TagFacet]

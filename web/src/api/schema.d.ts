@@ -106,6 +106,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search Notes */
+        get: operations["searchNotes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/search/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search Facets */
+        get: operations["searchFacets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sessions": {
         parameters: {
             query?: never;
@@ -330,6 +364,13 @@ export interface components {
             /** Detail */
             detail: string;
         };
+        /** FolderFacet */
+        FolderFacet: {
+            /** Count */
+            count: number;
+            /** Path */
+            path: string;
+        };
         /** HealthResponse */
         HealthResponse: {
             /**
@@ -439,6 +480,45 @@ export interface components {
             indexed: number;
             /** Pending */
             pending: number;
+        };
+        /** SearchFacets */
+        SearchFacets: {
+            /** Folders */
+            folders: components["schemas"]["FolderFacet"][];
+            /** Tags */
+            tags: components["schemas"]["TagFacet"][];
+        };
+        /** SearchHit */
+        SearchHit: {
+            /** Heading Path */
+            heading_path: string[];
+            /** Matched */
+            matched: ("text" | "vector")[];
+            /** Obsidian Url */
+            obsidian_url: string | null;
+            /** Path */
+            path: string;
+            /** Score */
+            score: number;
+            /** Snippet */
+            snippet: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /** Title */
+            title: string | null;
+        };
+        /** SearchResponse */
+        SearchResponse: {
+            /** Results */
+            results: components["schemas"]["SearchHit"][];
+            /**
+             * Vector
+             * @enum {string}
+             */
+            vector: "ok" | "unavailable";
         };
         /** SessionDetail */
         SessionDetail: {
@@ -558,6 +638,13 @@ export interface components {
              * @enum {string}
              */
             phase: "retrieving" | "connecting" | "generating";
+        };
+        /** TagFacet */
+        TagFacet: {
+            /** Count */
+            count: number;
+            /** Tag */
+            tag: string;
         };
         /** TokenEvent */
         TokenEvent: {
@@ -900,6 +987,123 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReadyResponse"];
+                };
+            };
+        };
+    };
+    searchNotes: {
+        parameters: {
+            query: {
+                q: string;
+                folder?: string | null;
+                tag?: string[] | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    searchFacets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchFacets"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
