@@ -181,3 +181,23 @@ def test_chat_mode_match_rule_and_two_per_note(
         assert "OneWord.md" not in paths  # one ordinary word is not
 
     indexed(db_url, tmp_path, fake, body)
+
+
+def test_chat_rule_runs_on_the_top_or_matches_only(
+    db_url: str, tmp_path: Path, make_fake_ollama: MakeFake, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = make_fake_ollama()
+    vault = VaultBuilder(tmp_path)
+    vault.write("Dense.md", "# Dense\nkopie kopie kopie kopie kopie kopie")
+    vault.write("Both.md", "# Both\nkopie " + "x " * 400 + "zapasowe")
+
+    async def body(h: Harness) -> None:
+        terms = chat_terms("kopie zapasowe")
+        async with h.pool.connection() as conn:
+            wide = await query(conn, "", vector=None, mode="chat", terms=terms, limit=16)
+            assert [hit.path for hit in wide.hits] == ["Both.md"]
+            monkeypatch.setattr("ai_second_brain.search.query.CHAT_TEXT_POOL", 1)
+            narrow = await query(conn, "", vector=None, mode="chat", terms=terms, limit=16)
+        assert narrow.hits == []  # Dense.md ranks first on OR, then fails the rule
+
+    indexed(db_url, tmp_path, fake, body)

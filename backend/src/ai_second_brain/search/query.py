@@ -15,6 +15,7 @@ SPACE_DIMS = 1024
 RRF_K = 60
 LIST_LIMIT = 50
 VECTOR_CANDIDATES = 200
+CHAT_TEXT_POOL = 200  # chat: the match rule runs on the top OR matches only
 Mode = Literal["search", "chat"]
 HEADLINE_OPTS = (
     "StartSel=<mark>, StopSel=</mark>, MaxFragments=2, MaxWords=30, MinWords=12,"
@@ -47,12 +48,6 @@ def like_prefix(folder: str) -> str:
     return f"{escaped}/%"
 
 
-def _tsquery_sql(mode: Mode) -> sql.Composable:
-    if mode == "search":
-        return sql.SQL("websearch_to_tsquery('simple', %(q)s)")
-    return sql.SQL("to_tsquery('simple', %(or_query)s)")
-
-
 _STATEMENT = """
 WITH live AS (
   SELECT s.id AS source_id, s.external_ref AS path, s.title, s.current_revision_id AS revision_id
@@ -61,14 +56,7 @@ WITH live AS (
     AND (%(folder)s::text IS NULL OR s.external_ref LIKE %(folder)s ESCAPE '\\')
     AND r.tags @> %(tags)s::text[]
 ),
-tsq AS (SELECT {tsquery} AS q WHERE %(has_text)s),
-fts AS (
-  SELECT c.id AS chunk_id,
-         row_number() OVER (ORDER BY ts_rank_cd(c.tsv, tsq.q) DESC, c.id) AS rank
-  FROM tsq, chunks c JOIN live l ON l.revision_id = c.revision_id
-  WHERE c.tsv @@ tsq.q {chat_rule}
-  ORDER BY rank LIMIT {list_limit}
-),
+{text_ctes},
 candidates AS MATERIALIZED (
   SELECT e.chunk_id, e.embedding::halfvec({dims}) <=> %(vec)s::halfvec({dims}) AS distance
   FROM chunk_embeddings e
@@ -108,14 +96,40 @@ ORDER BY r.score DESC, r.path, r.per_source
 LIMIT %(limit)s
 """
 
-_CHAT_RULE = """
-    AND (
-      (SELECT count(*) FROM unnest(%(terms)s::text[]) t
-        WHERE c.tsv @@ to_tsquery('simple', quote_literal(t))) >= 2
-      OR EXISTS (SELECT 1 FROM unnest(%(identifiers)s::text[]) t
-        WHERE c.tsv @@ to_tsquery('simple', quote_literal(t)))
-    )
-"""
+_SEARCH_TEXT = """
+tsq AS (SELECT websearch_to_tsquery('simple', %(q)s) AS q WHERE %(has_text)s),
+fts AS (
+  SELECT c.id AS chunk_id,
+         row_number() OVER (ORDER BY ts_rank_cd(c.tsv, tsq.q) DESC, c.id) AS rank
+  FROM tsq, chunks c JOIN live l ON l.revision_id = c.revision_id
+  WHERE c.tsv @@ tsq.q
+  ORDER BY rank LIMIT {list_limit}
+)"""
+
+# Chat (spec 6.2): rank the OR matches first, then apply the match rule (>= 2 distinct terms,
+# or any identifier) to the top CHAT_TEXT_POOL only. Per-term tsqueries are parsed once, in tsq.
+_CHAT_TEXT = """
+tsq AS (
+  SELECT to_tsquery('simple', %(or_query)s) AS q,
+         array(SELECT to_tsquery('simple', quote_literal(t))
+               FROM unnest(%(terms)s::text[]) t) AS term_qs,
+         array(SELECT to_tsquery('simple', quote_literal(t))
+               FROM unnest(%(identifiers)s::text[]) t) AS ident_qs
+  WHERE %(has_text)s
+),
+fts_pool AS (
+  SELECT c.id AS chunk_id, c.tsv, ts_rank_cd(c.tsv, tsq.q) AS text_rank
+  FROM tsq, chunks c JOIN live l ON l.revision_id = c.revision_id
+  WHERE c.tsv @@ tsq.q
+  ORDER BY text_rank DESC, c.id LIMIT {pool}
+),
+fts AS (
+  SELECT p.chunk_id, row_number() OVER (ORDER BY p.text_rank DESC, p.chunk_id) AS rank
+  FROM fts_pool p, tsq
+  WHERE (SELECT count(*) FROM unnest(tsq.term_qs) x WHERE p.tsv @@ x) >= 2
+     OR EXISTS (SELECT 1 FROM unnest(tsq.ident_qs) x WHERE p.tsv @@ x)
+  ORDER BY rank LIMIT {list_limit}
+)"""
 
 
 def _or_query(terms: ChatTerms) -> str:
@@ -136,9 +150,11 @@ async def query(
     if mode == "chat" and terms is None:
         raise ValueError("chat mode needs terms")
     has_text = bool(q.strip()) if mode == "search" else bool(terms and terms.terms)
+    text_ctes = sql.SQL(_CHAT_TEXT if mode == "chat" else _SEARCH_TEXT).format(
+        list_limit=sql.Literal(LIST_LIMIT), pool=sql.Literal(CHAT_TEXT_POOL)
+    )
     statement = sql.SQL(_STATEMENT).format(
-        tsquery=_tsquery_sql(mode),
-        chat_rule=sql.SQL(_CHAT_RULE if mode == "chat" else ""),
+        text_ctes=text_ctes,
         list_limit=sql.Literal(LIST_LIMIT),
         candidates=sql.Literal(VECTOR_CANDIDATES),
         dims=sql.Literal(SPACE_DIMS),

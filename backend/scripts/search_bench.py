@@ -1,4 +1,7 @@
-"""p50/p95 of hybrid search over a synthetic 50k-chunk set. Needs an empty scratch database.
+"""p50/p95 of hybrid search and chat retrieval over a synthetic 50k-chunk set.
+
+Needs a migrated scratch database; it seeds the set when the database has no sources and
+reuses it otherwise.
 
 Usage: uv run python scripts/search_bench.py postgres://…/scratch_db
 """
@@ -13,6 +16,7 @@ from psycopg import AsyncConnection
 
 from ai_second_brain.runtime import new_event_loop
 from ai_second_brain.search.query import query
+from ai_second_brain.search.terms import chat_terms
 
 WORDS = "nas dysk kopia backup proxmox klaster sieć router vlan zfs raid docker host serwer".split()
 
@@ -67,20 +71,35 @@ async def seed(
                 )
 
 
+def report(label: str, timings: list[float]) -> None:
+    timings.sort()
+    p50, p95 = statistics.median(timings), timings[int(len(timings) * 0.95)]
+    print(f"{label}: p50={p50:.1f}ms p95={p95:.1f}ms")
+
+
 async def main(url: str) -> None:
     rng = random.Random(7)  # noqa: S311 - deterministic synthetic data
     async with await AsyncConnection.connect(url) as conn:
-        await seed(conn, rng)
-        await conn.execute("ANALYZE")
-        await conn.commit()
+        row = await (await conn.execute("SELECT count(*) FROM sources")).fetchone()
+        if not row or row[0] == 0:
+            await seed(conn, rng)
+            await conn.execute("ANALYZE")
+            await conn.commit()
         timings = []
         for i in range(200):
             q = f"host{rng.randrange(5000):05d}" if i % 2 else " ".join(rng.sample(WORDS, 2))
             started = time.perf_counter()
             await query(conn, q, vector=vec(rng), limit=20)
             timings.append((time.perf_counter() - started) * 1000)
-    timings.sort()
-    print(f"p50={statistics.median(timings):.1f}ms p95={timings[int(len(timings) * 0.95)]:.1f}ms")
+        report("search", timings)
+        chat = []
+        for _ in range(40):  # a 5-term chat question, as the retriever sends it
+            question = " ".join(rng.sample(WORDS, 5)) + "?"
+            started = time.perf_counter()
+            terms = chat_terms(question)
+            await query(conn, "", vector=vec(rng), mode="chat", terms=terms, limit=16)
+            chat.append((time.perf_counter() - started) * 1000)
+        report("chat 5-term", chat)
 
 
 if __name__ == "__main__":
