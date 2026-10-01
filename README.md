@@ -185,8 +185,8 @@ ai-second-brain/
 │   │   ├── runtime.py          Event loop that psycopg needs on Windows
 │   │   ├── auth/               Password hashing, login throttle, server-side sessions
 │   │   ├── chat/               Private/cloud routing, Ollama and Anthropic clients, conversations
-│   │   ├── vault/              Reading the vault: observe, parse, chunk, watcher, reconcile, moves and deletions
-│   │   ├── search/             Hybrid query (full text + vectors, fused by RRF), query terms, the chat retriever, the capture writer
+│   │   ├── vault/              Reading the vault: observe, parse, chunk, watcher, reconcile, moves and deletions; the capture writer
+│   │   ├── search/             Hybrid query (full text + vectors, fused by RRF), query terms, the chat retriever
 │   │   ├── knowledge/          Sources, revisions, chunks and embeddings in Postgres; the index and embed jobs and the status summary
 │   │   ├── ingest/             The worker process (procrastinate queues, watcher, scheduled reconcile)
 │   │   └── interfaces/
@@ -405,8 +405,10 @@ version files, commits `chore(release): vX.Y.Z [skip ci]`, tags `vX.Y.Z` and pub
   (`bge-m3`).
 - **"Configuration error" naming a hosted model:** `SB_EMBED_MODEL` (or a chat model) ends in `:cloud` or
   `-cloud`. Hosted models are refused at settings validation; use a local tag.
-- **Search says "Matching by meaning is unavailable":** the embedding host is unreachable or the model isn't installed,
-  so only full-text results are shown. See "The embedding host is unreachable" and "The embedding model isn't installed" above.
+- **Search says "Matching by meaning is unavailable":** only full-text results are shown. Either the model is still
+  loading (the first search after Ollama unloaded it can take longer than the 1.5 s limit; it retries after 5 s), or the
+  embedding host is unreachable or the model isn't installed (it retries after 30 s). For the last two, see "The embedding
+  host is unreachable" and "The embedding model isn't installed" above.
 - **Capture says "Couldn't write to the vault folder":** the API process needs write access to
   `SB_VAULT_PATH/SB_CAPTURE_DIR`. Check the folder's permissions (and that the drive isn't read-only).
 - **An Obsidian link does nothing:** Obsidian must be installed on the device where you click it, and the vault name
