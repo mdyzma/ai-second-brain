@@ -19,6 +19,29 @@ test("search finds a note by text and filters by tag", async ({ page }) => {
   await expect(results.getByRole("listitem")).toHaveCount(1);
 });
 
+test("Back and Forward move between searches", async ({ page }) => {
+  const box = page.getByLabel("Search your notes");
+  await box.fill("Dyski");
+  await expect(page).toHaveURL(/q=.*Dyski/);
+  await box.press("Enter");
+  await page.getByRole("button", { name: "homelab", pressed: false }).click();
+  await expect(page).toHaveURL(/tag=.*homelab/);
+  await box.fill("Proxmox");
+  await expect(page).toHaveURL(/q=.*Proxmox/);
+  await box.press("Enter");
+
+  await page.goBack();
+  await expect(page).toHaveURL(/q=.*Dyski.*tag=.*homelab/);
+  await expect(box).toHaveValue("Dyski");
+  await page.goBack();
+  await expect(page).toHaveURL(/q=.*Dyski/);
+  await expect(page).not.toHaveURL(/tag=/);
+  await page.goForward();
+  await page.goForward();
+  await expect(page).toHaveURL(/q=.*Proxmox/);
+  await expect(box).toHaveValue("Proxmox");
+});
+
 test("a capture becomes searchable", async ({ page }) => {
   await page.getByRole("button", { name: "Capture" }).click();
   await page

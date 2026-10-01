@@ -38,6 +38,7 @@ function setup(
   const props = {
     state: { q: "", tags: [] } as SearchState,
     onState: vi.fn(),
+    onRemember: vi.fn(),
     facets: FACETS,
     loading: false,
     recent: [] as string[],
@@ -82,12 +83,12 @@ describe("SearchScreen", () => {
     act(() => {
       vi.advanceTimersByTime(1);
     });
-    expect(props.onState).toHaveBeenCalledWith({ q: "nas", tags: [] });
+    expect(props.onState).toHaveBeenCalledWith({ q: "nas", tags: [] }, "typing");
 
     props.onState.mockClear();
     fireEvent.change(input, { target: { value: "disks" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(props.onState).toHaveBeenCalledWith({ q: "disks", tags: [] });
+    expect(props.onState).toHaveBeenCalledWith({ q: "disks", tags: [] }, "commit");
     act(() => {
       vi.advanceTimersByTime(500);
     });
@@ -141,21 +142,30 @@ describe("SearchScreen", () => {
       "false",
     );
     await userEvent.click(screen.getByRole("button", { name: "homelab" }));
-    expect(props.onState).toHaveBeenLastCalledWith({
-      q: "nas",
-      folder: "Projects",
-      tags: ["nas", "homelab"],
-    });
+    expect(props.onState).toHaveBeenLastCalledWith(
+      {
+        q: "nas",
+        folder: "Projects",
+        tags: ["nas", "homelab"],
+      },
+      "commit",
+    );
     await userEvent.click(screen.getByRole("button", { name: "nas" }));
-    expect(props.onState).toHaveBeenLastCalledWith({ q: "nas", folder: "Projects", tags: [] });
+    expect(props.onState).toHaveBeenLastCalledWith(
+      { q: "nas", folder: "Projects", tags: [] },
+      "commit",
+    );
     await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(props.onState).toHaveBeenLastCalledWith({ q: "nas", tags: [] });
+    expect(props.onState).toHaveBeenLastCalledWith({ q: "nas", tags: [] }, "commit");
   });
 
   it("changes the folder", async () => {
     const props = setup({ state: { q: "nas", tags: [] }, response: two });
     await userEvent.selectOptions(screen.getByLabelText("Folder"), "Projects");
-    expect(props.onState).toHaveBeenCalledWith({ q: "nas", tags: [], folder: "Projects" });
+    expect(props.onState).toHaveBeenCalledWith(
+      { q: "nas", tags: [], folder: "Projects" },
+      "commit",
+    );
   });
 
   it("moves focus between result links with the arrow keys", async () => {
@@ -195,6 +205,7 @@ describe("SearchScreen", () => {
       <SearchScreen
         state={{ q: "xx", tags: [] }}
         onState={vi.fn()}
+        onRemember={vi.fn()}
         loading={false}
         recent={[]}
         onClearRecent={vi.fn()}
@@ -226,6 +237,50 @@ describe("SearchScreen", () => {
   it("shows error copy from the shared labels", () => {
     setup({ state: { q: "nas", tags: [] }, error: 409, errorDetail: "vault_disabled" });
     expect(screen.getByRole("alert")).toHaveTextContent("Set SB_VAULT_PATH to search your notes.");
+  });
+
+  it("commits a recent-search click", async () => {
+    const props = setup({ recent: ["backup"] });
+    await userEvent.click(screen.getByRole("button", { name: "backup" }));
+    expect(props.onState).toHaveBeenCalledWith({ q: "backup", tags: [] }, "commit");
+  });
+
+  it("remembers a query on Enter but never a debounced prefix", () => {
+    vi.useFakeTimers();
+    const props = setup();
+    const input = screen.getByLabelText("Search your notes");
+    fireEvent.change(input, { target: { value: "ko" } });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(props.onRemember).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "kopie zapasowe " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(props.onRemember).toHaveBeenCalledExactlyOnceWith("kopie zapasowe");
+  });
+
+  it("does not remember a one-letter Enter", () => {
+    const props = setup();
+    const input = screen.getByLabelText("Search your notes");
+    fireEvent.change(input, { target: { value: "k" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(props.onRemember).not.toHaveBeenCalled();
+  });
+
+  it("remembers the query when a result is clicked", () => {
+    const props = setup({ state: { q: "dyski", tags: [] }, response: two });
+    const link = screen.getAllByRole("link")[0] as HTMLElement;
+    link.addEventListener("click", (e) => e.preventDefault());
+    fireEvent.click(link);
+    expect(props.onRemember).toHaveBeenCalledExactlyOnceWith("dyski");
+  });
+
+  it("falls back to the path when a hit has no title", () => {
+    setup({
+      state: { q: "nas", tags: [] },
+      response: { vector: "ok", results: [hit({ title: null })] },
+    });
+    expect(screen.getByRole("link", { name: "Projects/NAS.md" })).toBeInTheDocument();
   });
 
   it("marks the list busy while refreshing", () => {

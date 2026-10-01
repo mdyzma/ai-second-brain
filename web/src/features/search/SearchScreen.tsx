@@ -6,7 +6,7 @@ import { Card } from "@/design-system/ui/card";
 import { Input } from "@/design-system/ui/input";
 import { errorCopy, snippetParts, VECTOR_UNAVAILABLE } from "./labels";
 import type { SearchFacets, SearchHit, SearchResponse } from "./types";
-import type { SearchState } from "./url";
+import type { SearchChange, SearchState } from "./url";
 
 const DEBOUNCE_MS = 250;
 const MIN_QUERY = 2;
@@ -14,7 +14,9 @@ const TOP_TAGS = 12;
 
 type Props = {
   state: SearchState;
-  onState: (next: SearchState) => void;
+  onState: (next: SearchState, change: SearchChange) => void;
+  /** Save a query to recent searches (Enter, a result click). */
+  onRemember: (q: string) => void;
   response?: SearchResponse | undefined;
   facets?: SearchFacets | undefined;
   loading: boolean;
@@ -47,7 +49,7 @@ function Snippet({ snippet }: { snippet: string }) {
   );
 }
 
-function Result({ hit }: { hit: SearchHit }) {
+function Result({ hit, onOpen }: { hit: SearchHit; onOpen: () => void }) {
   const trail = hit.heading_path.join(" › ");
   return (
     <li className="rounded-lg border border-border bg-surface-raised p-4">
@@ -55,12 +57,13 @@ function Result({ hit }: { hit: SearchHit }) {
         {isObsidianUrl(hit.obsidian_url) ? (
           <a
             href={hit.obsidian_url}
+            onClick={onOpen}
             className="font-medium text-accent underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
           >
-            {hit.title}
+            {hit.title ?? hit.path}
           </a>
         ) : (
-          <span className="font-medium">{hit.title}</span>
+          <span className="font-medium">{hit.title ?? hit.path}</span>
         )}
         {hit.matched.includes("text") && <span className={BADGE}>Text</span>}
         {hit.matched.includes("vector") && <span className={BADGE}>Meaning</span>}
@@ -75,6 +78,7 @@ function Result({ hit }: { hit: SearchHit }) {
 export function SearchScreen({
   state,
   onState,
+  onRemember,
   response,
   facets,
   loading,
@@ -122,15 +126,15 @@ export function SearchScreen({
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  const commit = (q: string) => {
+  const commit = (q: string, change: SearchChange = "commit") => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
-    latest.current.onState({ ...latest.current.state, q });
+    latest.current.onState({ ...latest.current.state, q }, change);
   };
   const onChange = (q: string) => {
     setText(q);
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => commit(q), DEBOUNCE_MS);
+    timer.current = setTimeout(() => commit(q, "typing"), DEBOUNCE_MS);
   };
 
   const links = () => Array.from(listRef.current?.querySelectorAll<HTMLElement>("a") ?? []);
@@ -157,10 +161,13 @@ export function SearchScreen({
     .filter((t) => !visible.includes(t))
     .filter((t) => t.toLowerCase().includes(tagFilter.trim().toLowerCase()));
   const toggleTag = (tag: string) =>
-    onState({
-      ...state,
-      tags: state.tags.includes(tag) ? state.tags.filter((t) => t !== tag) : [...state.tags, tag],
-    });
+    onState(
+      {
+        ...state,
+        tags: state.tags.includes(tag) ? state.tags.filter((t) => t !== tag) : [...state.tags, tag],
+      },
+      "commit",
+    );
 
   const queryReady = state.q.trim().length >= MIN_QUERY;
   const results = response?.results ?? [];
@@ -194,8 +201,10 @@ export function SearchScreen({
         value={text}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") commit(text);
-          else if (e.key === "ArrowDown" && moveFocus(1, null)) e.preventDefault();
+          if (e.key === "Enter") {
+            commit(text);
+            if (text.trim().length >= MIN_QUERY) onRemember(text.trim());
+          } else if (e.key === "ArrowDown" && moveFocus(1, null)) e.preventDefault();
         }}
       />
 
@@ -205,7 +214,7 @@ export function SearchScreen({
           value={state.folder ?? ""}
           onChange={(e) => {
             const { folder: _drop, ...rest } = state;
-            onState(e.target.value ? { ...rest, folder: e.target.value } : rest);
+            onState(e.target.value ? { ...rest, folder: e.target.value } : rest, "commit");
           }}
           className="h-8 rounded-md border border-border-input bg-surface-raised px-2 text-sm text-fg"
         >
@@ -238,7 +247,11 @@ export function SearchScreen({
           </details>
         ) : null}
         {hasFilters && (
-          <Button variant="ghost" size="sm" onClick={() => onState({ q: state.q, tags: [] })}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onState({ q: state.q, tags: [] }, "commit")}
+          >
             Clear filters
           </Button>
         )}
@@ -321,6 +334,7 @@ export function SearchScreen({
             <Result
               key={`${hit.source_id}:${hit.heading_path.join("/")}:${hit.snippet}`}
               hit={hit}
+              onOpen={() => onRemember(state.q)}
             />
           ))}
         </ol>

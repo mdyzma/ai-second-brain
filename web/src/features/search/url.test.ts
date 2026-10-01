@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { parseSearch, toSearchParams } from "./url";
+import { historyStep, parseSearch, toSearchParams } from "./url";
+
+describe("search history steps", () => {
+  it("pushes a committed change on top of a committed entry", () => {
+    expect(historyStep(false, "commit")).toEqual({ replace: false, draft: false });
+  });
+  it("pushes the first typing update, marked as a draft", () => {
+    expect(historyStep(false, "typing")).toEqual({ replace: false, draft: true });
+  });
+  it("replaces a draft entry with further typing", () => {
+    expect(historyStep(true, "typing")).toEqual({ replace: true, draft: true });
+  });
+  it("turns a draft into a committed entry in place", () => {
+    expect(historyStep(true, "commit")).toEqual({ replace: true, draft: false });
+  });
+});
 
 describe("search url state", () => {
   it("round-trips state through the URL", () => {
