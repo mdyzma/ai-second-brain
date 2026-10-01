@@ -22,7 +22,7 @@ from ai_second_brain.chat.policy import route
 from ai_second_brain.chat.prompts import build_messages, system_prompt
 from ai_second_brain.chat.providers.base import ChatProvider
 from ai_second_brain.chat.repository import STORAGE_ERRORS, ChatRepository
-from ai_second_brain.chat.retrieval import Retriever
+from ai_second_brain.chat.retrieval import Retrieval, Retriever
 
 logger = logging.getLogger("ai_second_brain.chat")
 
@@ -84,7 +84,10 @@ class ChatService:
         try:
             yield StatusEvent(phase="retrieving")
             tier = route(session.mode)
-            sources = await self._retrieve(question) if tier is Tier.LOCAL else []
+            retrieval = (
+                await self._retrieve(question) if tier is Tier.LOCAL else Retrieval([], "none")
+            )
+            sources = retrieval.sources
             yield SourcesEvent(items=sources, disabled=tier is Tier.CLOUD)
             yield StatusEvent(phase="connecting")
             provider = await self._provider(tier)
@@ -122,6 +125,7 @@ class ChatService:
                 model=model,
                 degraded=provider.degraded,
                 duration_ms=self._elapsed_ms(started),
+                retrieval=retrieval.mode,
             )
             yield DoneEvent()
         except ChatError as error:
@@ -141,15 +145,19 @@ class ChatService:
     def _elapsed_ms(self, started: float) -> int:
         return round((self._timer() - started) * 1000)
 
-    async def _retrieve(self, question: str) -> list[Source]:
+    async def _retrieve(self, question: str) -> Retrieval:
         try:
-            found: Sequence[Source] = await self._retriever.retrieve(question, SOURCE_LIMIT)
+            found = await self._retriever.retrieve(question, SOURCE_LIMIT)
         except Exception:  # any retriever failure is reported, never its details
             raise ChatError("retrieval_error", "retrieval") from None
-        return [
-            source.model_copy(update={"n": index})
-            for index, source in enumerate(found[:SOURCE_LIMIT], start=1)
-        ]
+        sources: Sequence[Source] = found.sources
+        return Retrieval(
+            [
+                source.model_copy(update={"n": index})
+                for index, source in enumerate(sources[:SOURCE_LIMIT], start=1)
+            ],
+            found.mode,
+        )
 
     async def _provider(self, tier: Tier) -> ChatProvider:
         if tier is Tier.LOCAL:

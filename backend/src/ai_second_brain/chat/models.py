@@ -34,6 +34,7 @@ class Source(BaseModel):
     heading: str | None = None
     score: float
     snippet: str
+    obsidian_url: str | None = None
 
 
 class ChatSession(BaseModel):

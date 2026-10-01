@@ -34,6 +34,7 @@ from ai_second_brain.knowledge.embedder import Embedder
 from ai_second_brain.knowledge.jobs import create_job_app
 from ai_second_brain.knowledge.queue import JobQueue, ProcrastinateQueue
 from ai_second_brain.search.embedding import QueryEmbedder
+from ai_second_brain.search.retriever import HybridRetriever
 
 logger = logging.getLogger("ai_second_brain.api")
 
@@ -154,14 +155,8 @@ def create_app(
             http_client,
             timeouts=timeouts,
             max_tokens=settings.chat_max_tokens,
+            num_ctx=settings.chat_num_ctx,
             status_ttl=settings.chat_status_ttl_seconds,
-        )
-        app.state.chat_repo = PgChatRepository(pool)
-        app.state.chat = ChatService(
-            app.state.chat_repo,
-            retriever or NullRetriever(),
-            app.state.ollama,
-            make_cloud_factory(settings, timeouts),
         )
         embedder = (
             Embedder(settings.embed_url, settings.embed_model, 1024, http_client, timeouts)
@@ -169,6 +164,18 @@ def create_app(
             else None
         )
         app.state.query_embedder = QueryEmbedder(embedder)
+        chat_retriever = retriever or (
+            HybridRetriever(pool, app.state.query_embedder, settings)
+            if settings.vault_path is not None
+            else NullRetriever()
+        )
+        app.state.chat_repo = PgChatRepository(pool)
+        app.state.chat = ChatService(
+            app.state.chat_repo,
+            chat_retriever,
+            app.state.ollama,
+            make_cloud_factory(settings, timeouts),
+        )
         job_app = create_job_app(settings.database_url, open_timeout=2.0)
         # space 1 is seeded by the migration
         app.state.ingest = IngestAccess(job_app, 1, embedder)

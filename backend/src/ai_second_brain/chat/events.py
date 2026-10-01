@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 from ai_second_brain.chat.models import Source
+from ai_second_brain.chat.retrieval import RetrievalMode
 
 PING = ": ping\n\n"
 
@@ -42,6 +43,7 @@ class ReceiptEvent(_Event):
     model: str
     degraded: bool
     duration_ms: int
+    retrieval: RetrievalMode = "none"
 
 
 class DoneEvent(_Event):

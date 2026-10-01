@@ -35,7 +35,13 @@ def make_pool(
 ) -> tuple[OllamaPool, httpx2.AsyncClient]:
     client = create_http_client()
     pool = OllamaPool(
-        list(endpoints), client, timeouts=FAST, max_tokens=321, status_ttl=10.0, clock=clock
+        list(endpoints),
+        client,
+        timeouts=FAST,
+        max_tokens=321,
+        num_ctx=8192,
+        status_ttl=10.0,
+        clock=clock,
     )
     return pool, client
 
@@ -91,7 +97,7 @@ def test_stream_sends_expected_payload(make_fake_ollama: MakeFake) -> None:
         "model": "fake-model",
         "messages": [{"role": "system", "content": "SYSTEM"}, *MESSAGES],
         "stream": True,
-        "options": {"num_predict": 321},
+        "options": {"num_predict": 321, "num_ctx": 8192},
     }
 
 

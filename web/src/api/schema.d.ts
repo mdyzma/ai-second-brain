@@ -459,6 +459,12 @@ export interface components {
             event: "receipt";
             /** Model */
             model: string;
+            /**
+             * Retrieval
+             * @default none
+             * @enum {string}
+             */
+            retrieval: "hybrid" | "text_only" | "none";
             /** Seq */
             seq: number;
             /**
@@ -549,6 +555,8 @@ export interface components {
             heading?: string | null;
             /** N */
             n: number;
+            /** Obsidian Url */
+            obsidian_url?: string | null;
             /** Path */
             path: string;
             /** Score */

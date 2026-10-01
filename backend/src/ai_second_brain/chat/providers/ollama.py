@@ -42,11 +42,14 @@ class OllamaProvider:
         client: httpx2.AsyncClient,
         timeouts: ChatTimeouts,
         max_tokens: int,
+        *,
+        num_ctx: int,
     ) -> None:
         self._endpoint = endpoint
         self._client = client
         self._timeouts = timeouts
         self._max_tokens = max_tokens
+        self._num_ctx = num_ctx
 
     @property
     def label(self) -> str:
@@ -69,7 +72,7 @@ class OllamaProvider:
             "model": self._endpoint.model,
             "messages": [{"role": "system", "content": system}, *messages],
             "stream": True,
-            "options": {"num_predict": self._max_tokens},
+            "options": {"num_predict": self._max_tokens, "num_ctx": self._num_ctx},
         }
         done = False
         try:
@@ -122,6 +125,7 @@ class OllamaPool:
         *,
         timeouts: ChatTimeouts,
         max_tokens: int,
+        num_ctx: int,
         status_ttl: float,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -129,6 +133,7 @@ class OllamaPool:
         self._client = client
         self._timeouts = timeouts
         self._max_tokens = max_tokens
+        self._num_ctx = num_ctx
         self._status_ttl = status_ttl
         self._clock = clock
         self._cache: tuple[float, list[EndpointStatus]] | None = None
@@ -150,7 +155,13 @@ class OllamaPool:
         """First endpoint whose probe answers, in configured order. No cloud, ever."""
         for endpoint in self._endpoints:
             if await self._probe(endpoint):
-                return OllamaProvider(endpoint, self._client, self._timeouts, self._max_tokens)
+                return OllamaProvider(
+                    endpoint,
+                    self._client,
+                    self._timeouts,
+                    self._max_tokens,
+                    num_ctx=self._num_ctx,
+                )
         raise ChatError("no_local_model", "ollama")
 
     async def status(self) -> list[EndpointStatus]:

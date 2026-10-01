@@ -86,6 +86,8 @@ def test_private_turn_streams_in_order_and_saves() -> None:
         sources = events[1]
         assert isinstance(sources, SourcesEvent)
         assert [s.n for s in sources.items] == [1, 2]  # renumbered
+        receipt = events[-2]
+        assert isinstance(receipt, ReceiptEvent) and receipt.retrieval == "hybrid"
         assert sources.disabled is False
         [turn] = await repo.list_turns(session.id)
         assert (turn.answer, turn.endpoint, turn.model) == (
@@ -113,6 +115,8 @@ def test_cloud_turn_never_retrieves_or_touches_local_models() -> None:
         events = await drain(service, session, "Explain CRDTs")
         sources = next(e for e in events if isinstance(e, SourcesEvent))
         assert (sources.items, sources.disabled) == ([], True)
+        receipt = next(e for e in events if isinstance(e, ReceiptEvent))
+        assert receipt.retrieval == "none"
         assert isinstance(events[-1], DoneEvent)
         assert local.selects == 0
         system, messages = cloud_provider.calls[0]

@@ -20,6 +20,7 @@ const RECEIPT: TurnEvent = {
   model: "m",
   degraded: false,
   duration_ms: 5,
+  retrieval: "hybrid",
 };
 
 function sseBody(frames: string[]): Response {

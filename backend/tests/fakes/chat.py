@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator, Sequence
 
 from ai_second_brain.chat.errors import ChatError, Component
 from ai_second_brain.chat.models import ChatMessage, Source
+from ai_second_brain.chat.retrieval import Retrieval
 
 
 class ScriptedProvider:
@@ -71,18 +72,18 @@ class StaticRetriever:
         self.sources = list(sources)
         self.calls: list[tuple[str, int]] = []
 
-    async def retrieve(self, question: str, limit: int) -> list[Source]:
+    async def retrieve(self, question: str, limit: int) -> Retrieval:
         self.calls.append((question, limit))
-        return self.sources
+        return Retrieval(self.sources, "hybrid" if self.sources else "none")
 
 
 class SpyRetriever(StaticRetriever):
     """Fails the test if cloud code ever retrieves."""
 
-    async def retrieve(self, question: str, limit: int) -> list[Source]:
+    async def retrieve(self, question: str, limit: int) -> Retrieval:
         raise AssertionError("retriever must not be called")
 
 
 class FailingRetriever:
-    async def retrieve(self, question: str, limit: int) -> list[Source]:
+    async def retrieve(self, question: str, limit: int) -> Retrieval:
         raise RuntimeError("index unavailable")

@@ -472,6 +472,16 @@
             "title": "Model",
             "type": "string"
           },
+          "retrieval": {
+            "default": "none",
+            "enum": [
+              "hybrid",
+              "text_only",
+              "none"
+            ],
+            "title": "Retrieval",
+            "type": "string"
+          },
           "seq": {
             "title": "Seq",
             "type": "integer"
@@ -489,7 +499,8 @@
           "endpoint",
           "model",
           "degraded",
-          "duration_ms"
+          "duration_ms",
+          "retrieval"
         ],
         "title": "ReceiptEvent",
         "type": "object"
@@ -719,6 +730,17 @@
             "minimum": 1.0,
             "title": "N",
             "type": "integer"
+          },
+          "obsidian_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Obsidian Url"
           },
           "path": {
             "title": "Path",

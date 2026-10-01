@@ -20,7 +20,7 @@ from ai_second_brain.chat.models import ChatMode
 from ai_second_brain.chat.providers.base import ChatTimeouts
 from ai_second_brain.chat.providers.ollama import OllamaPool, create_http_client
 from ai_second_brain.chat.repository import InMemoryChatRepository
-from ai_second_brain.chat.retrieval import NullRetriever
+from ai_second_brain.chat.retrieval import NullRetriever, Retriever
 from ai_second_brain.chat.service import ChatService
 from ai_second_brain.config import Settings, get_settings
 from ai_second_brain.db import create_pool
@@ -32,6 +32,8 @@ from ai_second_brain.knowledge.embedder import Embedder
 from ai_second_brain.knowledge.jobs import create_job_app
 from ai_second_brain.knowledge.queue import ProcrastinateQueue
 from ai_second_brain.runtime import new_event_loop
+from ai_second_brain.search.embedding import QueryEmbedder
+from ai_second_brain.search.retriever import HybridRetriever
 from ai_second_brain.vault.paths import Vault
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="Second Brain admin CLI.")
@@ -106,6 +108,7 @@ async def _chat_smoke(settings: Any) -> int:
             client,
             timeouts=ChatTimeouts(),
             max_tokens=settings.chat_max_tokens,
+            num_ctx=settings.chat_num_ctx,
             status_ttl=0,
         )
         for status in await pool.status():
@@ -113,23 +116,41 @@ async def _chat_smoke(settings: Any) -> int:
             degraded = " (degraded)" if status.degraded else ""
             typer.echo(f"{status.label:<16} {status.model:<28} {state}{degraded}")
         repository = InMemoryChatRepository()  # nothing is saved
-        service = ChatService(repository, NullRetriever(), pool, cloud=None)
-        session = await repository.create_session(ChatMode.PRIVATE)
-        answer: list[str] = []
-        exit_code = 1
-        async for event in service.run_turn(session, SMOKE_QUESTION):
-            if isinstance(event, TokenEvent):
-                answer.append(event.text)
-            elif isinstance(event, ReceiptEvent):
-                exit_code = 0
-                typer.echo(
-                    f"Answered by {event.endpoint} ({event.model}) in {event.duration_ms} ms"
-                )
-            elif isinstance(event, ErrorEvent):
-                typer.echo(f"Error [{event.component}] {event.code}: {event.message}")
-        if exit_code == 0:
-            typer.echo(f"Answer: {''.join(answer).strip()}")
-        return exit_code
+        db_pool = None
+        retriever: Retriever = NullRetriever()
+        if settings.vault_path is not None:
+            db_pool = create_pool(settings.database_url)
+            await db_pool.open(wait=True, timeout=30)
+            embedder = (
+                Embedder(settings.embed_url, settings.embed_model, 1024, client, ChatTimeouts())
+                if settings.embed_url
+                else None
+            )
+            retriever = HybridRetriever(db_pool, QueryEmbedder(embedder), settings)
+        try:
+            return await _smoke_turn(
+                ChatService(repository, retriever, pool, cloud=None), repository
+            )
+        finally:
+            if db_pool is not None:
+                await db_pool.close()
+
+
+async def _smoke_turn(service: ChatService, repository: InMemoryChatRepository) -> int:
+    session = await repository.create_session(ChatMode.PRIVATE)
+    answer: list[str] = []
+    exit_code = 1
+    async for event in service.run_turn(session, SMOKE_QUESTION):
+        if isinstance(event, TokenEvent):
+            answer.append(event.text)
+        elif isinstance(event, ReceiptEvent):
+            exit_code = 0
+            typer.echo(f"Answered by {event.endpoint} ({event.model}) in {event.duration_ms} ms")
+        elif isinstance(event, ErrorEvent):
+            typer.echo(f"Error [{event.component}] {event.code}: {event.message}")
+    if exit_code == 0:
+        typer.echo(f"Answer: {''.join(answer).strip()}")
+    return exit_code
 
 
 @app.command("chat-smoke")
