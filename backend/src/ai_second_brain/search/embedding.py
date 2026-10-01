@@ -48,8 +48,14 @@ class QueryEmbedder:
 
 
 def excerpt(content: str, limit: int = 240) -> str:
-    # Escape first, then cut at a space: entities contain no spaces, so none is split.
+    # Escape first, then cut at a space; a cut inside a space-free run drops a partial entity.
     text = html.escape(" ".join(content.split()), quote=False)
     if len(text) > limit:
-        text = (text[:limit].rsplit(" ", 1)[0] or text[:limit]) + "…"
+        cut = text[:limit]
+        if " " in cut:
+            cut = cut.rsplit(" ", 1)[0]
+        amp = cut.rfind("&")
+        if amp != -1 and ";" not in cut[amp:]:
+            cut = cut[:amp]
+        text = cut + "…"
     return text

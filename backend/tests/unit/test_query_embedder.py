@@ -54,3 +54,9 @@ def test_excerpt_escapes_and_cuts_at_word() -> None:
     text = "<b>bold</b> & " + "word " * 100
     out = excerpt(text, 40)
     assert out.startswith("&lt;b&gt;bold&lt;/b&gt; &amp;") and len(out) <= 41 and out.endswith("…")
+
+
+def test_excerpt_never_splits_an_entity() -> None:
+    out = excerpt("<" * 300, 10)
+    assert out.endswith("…")
+    assert out[:-1].replace("&lt;", "") == ""
