@@ -46,6 +46,7 @@ class OllamaBehaviour:
     embed_fail_on_call: int | None = None  # 1-based call number that returns 500
     embed_delay: float = 0.0
     embed_raw_vector: list[Any] | None = None  # replaces the first vector verbatim
+    embed_topics: dict[str, str] = field(default_factory=dict)  # substring → shared topic vector
 
 
 def fake_vector(text: str, dims: int = 1024) -> list[float]:
@@ -96,7 +97,15 @@ class FakeOllama:
         if b.embed_status != 200:
             return JSONResponse({"error": b.embed_error_text}, status_code=b.embed_status)
         inputs = body["input"] if isinstance(body["input"], list) else [body["input"]]
-        vectors = [fake_vector(text, b.embed_dims) for text in inputs]
+
+        def vector_for(text: str) -> list[float]:
+            lowered = text.lower()
+            for needle, topic in b.embed_topics.items():
+                if needle.lower() in lowered:
+                    return fake_vector(f"topic:{topic}", b.embed_dims)
+            return fake_vector(text, b.embed_dims)
+
+        vectors = [vector_for(text) for text in inputs]
         if b.embed_count_delta < 0:
             vectors = vectors[: b.embed_count_delta]
         elif b.embed_count_delta > 0:
