@@ -80,3 +80,10 @@ def test_target_limits(tmp_path: Path) -> None:
                 f"  - {{id: a, q: x, lang: pl, kind: topic, targets: [{many}]}}\n",
             )
         )
+
+
+def test_unreadable_or_non_utf8_file_is_config_error(tmp_path: Path) -> None:
+    path = tmp_path / "queries.yaml"
+    path.write_bytes(b"version: 1\nqueries: [\xff\xfe]\n")
+    with pytest.raises(EvalConfigError):
+        load_queries(path)

@@ -36,6 +36,8 @@ def load_queries(path: Path) -> list[EvalQuery]:
         data: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError:
         raise EvalConfigError(["queries file is not valid YAML"]) from None
+    except (UnicodeDecodeError, OSError):
+        raise EvalConfigError(["queries file could not be read as UTF-8 text"]) from None
     if (
         not isinstance(data, dict)
         or data.get("version") != 1

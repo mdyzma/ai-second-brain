@@ -192,7 +192,7 @@ class Settings(BaseSettings):
 
     @property
     def eval_report_dir(self) -> Path:
-        return self.eval_dir.expanduser()
+        return self.eval_dir.expanduser().resolve()  # the same path the repo check validated
 
     @property
     def eval_database_url(self) -> str:
