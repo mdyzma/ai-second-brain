@@ -29,11 +29,11 @@ from ai_second_brain.chat.providers.ollama import OllamaPool, create_http_client
 from ai_second_brain.chat.repository import InMemoryChatRepository
 from ai_second_brain.chat.retrieval import NullRetriever, Retriever
 from ai_second_brain.chat.service import ChatService
-from ai_second_brain.config import REPO_ROOT, Settings, get_settings
+from ai_second_brain.config import REPO_ROOT, Settings, eval_model_tags, get_settings
 from ai_second_brain.db import create_pool
-from ai_second_brain.eval.database import DbmateError
+from ai_second_brain.eval.database import DbmateError, EvalDatabaseError
 from ai_second_brain.eval.database import prepare as prepare_eval_db
-from ai_second_brain.eval.embedding import PreflightError
+from ai_second_brain.eval.embedding import ModelEmbedError, PreflightError
 from ai_second_brain.eval.guards import check_eval_url
 from ai_second_brain.eval.queries import EvalConfigError, parse_queries
 from ai_second_brain.eval.report import SUMMARY_HEADER, summary_rows, write_report
@@ -470,6 +470,13 @@ async def _eval_run(settings: Settings, queries_path: Path, models: list[str]) -
         )
 
 
+RESUME_HINT = "Cached vectors are kept: run again to resume."
+UNREACHABLE = {
+    "dev": "Could not reach the dev database (DATABASE_URL).",
+    "eval": "Could not reach the evaluation database (SB_EVAL_DATABASE_URL).",
+}
+
+
 def _save_report(result: RunResult, out_dir: Path, now: datetime) -> Path:
     """Write the report; if out_dir fails, keep the (possibly hours-long) run in the temp dir."""
     try:
@@ -480,8 +487,9 @@ def _save_report(result: RunResult, out_dir: Path, now: datetime) -> Path:
             " writing it to the temp directory instead.",
             err=True,
         )
-    fallback = Path(tempfile.gettempdir()) / f"sb-eval-{now.strftime('%Y%m%d-%H%M%S')}"
     try:
+        # mkdtemp: a fresh folder only the owner can read (0700), since results.json names notes
+        fallback = Path(tempfile.mkdtemp(prefix="sb-eval-", dir=tempfile.gettempdir()))
         return write_report(result, fallback, now)
     except OSError as error:
         typer.echo(f"Evaluation failed ({type(error).__name__}).", err=True)
@@ -503,9 +511,13 @@ def eval_run(
 ) -> None:
     """Run the embedding bake-off and write report.md + results.json."""
     settings = _load_settings()
-    model_list = (
-        [m.strip() for m in models.split(",") if m.strip()] if models else settings.eval_model_list
-    )
+    try:
+        model_list = (
+            eval_model_tags(models, settings.embed_model) if models else settings.eval_model_list
+        )
+    except ValueError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
     out_dir = out.expanduser().resolve() if out else settings.eval_report_dir
     if out_dir == REPO_ROOT or REPO_ROOT in out_dir.parents:
         typer.echo("--out must be outside the repository", err=True)
@@ -516,6 +528,9 @@ def eval_run(
             _eval_run(settings, queries or settings.eval_queries_path, model_list),
             loop_factory=new_event_loop,
         )
+    except KeyboardInterrupt as error:
+        typer.echo(f"Interrupted. {RESUME_HINT}", err=True)
+        raise typer.Exit(code=130) from error
     except EvalConfigError as error:
         _eval_errors(error)
         raise typer.Exit(code=1) from error
@@ -527,6 +542,12 @@ def eval_run(
         else:
             typer.echo(f"Preflight failed: {error.code} ({error.model})", err=True)
         raise typer.Exit(code=1) from error
+    except ModelEmbedError as error:
+        typer.echo(f"Embedding failed ({error.code}) for {error.model}. {RESUME_HINT}", err=True)
+        raise typer.Exit(code=2) from error
+    except EvalDatabaseError as error:
+        typer.echo(UNREACHABLE[error.which], err=True)
+        raise typer.Exit(code=2) from error
     except Exception as error:
         typer.echo(f"Evaluation failed ({type(error).__name__}).", err=True)
         raise typer.Exit(code=2) from error

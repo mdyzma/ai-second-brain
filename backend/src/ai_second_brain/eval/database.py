@@ -5,13 +5,26 @@ import shlex
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+import psycopg
 from psycopg import AsyncConnection
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from ai_second_brain.eval.queries import EvalConfigError
 
 DBMATE_TIMEOUT_S = 300
+PROBE_TIMEOUT_S = 5
+NOT_PREPARED = "the evaluation database is not prepared: run just eval-prepare"
+MISSING = "the evaluation database does not exist: run just eval-prepare"
+
+
+class EvalDatabaseError(Exception):
+    """A database could not be reached. Carries no URL, so nothing secret reaches the CLI."""
+
+    def __init__(self, which: Literal["dev", "eval"]) -> None:
+        super().__init__(f"{which} database unreachable")
+        self.which: Literal["dev", "eval"] = which
 
 
 class DbmateError(EvalConfigError):
@@ -83,4 +96,37 @@ async def check_ready(conn: AsyncConnection[Any]) -> None:
         cur = await conn.execute("SELECT to_regclass('public.eval_embedding_cache') IS NOT NULL")
         row = await cur.fetchone()
     if not row or not row[0]:
-        raise EvalConfigError(["the evaluation database is not prepared: run just eval-prepare"])
+        raise EvalConfigError([NOT_PREPARED])
+
+
+async def _database_missing(url: str) -> bool:
+    """True only if the server answers and has no database of that name (locale-independent)."""
+    try:
+        name = conninfo_to_dict(url).get("dbname")
+        if not name:
+            return False
+        probe = make_conninfo(url, dbname="postgres", connect_timeout=PROBE_TIMEOUT_S)
+        async with await AsyncConnection.connect(probe) as conn:
+            cur = await conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,))
+            return await cur.fetchone() is None
+    except (psycopg.Error, ValueError):
+        return False
+
+
+async def connect_eval(url: str) -> AsyncConnection[Any]:
+    """Connect to the scratch DB: missing → EvalConfigError (prepare hint), else unreachable."""
+    try:
+        return await AsyncConnection.connect(url)
+    except psycopg.errors.InvalidCatalogName:
+        raise EvalConfigError([MISSING]) from None
+    except psycopg.OperationalError:
+        if await _database_missing(url):
+            raise EvalConfigError([MISSING]) from None
+        raise EvalDatabaseError("eval") from None
+
+
+async def connect_dev(url: str) -> AsyncConnection[Any]:
+    try:
+        return await AsyncConnection.connect(url)
+    except psycopg.OperationalError:
+        raise EvalDatabaseError("dev") from None

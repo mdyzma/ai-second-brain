@@ -1,4 +1,6 @@
 import io
+import stat
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -8,8 +10,8 @@ import yaml
 from typer.testing import CliRunner
 
 from ai_second_brain.config import Settings
-from ai_second_brain.eval.database import DbmateError
-from ai_second_brain.eval.embedding import PreflightError
+from ai_second_brain.eval.database import DbmateError, EvalDatabaseError
+from ai_second_brain.eval.embedding import ModelEmbedError, PreflightError
 from ai_second_brain.eval.queries import EvalConfigError
 from ai_second_brain.interfaces.cli import main
 from ai_second_brain.interfaces.cli.main import app
@@ -303,3 +305,150 @@ def test_run_exits_2_when_fallback_also_fails(
     result = runner.invoke(app, ["eval", "run"])
     assert result.exit_code == 2
     assert "OSError" in result.stderr
+
+
+def _recording_run(calls: list[list[str]]) -> Callable[..., Any]:
+    async def fake(*args: Any, **kwargs: Any) -> Any:
+        calls.append(list(kwargs["models"]))
+        return _result()
+
+    return fake
+
+
+def test_models_option_relabels_the_incumbent_like_the_default(
+    monkeypatch: pytest.MonkeyPatch,
+    make_settings: Callable[..., Settings],
+    tmp_path: Path,
+) -> None:
+    built = make_settings(eval_dir=tmp_path / "reports", embed_model="bge-m3:567m")
+    monkeypatch.setattr(main, "get_settings", lambda: built)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(main, "run_eval", _recording_run(calls))
+    result = runner.invoke(app, ["eval", "run", "--models", " bge-m3 , granite-embedding:278m"])
+    assert result.exit_code == 0, result.output
+    assert calls == [["bge-m3:567m", "granite-embedding:278m"]]
+
+    result = runner.invoke(app, ["eval", "run"])
+    assert result.exit_code == 0, result.output
+    assert calls[1][0] == "bge-m3:567m"  # the same helper as SB_EVAL_MODELS
+
+
+def test_models_option_refuses_cloud_tags_up_front(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(main, "run_eval", _recording_run(calls))
+    result = runner.invoke(app, ["eval", "run", "--models", "bge-m3,big:cloud"])
+    assert result.exit_code == 1
+    assert "big:cloud" in result.stderr and "hosted" in result.stderr
+    assert calls == []
+
+
+def test_models_option_refuses_duplicates(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(main, "run_eval", _recording_run(calls))
+    result = runner.invoke(app, ["eval", "run", "--models", "bge-m3,granite-embedding,bge-m3"])
+    assert result.exit_code == 1
+    assert "duplicate model bge-m3" in result.stderr
+    assert calls == []
+
+
+def test_embed_failure_names_code_and_model_and_resume(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    error = ModelEmbedError("embed_unreachable", "granite-embedding:278m")
+    monkeypatch.setattr(main, "run_eval", _fake_run(error))
+    result = runner.invoke(app, ["eval", "run"])
+    assert result.exit_code == 2
+    assert (
+        "Embedding failed (embed_unreachable) for granite-embedding:278m."
+        " Cached vectors are kept: run again to resume." in result.stderr
+    )
+
+
+@pytest.mark.parametrize(
+    ("which", "message"),
+    [
+        ("dev", "Could not reach the dev database (DATABASE_URL)."),
+        ("eval", "Could not reach the evaluation database (SB_EVAL_DATABASE_URL)."),
+    ],
+)
+def test_unreachable_database_is_named(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, which: Any, message: str
+) -> None:
+    monkeypatch.setattr(main, "run_eval", _fake_run(EvalDatabaseError(which)))
+    result = runner.invoke(app, ["eval", "run"])
+    assert result.exit_code == 2
+    assert message in result.stderr
+    assert "postgres://" not in result.output
+
+
+def test_unprepared_scratch_database_exits_1_with_hint(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    error = EvalConfigError(["the evaluation database does not exist: run just eval-prepare"])
+    monkeypatch.setattr(main, "run_eval", _fake_run(error))
+    result = runner.invoke(app, ["eval", "run"])
+    assert result.exit_code == 1
+    assert "run just eval-prepare" in result.stderr
+
+
+def test_ctrl_c_exits_130_with_resume_hint(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    monkeypatch.setattr(main, "run_eval", _fake_run(KeyboardInterrupt()))
+    result = runner.invoke(app, ["eval", "run"])
+    assert result.exit_code == 130
+    assert "Interrupted. Cached vectors are kept: run again to resume." in result.stderr
+    assert not settings.eval_report_dir.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_fallback_report_folder_is_owner_only(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(main, "run_eval", _fake_run(_result()))
+    real = main.write_report
+    fallback_root = tmp_path / "tmp"
+    fallback_root.mkdir()
+    monkeypatch.setattr(main.tempfile, "gettempdir", lambda: str(fallback_root))
+
+    def flaky(result: Any, out_dir: Path, now: Any) -> Path:
+        if out_dir == settings.eval_report_dir:
+            raise PermissionError("denied")
+        return real(result, out_dir, now)
+
+    monkeypatch.setattr(main, "write_report", flaky)
+    result = runner.invoke(app, ["eval", "run"])
+    assert result.exit_code == 0, result.output
+    [folder] = list(fallback_root.iterdir())
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+
+
+def test_fallback_uses_a_fresh_mkdtemp_folder(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(main, "run_eval", _fake_run(_result()))
+    monkeypatch.setattr(main.tempfile, "gettempdir", lambda: str(tmp_path))
+    prefixes: list[str] = []
+    real_mkdtemp = main.tempfile.mkdtemp
+
+    def mkdtemp(prefix: str, dir: str) -> str:  # noqa: A002 - mirrors tempfile.mkdtemp
+        prefixes.append(prefix)
+        return real_mkdtemp(prefix=prefix, dir=dir)
+
+    monkeypatch.setattr(main.tempfile, "mkdtemp", mkdtemp)
+    real = main.write_report
+
+    def flaky(result: Any, out_dir: Path, now: Any) -> Path:
+        if out_dir == settings.eval_report_dir:
+            raise PermissionError("denied")
+        return real(result, out_dir, now)
+
+    monkeypatch.setattr(main, "write_report", flaky)
+    assert runner.invoke(app, ["eval", "run"]).exit_code == 0
+    assert runner.invoke(app, ["eval", "run"]).exit_code == 0
+    assert prefixes == ["sb-eval-", "sb-eval-"]
+    assert len([p for p in tmp_path.iterdir() if p.name.startswith("sb-eval-")]) == 2

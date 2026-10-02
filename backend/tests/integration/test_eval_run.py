@@ -1,5 +1,6 @@
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -9,10 +10,13 @@ import yaml
 
 from ai_second_brain.chat.providers.ollama import create_http_client
 from ai_second_brain.config import Settings
+from ai_second_brain.eval import runner
+from ai_second_brain.eval.embedding import ModelEmbedError
 from ai_second_brain.eval.queries import EvalConfigError
 from ai_second_brain.eval.report import write_report
 from ai_second_brain.eval.runner import RunResult, run_eval
 from ai_second_brain.interfaces.cli import main
+from ai_second_brain.knowledge.embedder import EmbedError
 from ai_second_brain.vault.reconcile import reconcile
 
 from ..conftest import TEST_HASH, run_async
@@ -66,6 +70,7 @@ def _run(
     tmp_path: Path,
     fake: FakeOllama,
     queries_path: Path = FIXTURE,
+    progress: Callable[[str], None] = lambda _: None,
 ) -> RunResult:
     vault_root = tmp_path / "vault"
     _vault(vault_root)
@@ -85,7 +90,7 @@ def _run(
                 eval_url=eval_db_url,
                 test_url=None,
                 client=client,
-                progress=lambda _: None,
+                progress=progress,
             )
 
     return run_async(scenario())
@@ -203,3 +208,52 @@ def test_suggest_round_robins_folders_and_check_reads_live_paths(  # type: ignor
     assert folders == {"", "Filler", "Projects"}  # one pick per top-level folder first
     assert len(everything) == len(set(everything)) == 3 + FILLERS
     assert live == set(everything)
+
+
+def test_mid_run_embed_failure_names_the_model(  # type: ignore[no-untyped-def]
+    db_url: str, eval_db_url: str, tmp_path: Path, make_fake_ollama, monkeypatch
+) -> None:
+    fake = make_fake_ollama()
+    real = runner.query_vectors
+
+    async def flaky(embedder: Any, texts: Any) -> Any:
+        if embedder.model == "good-model":
+            raise EmbedError("embed_unreachable")
+        return await real(embedder, texts)
+
+    monkeypatch.setattr(runner, "query_vectors", flaky)
+    with pytest.raises(ModelEmbedError) as caught:
+        _run(db_url, eval_db_url, tmp_path, fake)
+    assert (caught.value.code, caught.value.model) == ("embed_unreachable", "good-model")
+
+
+def test_run_reports_progress_lines_and_query_prefix(  # type: ignore[no-untyped-def]
+    db_url: str, eval_db_url: str, tmp_path: Path, make_fake_ollama
+) -> None:
+    fake = make_fake_ollama()
+    lines: list[str] = []
+    result = _run(db_url, eval_db_url, tmp_path, fake, progress=lines.append)
+    assert lines and all(" chunks · " in line and "/s · ETA " in line for line in lines)
+    assert lines[0].startswith("bge-m3 ")
+    assert [run.query_prefix for run in result.models] == ["", ""]
+
+
+def test_run_refuses_duplicate_models(db_url: str, eval_db_url: str, tmp_path: Path) -> None:
+    settings = _settings(db_url, eval_db_url, tmp_path, FakeOllama())
+
+    async def scenario() -> None:
+        async with create_http_client() as client:
+            await run_eval(
+                settings,
+                queries_path=FIXTURE,
+                models=["bge-m3", "bge-m3"],
+                dev_url=db_url,
+                eval_url=eval_db_url,
+                test_url=None,
+                client=client,
+                progress=lambda _: None,
+            )
+
+    with pytest.raises(EvalConfigError) as caught:
+        run_async(scenario())
+    assert caught.value.errors == ["duplicate model bge-m3"]

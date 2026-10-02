@@ -17,12 +17,15 @@ from psycopg import AsyncConnection
 
 from ai_second_brain.chat.providers.base import ChatTimeouts
 from ai_second_brain.config import Settings
-from ai_second_brain.eval.database import check_ready
+from ai_second_brain.eval.database import check_ready, connect_dev, connect_eval
 from ai_second_brain.eval.embedding import (
+    BatchProgress,
+    ModelEmbedError,
     ModelSpace,
     embed_space,
-    model_digests,
     preflight,
+    progress_line,
+    query_prefix,
     query_vectors,
 )
 from ai_second_brain.eval.guards import check_eval_url
@@ -30,7 +33,7 @@ from ai_second_brain.eval.metrics import bootstrap_diff, first_rank, percentile,
 from ai_second_brain.eval.queries import EvalConfigError, EvalQuery, load_queries
 from ai_second_brain.eval.snapshot import SnapshotInfo, live_paths, snapshot
 from ai_second_brain.eval.verdict import ModelScore, Verdict, decide
-from ai_second_brain.knowledge.embedder import Embedder
+from ai_second_brain.knowledge.embedder import Embedder, EmbedError
 from ai_second_brain.search.query import query
 
 log = logging.getLogger(__name__)
@@ -50,6 +53,7 @@ class ModelRun:
     hybrid_paths: list[list[str]]
     vector_paths: list[list[str]]
     latency_ms: list[float]
+    query_prefix: str = ""  # the model card's query instruction; documents get none
 
 
 @dataclass(frozen=True)
@@ -114,16 +118,19 @@ async def run_eval(
         raise EvalConfigError(["no embedding host: set SB_EMBED_URL"])
     if not models:
         raise EvalConfigError(["no models to evaluate: set SB_EVAL_MODELS or pass --models"])
+    duplicates = sorted({m for m in models if list(models).count(m) > 1})
+    if duplicates:
+        raise EvalConfigError([f"duplicate model {tag}" for tag in duplicates])
 
     def make_embedder(model: str) -> Embedder:
         return Embedder(embed_url, model, None, client, ChatTimeouts())
 
-    spaces = await preflight(make_embedder, models)
+    spaces = await preflight(make_embedder, models, client=client, url=embed_url)
 
-    async with await AsyncConnection.connect(eval_url) as ev:
+    async with await connect_eval(eval_url) as ev:
         await check_ready(ev)
         # dev is opened only for the snapshot (read-only inside it) and closed right after
-        async with await AsyncConnection.connect(dev_url) as dev:
+        async with await connect_dev(dev_url) as dev:
             info = await snapshot(dev, ev)
 
         live = await live_paths(ev)
@@ -141,13 +148,16 @@ async def run_eval(
         for space in spaces:
             embedder = make_embedder(space.model)
 
-            def report(model: str, done: int, total: int) -> None:
-                progress(f"{model} {done}/{total}")
+            def report(step: BatchProgress) -> None:
+                progress(progress_line(step))
 
-            newly = await embed_space(
-                ev, embedder, space, batch=settings.embed_batch, progress=report
-            )
-            vectors, latency = await query_vectors(embedder, texts)
+            try:
+                newly = await embed_space(
+                    ev, embedder, space, batch=settings.embed_batch, progress=report
+                )
+                vectors, latency = await query_vectors(embedder, texts)
+            except EmbedError as error:
+                raise ModelEmbedError(error.code, space.model) from error
             hybrid_paths: list[list[str]] = []
             vector_paths: list[list[str]] = []
             for q, vec in zip(queries, vectors, strict=True):
@@ -157,8 +167,6 @@ async def run_eval(
 
         text_only_paths = [await _ranked(ev, q.q, None) for q in queries]
 
-    digests = await model_digests(client, embed_url, [s.model for s in spaces])
-
     def ranks(paths: list[list[str]]) -> list[int | None]:
         return [first_rank(p, q.targets) for p, q in zip(paths, queries, strict=True)]
 
@@ -167,13 +175,14 @@ async def run_eval(
             model=space.model,
             space_id=space.space_id,
             dims=space.dims,
-            digest=digests.get(space.model, "unknown"),
+            digest=space.digest,
             newly_embedded=newly,
             hybrid=ranks(hybrid_paths),
             vector=ranks(vector_paths),
             hybrid_paths=hybrid_paths,
             vector_paths=vector_paths,
             latency_ms=latency,
+            query_prefix=query_prefix(space.model),
         )
         for space, (newly, hybrid_paths, vector_paths, latency) in zip(spaces, runs, strict=True)
     ]

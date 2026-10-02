@@ -17,7 +17,13 @@ QUERIES = [
 ]
 
 
-def _run(model: str, hybrid: list[int | None], digest: str, latency: list[float]) -> ModelRun:
+def _run(
+    model: str,
+    hybrid: list[int | None],
+    digest: str,
+    latency: list[float],
+    prefix: str = "",
+) -> ModelRun:
     paths = [["Projects/NAS.md"] if r == 1 else ["Filler/f0.md"] for r in hybrid]
     return ModelRun(
         model=model,
@@ -30,6 +36,7 @@ def _run(model: str, hybrid: list[int | None], digest: str, latency: list[float]
         hybrid_paths=paths,
         vector_paths=paths,
         latency_ms=latency,
+        query_prefix=prefix,
     )
 
 
@@ -41,7 +48,9 @@ def _result() -> RunResult:
         queries_path="C:/owner/eval/queries.yaml",
         models=[
             _run("bge-m3", [None, 1, None], "sha256:incumbentdigest", [10.0, 20.0, 30.0]),
-            _run("good-model", [1, 1, 2], "sha256:challengerdigest", [40.0, 50.0, 400.0]),
+            _run(
+                "good-model", [1, 1, 2], "sha256:challengerdigest", [40.0, 50.0, 400.0], "query: "
+            ),
         ],
         text_only=[None, 1, None],
         text_only_paths=[[], ["Projects/NAS.md"], []],
@@ -111,3 +120,12 @@ def test_write_report_folder_and_json(tmp_path: Path) -> None:
     assert data["queries"][1]["text_only"] == ["Projects/NAS.md"]
     raw = (folder / "results.json").read_text(encoding="utf-8")
     assert "→" in raw  # ensure_ascii=False keeps the verdict readable
+
+
+def test_report_lists_each_models_query_prefix(tmp_path: Path) -> None:
+    md = render_markdown(_result())
+    assert "| bge-m3 | 100 | 1024 | sha256:incumbentdigest | none | 7 |" in md
+    assert "| good-model | 100 | 1024 | sha256:challengerdigest | `query: ` | 7 |" in md
+    folder = write_report(_result(), tmp_path, datetime(2026, 10, 2, 12, 0, 0))
+    data = json.loads((folder / "results.json").read_text(encoding="utf-8"))
+    assert [m["query_prefix"] for m in data["models"]] == [None, "query: "]

@@ -50,6 +50,32 @@ def model_matches_space(tag: str, space_model: str) -> bool:
     return tag == space_model or tag.startswith(f"{space_model}:")
 
 
+def eval_model_tags(raw: str, embed_model: str) -> list[str]:
+    """Parse comma-separated eval tags (SB_EVAL_MODELS or --models).
+
+    Every tag must be local; the first (the incumbent) becomes the SB_EMBED_MODEL tag when it
+    names the same model; a tag listed twice is refused. Raises ValueError with a clear message.
+    """
+    tags: list[str] = []
+    for raw_tag in raw.split(","):
+        if not raw_tag.strip():
+            continue
+        try:
+            tags.append(local_model_name(raw_tag))
+        except ValueError as error:
+            raise ValueError(f"{raw_tag.strip()}: {error}") from None
+    if not tags:
+        raise ValueError("no models to evaluate: name at least one model")
+    if embed_model and model_matches_space(embed_model, tags[0]):
+        tags[0] = embed_model
+    seen: set[str] = set()
+    for tag in tags:
+        if tag in seen:
+            raise ValueError(f"duplicate model {tag}")
+        seen.add(tag)
+    return tags
+
+
 class OllamaEndpointConfig(BaseModel):
     """One Ollama endpoint on the owner's LAN. List order is preference order."""
 
@@ -117,12 +143,9 @@ class Settings(BaseSettings):
     @field_validator("eval_models")
     @classmethod
     def _eval_models_local(cls, value: str) -> str:
-        tags = [t.strip() for t in value.split(",") if t.strip()]
-        if not tags:
+        if not value.replace(",", "").strip():
             raise ValueError("SB_EVAL_MODELS needs at least one model")
-        for tag in tags:
-            local_model_name(tag)
-        return ",".join(tags)
+        return ",".join(eval_model_tags(value, ""))
 
     @field_validator("eval_dir")
     @classmethod
@@ -203,10 +226,7 @@ class Settings(BaseSettings):
 
     @property
     def eval_model_list(self) -> list[str]:
-        tags = self.eval_models.split(",")
-        if model_matches_space(self.embed_model, tags[0]):
-            tags[0] = self.embed_model
-        return tags
+        return eval_model_tags(self.eval_models, self.embed_model)
 
     @property
     def cloud_available(self) -> bool:

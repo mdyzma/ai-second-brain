@@ -6,7 +6,9 @@ import pytest
 from psycopg.pq import TransactionStatus
 
 from ai_second_brain.chat.providers.ollama import create_http_client
+from ai_second_brain.eval.database import EvalDatabaseError, connect_dev, connect_eval
 from ai_second_brain.eval.embedding import (
+    BatchProgress,
     ModelSpace,
     PreflightError,
     embed_space,
@@ -30,7 +32,7 @@ pytestmark = pytest.mark.integration
 IDLE = TransactionStatus.IDLE
 
 
-def _noop(model: str, done: int, total: int) -> None:
+def _noop(step: BatchProgress) -> None:
     return None
 
 
@@ -277,5 +279,160 @@ def test_duplicate_inputs_embedded_once_and_dims_checked(  # type: ignore[no-unt
                     sql = "SELECT count(*) FROM chunk_embeddings WHERE space_id = 100"
                     assert await _count(ev, sql) == 2
                     assert base >= 0
+
+    run_async(scenario())
+
+
+def test_progress_counts_only_this_runs_batches(  # type: ignore[no-untyped-def]
+    db_url: str, eval_db_url: str, tmp_path: Path, make_fake_ollama
+) -> None:
+    fake = make_fake_ollama()
+    vault = VaultBuilder(tmp_path)
+    _write_notes(vault, 5)
+    ticks = iter(float(n) for n in range(1000))
+    clock = lambda: next(ticks)  # noqa: E731 - each batch takes exactly 1 s
+
+    async def scenario() -> tuple[list[BatchProgress], list[BatchProgress]]:
+        async with create_http_client() as client:
+            make = lambda model: Embedder(fake.url, model, None, client, FAST)  # noqa: E731
+            space = (await preflight(make, ["m1"]))[0]
+            async with ingest_harness(db_url, tmp_path, fake.url) as h:
+                await reconcile(h.ctx, trigger="startup")
+                await h.drain()
+                async with (
+                    await psycopg.AsyncConnection.connect(db_url) as dev,
+                    await psycopg.AsyncConnection.connect(eval_db_url) as ev,
+                ):
+                    await snapshot(dev, ev)
+                    first: list[BatchProgress] = []
+                    await embed_space(
+                        ev, make("m1"), space, batch=2, progress=first.append, clock=clock
+                    )
+                    vault.write("n1.md", "# Note 1\nedited body")
+                    await reconcile(h.ctx, trigger="schedule")
+                    await h.drain()
+                    await dev.rollback()
+                    await snapshot(dev, ev)
+                    second: list[BatchProgress] = []
+                    await embed_space(
+                        ev, make("m1"), space, batch=2, progress=second.append, clock=clock
+                    )
+                    return first, second
+
+    first, second = run_async(scenario())
+    assert [(p.done, p.total, p.batches, p.seconds) for p in first] == [
+        (2, 5, 1, 1.0),
+        (4, 5, 2, 2.0),
+        (5, 5, 3, 3.0),
+    ]
+    assert [(p.done, p.total, p.batches) for p in second] == [(1, 1, 1)]  # 4 cached, skipped
+
+
+def test_snowflake_queries_get_prefix_and_chunks_do_not(  # type: ignore[no-untyped-def]
+    db_url: str, eval_db_url: str, tmp_path: Path, make_fake_ollama
+) -> None:
+    fake = make_fake_ollama()
+    vault = VaultBuilder(tmp_path)
+    _write_notes(vault, 2)
+    model = "snowflake-arctic-embed2"
+
+    async def scenario() -> None:
+        async with create_http_client() as client:
+            make = lambda name: Embedder(fake.url, name, None, client, FAST)  # noqa: E731
+            space = (await preflight(make, [model]))[0]
+            async with ingest_harness(db_url, tmp_path, fake.url) as h:
+                await reconcile(h.ctx, trigger="startup")
+                await h.drain()
+                async with (
+                    await psycopg.AsyncConnection.connect(db_url) as dev,
+                    await psycopg.AsyncConnection.connect(eval_db_url) as ev,
+                ):
+                    await snapshot(dev, ev)
+                    fake.requests.clear()
+                    await embed_space(ev, make(model), space, batch=8, progress=_noop)
+                    chunk_inputs = [t for r in fake.embed_requests() for t in r.body["input"]]
+                    assert len(chunk_inputs) == 2
+                    assert not any(t.startswith("query: ") for t in chunk_inputs)
+                    fake.requests.clear()
+                    vectors, _ = await query_vectors(make(model), ["gdzie jest NAS", "RAID"])
+                    sent = [r.body["input"] for r in fake.embed_requests()][1:]  # skip warm-up
+                    assert sent == [["query: gdzie jest NAS"], ["query: RAID"]]
+                    want = fake_vector("query: gdzie jest NAS")
+                    assert max(abs(a - b) for a, b in zip(vectors[0], want, strict=True)) < 1e-6
+                    fake.requests.clear()
+                    await query_vectors(make("bge-m3:567m"), ["RAID"])
+                    assert fake.embed_requests()[-1].body["input"] == ["RAID"]
+
+    run_async(scenario())
+
+
+def test_new_model_digest_reembeds(  # type: ignore[no-untyped-def]
+    db_url: str, eval_db_url: str, tmp_path: Path, make_fake_ollama
+) -> None:
+    fake = make_fake_ollama()
+    vault = VaultBuilder(tmp_path)
+    _write_notes(vault, 3)
+
+    async def scenario() -> None:
+        async with create_http_client() as client:
+            make = lambda model: Embedder(fake.url, model, None, client, FAST)  # noqa: E731
+            async with ingest_harness(db_url, tmp_path, fake.url) as h:
+                await reconcile(h.ctx, trigger="startup")
+                await h.drain()
+                async with (
+                    await psycopg.AsyncConnection.connect(db_url) as dev,
+                    await psycopg.AsyncConnection.connect(eval_db_url) as ev,
+                ):
+                    await snapshot(dev, ev)
+                    fake.behaviour.tags = {"m1:latest": "sha256:old"}
+                    [old] = await preflight(make, ["m1"], client=client, url=fake.url)
+                    assert old.digest == "sha256:old"
+                    assert old.cache_model == "m1@sha256:old"
+                    assert await embed_space(ev, make("m1"), old, batch=8, progress=_noop) == 3
+                    assert await embed_space(ev, make("m1"), old, batch=8, progress=_noop) == 0
+                    fake.behaviour.tags = {"m1:latest": "sha256:new"}
+                    [new] = await preflight(make, ["m1"], client=client, url=fake.url)
+                    assert await embed_space(ev, make("m1"), new, batch=8, progress=_noop) == 3
+                    keys = await (
+                        await ev.execute(
+                            "SELECT model, count(*) FROM eval_embedding_cache GROUP BY model"
+                        )
+                    ).fetchall()
+                    await ev.rollback()
+                    assert dict(keys) == {"m1@sha256:old": 3, "m1@sha256:new": 3}
+                    sql = "SELECT count(*) FROM chunk_embeddings WHERE space_id = 100"
+                    assert await _count(ev, sql) == 3
+
+    run_async(scenario())
+
+
+def test_connect_eval_maps_a_missing_database_to_the_prepare_hint(eval_db_url: str) -> None:
+    missing = eval_db_url.replace("_eval", "_eval_missing_xyz", 1)
+
+    async def scenario() -> None:
+        with pytest.raises(EvalConfigError) as caught:
+            await connect_eval(missing)
+        assert "run just eval-prepare" in caught.value.errors[0]
+        assert "_missing_xyz" not in caught.value.errors[0]
+        conn = await connect_eval(eval_db_url)
+        await conn.close()
+
+    run_async(scenario())
+
+
+def test_connect_maps_unreachable_servers(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def refuse(*args: object, **kwargs: object) -> None:
+        raise psycopg.OperationalError("connection refused: postgres://u:secret@h/db")
+
+    monkeypatch.setattr(psycopg.AsyncConnection, "connect", refuse)
+
+    async def scenario() -> None:
+        with pytest.raises(EvalDatabaseError) as eval_error:
+            await connect_eval("postgres://u:secret@h/db_eval")
+        assert eval_error.value.which == "eval"
+        assert "secret" not in str(eval_error.value)
+        with pytest.raises(EvalDatabaseError) as dev_error:
+            await connect_dev("postgres://u:secret@h/db")
+        assert dev_error.value.which == "dev"
 
     run_async(scenario())

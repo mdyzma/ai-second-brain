@@ -50,6 +50,7 @@ class OllamaBehaviour:
     # model → substring → topic; when non-empty, topic vectors also depend on the model
     embed_topics_by_model: dict[str, dict[str, str]] = field(default_factory=dict)
     missing_models: set[str] = field(default_factory=set)
+    tags: dict[str, str] = field(default_factory=dict)  # /api/tags name → digest; empty → 404
 
 
 def fake_vector(text: str, dims: int = 1024) -> list[float]:
@@ -71,6 +72,7 @@ class FakeOllama:
                 Route("/api/version", self._version, methods=["GET"]),
                 Route("/api/chat", self._chat, methods=["POST"]),
                 Route("/api/embed", self._embed, methods=["POST"]),
+                Route("/api/tags", self._tags, methods=["GET"]),
                 Route("/{path:path}", self._other, methods=["GET", "POST"]),
             ]
         )
@@ -135,6 +137,13 @@ class FakeOllama:
             RecordedRequest(request.method, request.url.path, body, dict(request.headers))
         )
         return body
+
+    async def _tags(self, request: Request) -> Response:
+        await self._record(request)
+        if not self.behaviour.tags:
+            return Response(status_code=404)
+        models = [{"name": name, "digest": d} for name, d in self.behaviour.tags.items()]
+        return JSONResponse({"models": models})
 
     async def _version(self, request: Request) -> Response:
         await self._record(request)

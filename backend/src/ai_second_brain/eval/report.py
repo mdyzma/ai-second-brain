@@ -29,6 +29,10 @@ def _rank(rank: int | None) -> str:
     return "–" if rank is None else str(rank)
 
 
+def _prefix(prefix: str) -> str:
+    return f"`{prefix}`" if prefix else "none"
+
+
 def _mark(ok: bool) -> str:
     return TICK if ok else CROSS
 
@@ -129,12 +133,20 @@ def render_markdown(result: RunResult) -> str:
         "",
     ]
     out += _table(
-        ["model", "space", "dims", "digest", "newly embedded"],
+        ["model", "space", "dims", "digest", "query prefix", "newly embedded"],
         [
-            [run.model, str(run.space_id), str(run.dims), run.digest, str(run.newly_embedded)]
+            [
+                run.model,
+                str(run.space_id),
+                str(run.dims),
+                run.digest,
+                _prefix(run.query_prefix),
+                str(run.newly_embedded),
+            ]
             for run in result.models
         ],
     )
+    out += ["", "Queries get the model card's query prefix; notes are never prefixed."]
 
     out += ["", "## Query set", ""]
     out += [
@@ -163,6 +175,7 @@ def results_json(result: RunResult) -> dict[str, Any]:
                 "space_id": run.space_id,
                 "dims": run.dims,
                 "digest": run.digest,
+                "query_prefix": run.query_prefix or None,
                 "newly_embedded": run.newly_embedded,
                 "hybrid": asdict(summarize(run.hybrid)),
                 "vector": asdict(summarize(run.vector)),

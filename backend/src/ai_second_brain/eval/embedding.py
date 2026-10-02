@@ -16,6 +16,16 @@ from ai_second_brain.knowledge.embedder import Embedder, EmbedError
 
 KEEP_ALIVE = "30m"
 SPACE_BASE = 100
+ETA_AFTER_BATCHES = 3
+UNKNOWN_DIGEST = "unknown"
+
+# Query instructions from each model card, keyed by the model name without its tag.
+# Documents are never prefixed; a model missing here gets its queries verbatim.
+QUERY_PREFIX: dict[str, str] = {"snowflake-arctic-embed2": "query: "}
+
+
+def query_prefix(model: str) -> str:
+    return QUERY_PREFIX.get(model.split(":", 1)[0], "")
 
 
 @dataclass(frozen=True)
@@ -23,6 +33,38 @@ class ModelSpace:
     model: str
     space_id: int
     dims: int
+    digest: str = UNKNOWN_DIGEST
+
+    @property
+    def cache_model(self) -> str:
+        """Cache key for this model: a re-pulled model (new digest) never reuses old vectors."""
+        return self.model if self.digest == UNKNOWN_DIGEST else f"{self.model}@{self.digest}"
+
+
+@dataclass(frozen=True)
+class BatchProgress:
+    model: str
+    done: int  # chunks embedded in this run so far (cached chunks never count)
+    total: int  # chunks this run has to embed
+    batches: int
+    seconds: float  # time spent on this run's batches
+
+
+def format_eta(seconds: float) -> str:
+    whole = max(0, round(seconds))
+    hours, rest = divmod(whole, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:02d}:{secs:02d}"
+
+
+def progress_line(p: BatchProgress) -> str:
+    rate = p.done / p.seconds if p.seconds > 0 else 0.0
+    eta = (
+        format_eta((p.total - p.done) / rate)
+        if p.batches >= ETA_AFTER_BATCHES and rate > 0
+        else "…"
+    )
+    return f"{p.model} {p.done}/{p.total} chunks · {rate:.1f}/s · ETA {eta}"
 
 
 class PreflightError(Exception):
@@ -31,9 +73,22 @@ class PreflightError(Exception):
         self.code, self.model = code, model
 
 
+class ModelEmbedError(Exception):
+    """An embedding call failed mid-run; carries the model so the CLI can name it."""
+
+    def __init__(self, code: str, model: str) -> None:
+        super().__init__(f"{code}: {model}")
+        self.code, self.model = code, model
+
+
 async def preflight(
-    make_embedder: Callable[[str], Embedder], models: Sequence[str]
+    make_embedder: Callable[[str], Embedder],
+    models: Sequence[str],
+    *,
+    client: httpx2.AsyncClient | None = None,
+    url: str | None = None,
 ) -> list[ModelSpace]:
+    """Probe every model; with `client` and `url`, also read each model's digest."""
     spaces: list[ModelSpace] = []
     for index, model in enumerate(models):
         try:
@@ -45,7 +100,13 @@ async def preflight(
         except EmbedError as error:
             raise PreflightError(error.code, model) from None
         spaces.append(ModelSpace(model, SPACE_BASE + index, len(vector)))
-    return spaces
+    if client is None or url is None:
+        return spaces
+    digests = await model_digests(client, url, models)
+    return [
+        ModelSpace(s.model, s.space_id, s.dims, digests.get(s.model, UNKNOWN_DIGEST))
+        for s in spaces
+    ]
 
 
 def _digest(text: str) -> bytes:
@@ -62,7 +123,8 @@ async def embed_space(
     space: ModelSpace,
     *,
     batch: int,
-    progress: Callable[[str, int, int], None],
+    progress: Callable[[BatchProgress], None],
+    clock: Callable[[], float] = time.perf_counter,
 ) -> int:
     """Embed every snapshot chunk for one model; leaves `ev` idle on return or error."""
     await check_ready(ev)  # only the scratch database has eval_embedding_cache
@@ -78,7 +140,7 @@ async def embed_space(
             for row in await (
                 await ev.execute(
                     "SELECT input_sha256 FROM eval_embedding_cache WHERE model = %s",
-                    (space.model,),
+                    (space.cache_model,),
                 )
             ).fetchall()
         }
@@ -92,7 +154,9 @@ async def embed_space(
         if key not in cached:
             todo.setdefault(key, text)
     items = list(todo.items())
-    for start in range(0, len(items), batch):
+    spent = 0.0
+    for number, start in enumerate(range(0, len(items), batch), start=1):
+        began = clock()
         chunk = items[start : start + batch]
         vectors = await embedder.embed([text for _, text in chunk], keep_alive=KEEP_ALIVE)
         if any(len(vec) != space.dims for vec in vectors):
@@ -102,11 +166,13 @@ async def embed_space(
                 "INSERT INTO eval_embedding_cache (model, input_sha256, embedding)"
                 " VALUES (%s, %s, %s::halfvec) ON CONFLICT DO NOTHING",
                 [
-                    (space.model, key, _literal(vec))
+                    (space.cache_model, key, _literal(vec))
                     for (key, _), vec in zip(chunk, vectors, strict=True)
                 ],
             )
-        progress(space.model, min(start + batch, len(items)), len(items))
+        spent += clock() - began
+        done = min(start + batch, len(items))
+        progress(BatchProgress(space.model, done, len(items), number, spent))
     async with ev.transaction():
         stale = await (
             await ev.execute(
@@ -140,7 +206,7 @@ async def embed_space(
             "INSERT INTO chunk_embeddings (chunk_id, space_id, embedding)"
             " SELECT k.chunk_id, %s, e.embedding FROM _chunk_keys k"
             " JOIN eval_embedding_cache e ON e.model = %s AND e.input_sha256 = k.key",
-            (space.space_id, space.model),
+            (space.space_id, space.cache_model),
         )
     return len(items)
 
@@ -148,12 +214,14 @@ async def embed_space(
 async def query_vectors(
     embedder: Embedder, texts: Sequence[str]
 ) -> tuple[list[list[float]], list[float]]:
+    """Embed each query with its model's query prefix; the timed vectors are the ones ranked."""
+    prefix = query_prefix(embedder.model)
     await embedder.embed(["warm-up"], keep_alive=KEEP_ALIVE)
     vectors: list[list[float]] = []
     timings: list[float] = []
     for text in texts:
         started = time.perf_counter()
-        [vector] = await embedder.embed([text], keep_alive=KEEP_ALIVE)
+        [vector] = await embedder.embed([prefix + text], keep_alive=KEEP_ALIVE)
         timings.append((time.perf_counter() - started) * 1000)
         vectors.append(vector)
     return vectors, timings
@@ -162,7 +230,7 @@ async def query_vectors(
 async def model_digests(
     client: httpx2.AsyncClient, url: str, models: Sequence[str]
 ) -> dict[str, str]:
-    digests = dict.fromkeys(models, "unknown")
+    digests = dict.fromkeys(models, UNKNOWN_DIGEST)
     try:
         response = await client.get(f"{url}/api/tags", timeout=5.0)
         listed = (
