@@ -13,6 +13,19 @@ def test_dbmate_base_prefers_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert database.dbmate_base(tmp_path) == ["dbmate", "--no-dump-schema"]
 
 
+def test_dbmate_base_keeps_windows_backslashes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(database.os, "name", "nt")
+    monkeypatch.setenv("DBMATE", r'"C:\Program Files\dbmate\dbmate.exe" --no-dump-schema')
+    assert database.dbmate_base(tmp_path) == [
+        r"C:\Program Files\dbmate\dbmate.exe",
+        "--no-dump-schema",
+    ]
+    monkeypatch.setenv("DBMATE", r"C:\tools\dbmate.exe")
+    assert database.dbmate_base(tmp_path) == [r"C:\tools\dbmate.exe"]
+
+
 def test_dbmate_base_resolves_pnpm(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("DBMATE", raising=False)
     monkeypatch.setattr(database.shutil, "which", lambda name: f"C:/bin/{name}.cmd")
@@ -52,6 +65,8 @@ def test_prepare_runs_two_migrations(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert str(tmp_path / "db" / "eval" / "migrations") in calls[1]
     assert calls[1][calls[1].index("--migrations-table") + 1] == "schema_migrations_eval"
     assert "--migrations-table" not in calls[0]
+    assert all(cmd[-1] == "up" for cmd in calls)
+    assert all(kw.get("capture_output") is True for kw in options)
     assert all(not kw.get("shell") and kw.get("timeout") for kw in options)
 
 

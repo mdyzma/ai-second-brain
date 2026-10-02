@@ -3,7 +3,7 @@
 import re
 from collections.abc import Iterator
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import psycopg
 import pytest
@@ -14,22 +14,27 @@ EVAL_MIGRATION = ROOT / "db" / "eval" / "migrations" / "20261002100000_eval_cach
 
 
 def _with_db(url: str, name: str) -> str:
-    return urlunsplit(urlsplit(url)._replace(path=f"/{name}"))
+    """`url` pointed at database `name`; a `?dbname=` parameter can't redirect it elsewhere."""
+    parts = urlsplit(url)
+    query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "dbname"]
+    return urlunsplit(parts._replace(path=f"/{name}", query=urlencode(query)))
 
 
 def eval_db_name(db_url: str) -> str:
     """The scratch database's name: always `<test db>_eval`, never anything else."""
     test_name = urlsplit(db_url).path.lstrip("/")
-    assert test_name, "TEST_DATABASE_URL has no database name"
+    if not test_name or "/" in test_name:
+        raise RuntimeError("TEST_DATABASE_URL must name its database in the URL path")
     return test_name + "_eval"
 
 
 @pytest.fixture
 def eval_db_url(db_url: str) -> Iterator[str]:
-    test_name = urlsplit(db_url).path.lstrip("/")
-    name = eval_db_name(db_url)
     # The only database this fixture may ever drop: derived from the test URL, `_eval`-suffixed.
-    assert name == f"{test_name}_eval" and name.endswith("_eval") and name != test_name
+    # An explicit raise (not assert) so the check also runs under `python -O`.
+    name = eval_db_name(db_url)
+    if not name.endswith("_eval"):
+        raise RuntimeError("refusing to drop a database whose name does not end in _eval")
     with psycopg.connect(_with_db(db_url, "postgres"), autocommit=True) as admin:
         drop = sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name))
         admin.execute(drop)

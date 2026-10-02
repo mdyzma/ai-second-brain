@@ -22,10 +22,18 @@ class DbmateError(EvalConfigError):
         self.output = output
 
 
+def _split_command(value: str) -> list[str]:
+    """Split DBMATE like the platform's shell would; Windows paths keep their backslashes."""
+    if os.name != "nt":
+        return shlex.split(value)
+    parts = shlex.split(value, posix=False)  # non-POSIX mode keeps the surrounding quotes
+    return [p[1:-1] if len(p) >= 2 and p[0] == p[-1] and p[0] in "\"'" else p for p in parts]
+
+
 def dbmate_base(root: Path) -> list[str]:
     configured = os.environ.get("DBMATE", "").strip()
     if configured:
-        return shlex.split(configured)
+        return _split_command(configured)
     pnpm = shutil.which("pnpm")  # pnpm.cmd on Windows
     if pnpm is None:
         raise EvalConfigError(["pnpm not found; install it or set DBMATE to a dbmate binary"])

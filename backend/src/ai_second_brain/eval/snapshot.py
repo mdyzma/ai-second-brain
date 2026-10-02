@@ -1,7 +1,8 @@
 """Copy live, current notes from the dev DB (read-only) into the scratch DB.
 
 Safety: the dev connection is only ever used inside `read_only_transaction`, whose first
-statement is `SET TRANSACTION READ ONLY`, so PostgreSQL itself refuses any write to dev.
+statement is `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`. PostgreSQL itself
+refuses any write to dev, and all COPYs read one consistent view (no FK gaps mid-ingest).
 The scratch side is truncated only after it is shown to be a different, prepared database.
 """
 
@@ -56,11 +57,12 @@ class SnapshotInfo:
 
 @asynccontextmanager
 async def read_only_transaction(conn: AsyncConnection[Any]) -> AsyncIterator[None]:
-    """A top-level transaction whose very first statement makes it read-only."""
+    """A top-level transaction whose very first statement makes it read-only, repeatable-read."""
     if conn.info.transaction_status != TransactionStatus.IDLE:
         raise EvalConfigError(["the dev connection must be idle before the snapshot"])
     async with conn.transaction():
-        await conn.execute("SET TRANSACTION READ ONLY")
+        # One snapshot for every COPY (no FK gaps under concurrent ingest), and no writes.
+        await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         yield
 
 

@@ -83,6 +83,8 @@ def test_dev_connection_cannot_write_inside_snapshot_transaction(db_url: str) ->
                 async with read_only_transaction(dev):
                     cur = await dev.execute("SHOW transaction_read_only")
                     assert (await cur.fetchone()) == ("on",)
+                    cur = await dev.execute("SHOW transaction_isolation")
+                    assert (await cur.fetchone()) == ("repeatable read",)
                     await dev.execute("DELETE FROM sources")
 
     run_async(scenario())
