@@ -2,6 +2,8 @@ import os
 
 import pytest
 
+from ..eval_db import eval_db_url  # noqa: F401  (fixture)
+
 
 @pytest.fixture
 def db_url() -> str:
