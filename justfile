@@ -98,3 +98,19 @@ vault-scan *args:
 # Print ingestion status
 vault-status:
     uv run --directory backend ai-second-brain vault status
+
+# Create/migrate the scratch evaluation database (SB_EVAL_DATABASE_URL)
+eval-prepare:
+    uv run --directory backend ai-second-brain eval prepare
+
+# Print a starter queries.yaml (redirect it into SB_EVAL_QUERIES and edit)
+eval-suggest *args:
+    uv run --directory backend ai-second-brain eval suggest {{ args }}
+
+# Validate the query set against the current index
+eval-check *args:
+    uv run --directory backend ai-second-brain eval check {{ args }}
+
+# Run the embedding bake-off and write a report to SB_EVAL_DIR
+eval-run *args: eval-prepare
+    uv run --directory backend ai-second-brain eval run {{ args }}

@@ -1,16 +1,21 @@
-"""Admin CLI: `ai-second-brain serve | openapi | hash-password | chat-smoke`."""
+"""Admin CLI: `ai-second-brain serve | openapi | hash-password | chat-smoke | vault | eval`."""
 
 import asyncio
 import copy
 import json
 import logging.config
+import os
+from collections import Counter
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, LiteralString
 
 import typer
 import uvicorn
+import yaml
+from psycopg import AsyncConnection
 from pydantic import ValidationError
 from uvicorn.config import LOGGING_CONFIG
 
@@ -22,8 +27,16 @@ from ai_second_brain.chat.providers.ollama import OllamaPool, create_http_client
 from ai_second_brain.chat.repository import InMemoryChatRepository
 from ai_second_brain.chat.retrieval import NullRetriever, Retriever
 from ai_second_brain.chat.service import ChatService
-from ai_second_brain.config import Settings, get_settings
+from ai_second_brain.config import REPO_ROOT, Settings, get_settings
 from ai_second_brain.db import create_pool
+from ai_second_brain.eval.database import DbmateError
+from ai_second_brain.eval.database import prepare as prepare_eval_db
+from ai_second_brain.eval.embedding import PreflightError
+from ai_second_brain.eval.guards import check_eval_url
+from ai_second_brain.eval.queries import EvalConfigError, load_queries
+from ai_second_brain.eval.report import SUMMARY_HEADER, summary_rows, write_report
+from ai_second_brain.eval.runner import RunResult, run_eval
+from ai_second_brain.eval.snapshot import read_only_transaction
 from ai_second_brain.interfaces.api.app import openapi_schema
 from ai_second_brain.knowledge import status as read_status
 from ai_second_brain.knowledge import store
@@ -284,3 +297,183 @@ def vault_status() -> None:
     width = max(len(key) for key, _ in rows)
     for key, value in rows:
         typer.echo(f"{key + ':':<{width + 1}} {value}")
+
+
+eval_app = typer.Typer(no_args_is_help=True, help="Embedding evaluation commands.")
+app.add_typer(eval_app, name="eval")
+
+SUGGEST_SQL: LiteralString = (
+    "SELECT external_ref FROM ("
+    " SELECT s.external_ref,"
+    "  row_number() OVER (PARTITION BY"
+    "   CASE WHEN strpos(s.external_ref, '/') > 0 THEN split_part(s.external_ref, '/', 1)"
+    "   ELSE '' END ORDER BY random()) AS pick,"
+    "  CASE WHEN strpos(s.external_ref, '/') > 0 THEN split_part(s.external_ref, '/', 1)"
+    "  ELSE '' END AS folder"
+    " FROM sources s WHERE s.deleted_at IS NULL AND s.current_revision_id IS NOT NULL"
+    ") sampled ORDER BY pick, folder LIMIT %s"
+)
+
+
+def _eval_errors(error: EvalConfigError) -> None:
+    """Config errors name query ids and paths (owner's terminal only), never query text."""
+    if isinstance(error, DbmateError) and error.output:
+        typer.echo(error.output.rstrip(), err=True)
+    for line in error.errors:
+        typer.echo(line, err=True)
+
+
+async def _dev_read(settings: Settings, sql_text: LiteralString, *params: Any) -> list[Any]:
+    """Run one read inside a read-only transaction on the dev database."""
+    async with await AsyncConnection.connect(settings.database_url) as conn:
+        async with read_only_transaction(conn):
+            cur = await conn.execute(sql_text, params or None)
+            return [row[0] for row in await cur.fetchall()]
+
+
+async def _suggest_paths(settings: Settings, n: int) -> list[str]:
+    """Live notes, round-robin across top-level folders (each folder shuffled)."""
+    return await _dev_read(settings, SUGGEST_SQL, n)
+
+
+async def _dev_live_paths(settings: Settings) -> set[str]:
+    return set(
+        await _dev_read(
+            settings,
+            "SELECT s.external_ref FROM sources s"
+            " WHERE s.deleted_at IS NULL AND s.current_revision_id IS NOT NULL",
+        )
+    )
+
+
+@eval_app.command("prepare")
+def eval_prepare() -> None:
+    """Create and migrate the scratch evaluation database (SB_EVAL_DATABASE_URL)."""
+    settings = _load_settings()
+    try:
+        check_eval_url(
+            settings.eval_database_url, settings.database_url, os.environ.get("TEST_DATABASE_URL")
+        )
+        prepare_eval_db(settings.eval_database_url, REPO_ROOT)
+    except EvalConfigError as error:
+        _eval_errors(error)
+        raise typer.Exit(code=1) from error
+    typer.echo("Evaluation database ready.")
+
+
+@eval_app.command("suggest")
+def eval_suggest(
+    n: Annotated[int, typer.Option("--n", min=1, max=1000, help="How many notes to sample.")] = 60,
+) -> None:
+    """Print a starter queries.yaml to stdout (write a question for each entry)."""
+    settings = _load_settings()
+    try:
+        paths = asyncio.run(_suggest_paths(settings, n), loop_factory=new_event_loop)
+    except Exception as error:
+        typer.echo(f"Suggest failed ({type(error).__name__}).", err=True)
+        raise typer.Exit(code=2) from error
+    queries = [
+        {"id": f"q{i:02d}", "q": "", "lang": "pl", "kind": "topic", "targets": [path]}
+        for i, path in enumerate(paths, start=1)
+    ]
+    typer.echo(
+        yaml.safe_dump(
+            {"version": 1, "queries": queries}, allow_unicode=True, sort_keys=False
+        ).rstrip()
+    )
+
+
+@eval_app.command("check")
+def eval_check(
+    queries: Annotated[
+        Path | None, typer.Option("--queries", help="Queries file (default: SB_EVAL_QUERIES).")
+    ] = None,
+) -> None:
+    """Validate the query set and its targets against the current index."""
+    settings = _load_settings()
+    try:
+        loaded = load_queries(queries or settings.eval_queries_path)
+        live = asyncio.run(_dev_live_paths(settings), loop_factory=new_event_loop)
+        missing = [
+            f"{q.id}: target not in the index: {target}"
+            for q in loaded
+            for target in q.targets
+            if target not in live
+        ]
+        if missing:
+            raise EvalConfigError(missing)
+    except EvalConfigError as error:
+        _eval_errors(error)
+        raise typer.Exit(code=1) from error
+    except Exception as error:
+        typer.echo(f"Check failed ({type(error).__name__}).", err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(f"queries: {len(loaded)} (all targets are in the index)")
+    for key in ("lang", "kind"):
+        counts = Counter(getattr(q, key) for q in loaded)
+        typer.echo(f"by {key}: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+
+
+async def _eval_run(settings: Settings, queries_path: Path, models: list[str]) -> RunResult:
+    async with create_http_client() as client:
+        return await run_eval(
+            settings,
+            queries_path=queries_path,
+            models=models,
+            dev_url=settings.database_url,
+            eval_url=settings.eval_database_url,
+            test_url=os.environ.get("TEST_DATABASE_URL"),
+            client=client,
+            progress=typer.echo,
+        )
+
+
+@eval_app.command("run")
+def eval_run(
+    models: Annotated[
+        str | None,
+        typer.Option("--models", help="Comma-separated tags; the first is the incumbent."),
+    ] = None,
+    out: Annotated[
+        Path | None, typer.Option("--out", help="Report directory (default: SB_EVAL_DIR).")
+    ] = None,
+    queries: Annotated[
+        Path | None, typer.Option("--queries", help="Queries file (default: SB_EVAL_QUERIES).")
+    ] = None,
+) -> None:
+    """Run the embedding bake-off and write report.md + results.json."""
+    settings = _load_settings()
+    model_list = (
+        [m.strip() for m in models.split(",") if m.strip()] if models else settings.eval_model_list
+    )
+    out_dir = out.expanduser().resolve() if out else settings.eval_report_dir
+    if out_dir == REPO_ROOT or REPO_ROOT in out_dir.parents:
+        typer.echo("--out must be outside the repository", err=True)
+        raise typer.Exit(code=1)
+    logging.config.dictConfig(build_log_config())
+    try:
+        result = asyncio.run(
+            _eval_run(settings, queries or settings.eval_queries_path, model_list),
+            loop_factory=new_event_loop,
+        )
+        folder = write_report(result, out_dir, datetime.now())
+    except EvalConfigError as error:
+        _eval_errors(error)
+        raise typer.Exit(code=1) from error
+    except PreflightError as error:
+        if error.code == "embed_model_missing":
+            typer.echo(
+                f"Model {error.model} is not installed: run ollama pull {error.model}", err=True
+            )
+        else:
+            typer.echo(f"Preflight failed: {error.code} ({error.model})", err=True)
+        raise typer.Exit(code=1) from error
+    except Exception as error:
+        typer.echo(f"Evaluation failed ({type(error).__name__}).", err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(result.verdict.line)
+    rows = summary_rows(result)
+    widths = [max(len(r[i]) for r in [SUMMARY_HEADER, *rows]) for i in range(len(SUMMARY_HEADER))]
+    for row in [SUMMARY_HEADER, *rows]:
+        typer.echo("  ".join(cell.ljust(w) for cell, w in zip(row, widths, strict=True)).rstrip())
+    typer.echo(f"Report: {folder}")

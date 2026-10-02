@@ -1,0 +1,5 @@
+version: 1
+queries:
+  - {id: backup-paraphrase, q: "nightly backup schedule", lang: en, kind: paraphrase, targets: [Projects/NAS.md]}
+  - {id: disks-identifier, q: "RAID 5", lang: en, kind: identifier, targets: [Projects/NAS.md]}
+  - {id: proxmox-topic, q: "klaster wirtualizacji", lang: pl, kind: topic, targets: [Projects/Proxmox.md]}
