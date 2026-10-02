@@ -375,7 +375,9 @@ only if a challenger wins. The harness is built; the result is **pending your fi
 3. **Check it.** `just eval-check` lists every problem at once, each with its query id, and prints counts by
    `lang` and `kind`.
 4. **Run it.** `just eval-run` prepares the scratch database, embeds the notes with each model, runs every
-   query in hybrid mode and writes a report. It also takes `--models`, `--out` and `--queries`.
+   query in hybrid mode and writes a report. It also takes `--models`, `--out` and `--queries`. Relative
+   paths given to the `just eval-*` recipes resolve from the repository root; `~/` paths (for example
+   `--queries ~/.second-brain/eval/queries.yaml`) are recommended because they work from anywhere.
 
 ```yaml
 version: 1
@@ -398,15 +400,33 @@ wins, then the highest MRR@10. The verdict line is `<incumbent tag> stays` or `<
 **Models.** The incumbent is your `SB_EMBED_MODEL` tag (for example `bge-m3:567m`). The challengers are
 `snowflake-arctic-embed2`, `granite-embedding:278m` and `paraphrase-multilingual`. Pull each on the embedding
 host first (`ollama pull snowflake-arctic-embed2` and so on); a missing model stops the run with the
-`ollama pull <model>` hint. The first run embeds the whole vault once per model and prints an ETA. Later runs
-reuse the cache.
+`ollama pull <model>` hint. `--models` follows the same rules as `SB_EVAL_MODELS`: local models only, no tag
+twice, and a first tag naming your `SB_EMBED_MODEL` is relabelled with its full tag. The harness applies each
+model card's **query** prefix and never prefixes notes: `snowflake-arctic-embed2` gets `query: `, the others
+none. The report lists each model's prefix next to its digest.
+
+**Expected first-run time.** The first run embeds the whole vault once per model: roughly chunks ÷ (embeds
+per second on your host) per model. For example, 10,000 chunks at 5 chunks/s on CPU take about 33 minutes per
+model, about 2 hours for all four; a GPU host (`SB_EMBED_URL`) is much faster. The CLI shows a live rate and ETA
+after each batch, for example `bge-m3:567m 960/10000 chunks · 5.2/s · ETA 28:58`. Later runs reuse the cache,
+which is keyed by model digest, so a re-pulled model is embedded again.
 
 **Files.** Reports go to `SB_EVAL_DIR/<YYYYMMDD-HHMMSS>/` as `report.md` and `results.json`. The queries file and
 the reports name your notes, so they are private: they live outside the repository (an `SB_EVAL_DIR` inside it is
 refused) and are never committed. Notes are copied read-only from the dev database into a scratch database,
-`SB_EVAL_DATABASE_URL`, which can never be the dev or test database. Exit codes of `eval run`: 0 when the run
-completes (whatever the verdict), 1 for a setup or model problem, 2 for a runtime failure. If the report cannot
-be written to `SB_EVAL_DIR`, it is written to a temporary folder and the path is printed.
+`SB_EVAL_DATABASE_URL`, which can never be the dev or test database. If the report cannot be written to
+`SB_EVAL_DIR`, it is written to a new owner-only temporary folder (`sb-eval-*`) and the path is printed.
+
+Exit codes of `eval run`:
+- **0**: the run completed, whatever the verdict.
+- **1**: a setup or model problem: the queries file, a missing or cloud model, a duplicate tag, or a scratch
+  database that does not exist or is not prepared (`run just eval-prepare`).
+- **2**: a runtime failure. An embedding failure names its code and model (`Embedding failed (embed_unreachable)
+  for <model>`), and an unreachable database is named (`DATABASE_URL` or `SB_EVAL_DATABASE_URL`).
+- **130**: interrupted with Ctrl+C.
+
+After an exit 2 from an embedding failure, or a 130, the vectors already embedded stay cached: run again to
+resume.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
