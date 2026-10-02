@@ -10,6 +10,7 @@ import httpx2
 from psycopg import AsyncConnection
 
 from ai_second_brain.config import local_model_name
+from ai_second_brain.eval.database import check_ready
 from ai_second_brain.knowledge.embed_text import embed_input
 from ai_second_brain.knowledge.embedder import Embedder, EmbedError
 
@@ -64,6 +65,7 @@ async def embed_space(
     progress: Callable[[str, int, int], None],
 ) -> int:
     """Embed every snapshot chunk for one model; leaves `ev` idle on return or error."""
+    await check_ready(ev)  # only the scratch database has eval_embedding_cache
     async with ev.transaction():
         rows = await (
             await ev.execute(
@@ -93,6 +95,8 @@ async def embed_space(
     for start in range(0, len(items), batch):
         chunk = items[start : start + batch]
         vectors = await embedder.embed([text for _, text in chunk], keep_alive=KEEP_ALIVE)
+        if any(len(vec) != space.dims for vec in vectors):
+            raise EmbedError("embed_bad_response")
         async with ev.transaction(), ev.cursor() as cur:
             await cur.executemany(
                 "INSERT INTO eval_embedding_cache (model, input_sha256, embedding)"
@@ -106,15 +110,20 @@ async def embed_space(
     async with ev.transaction():
         stale = await (
             await ev.execute(
-                "SELECT id FROM embedding_spaces WHERE model = %s OR id = %s",
-                (space.model, space.space_id),
+                "SELECT id FROM embedding_spaces WHERE id >= %s AND (model = %s OR id = %s)",
+                (SPACE_BASE, space.model, space.space_id),
             )
         ).fetchall()
         for (old_id,) in stale:
             await ev.execute("DELETE FROM chunk_embeddings WHERE space_id = %s", (old_id,))
         await ev.execute(
-            "DELETE FROM embedding_spaces WHERE model = %s OR id = %s",
-            (space.model, space.space_id),
+            "DELETE FROM embedding_spaces WHERE id >= %s AND (model = %s OR id = %s)",
+            (SPACE_BASE, space.model, space.space_id),
+        )
+        # the seed space keeps its row; only its scratch-database name gives way
+        await ev.execute(
+            "UPDATE embedding_spaces SET model = model || '@seed' WHERE id < %s AND model = %s",
+            (SPACE_BASE, space.model),
         )
         await ev.execute(
             "INSERT INTO embedding_spaces (id, model, dims, is_default) VALUES (%s, %s, %s, false)",
