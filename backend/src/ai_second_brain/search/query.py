@@ -146,10 +146,15 @@ async def query(
     limit: int = 20,
     mode: Mode = "search",
     terms: ChatTerms | None = None,
+    space_id: int = SPACE_ID,
+    dims: int = SPACE_DIMS,
+    text: bool = True,
 ) -> SearchResult:
     if mode == "chat" and terms is None:
         raise ValueError("chat mode needs terms")
-    has_text = bool(q.strip()) if mode == "search" else bool(terms and terms.terms)
+    if space_id < 1 or dims < 1:
+        raise ValueError("space_id and dims must be positive")
+    has_text = text and (bool(q.strip()) if mode == "search" else bool(terms and terms.terms))
     text_ctes = sql.SQL(_CHAT_TEXT if mode == "chat" else _SEARCH_TEXT).format(
         list_limit=sql.Literal(LIST_LIMIT), pool=sql.Literal(CHAT_TEXT_POOL)
     )
@@ -157,8 +162,8 @@ async def query(
         text_ctes=text_ctes,
         list_limit=sql.Literal(LIST_LIMIT),
         candidates=sql.Literal(VECTOR_CANDIDATES),
-        dims=sql.Literal(SPACE_DIMS),
-        space=sql.Literal(SPACE_ID),
+        dims=sql.Literal(dims),
+        space=sql.Literal(space_id),
         k=sql.Literal(RRF_K),
         headline_opts=sql.Literal(HEADLINE_OPTS),
     )

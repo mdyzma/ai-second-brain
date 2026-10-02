@@ -14,10 +14,12 @@ FAST = ChatTimeouts(connect=1.0, read=0.5, probe=0.5)
 MakeFake = Callable[[], FakeOllama]
 
 
-def embed(url: str, texts: list[str], keep_alive: str | None = None) -> list[list[float]]:
+def embed(
+    url: str, texts: list[str], keep_alive: str | None = None, dims: int | None = 1024
+) -> list[list[float]]:
     async def scenario() -> list[list[float]]:
         async with create_http_client() as client:
-            embedder = Embedder(url, "bge-m3", 1024, client, FAST)
+            embedder = Embedder(url, "bge-m3", dims, client, FAST)
             if keep_alive is None:
                 return await embedder.embed(texts)
             return await embedder.embed(texts, keep_alive=keep_alive)
@@ -85,3 +87,17 @@ def test_reachable(make_fake_ollama: MakeFake) -> None:
 
     assert run_async(scenario(fake.url)) is True
     assert run_async(scenario(closed_port_url())) is False
+
+
+def test_dims_none_accepts_any_consistent_length(make_fake_ollama: MakeFake) -> None:
+    fake = make_fake_ollama()
+    fake.behaviour.embed_dims = 3
+    vectors = embed(fake.url, ["a", "b"], dims=None)
+    assert [len(v) for v in vectors] == [3, 3]
+    fake.behaviour.embed_raw_vector = [1.0, 2.0]
+    with pytest.raises(EmbedError) as error:
+        embed(fake.url, ["a", "b"], dims=None)
+    assert error.value.code == "embed_bad_response"
+    fake.behaviour.embed_raw_vector = []
+    with pytest.raises(EmbedError):
+        embed(fake.url, ["a", "b"], dims=None)

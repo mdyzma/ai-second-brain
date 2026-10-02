@@ -1,7 +1,9 @@
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
+from psycopg import AsyncConnection
 
 from ai_second_brain.search.query import query
 from ai_second_brain.search.terms import chat_terms
@@ -199,5 +201,71 @@ def test_chat_rule_runs_on_the_top_or_matches_only(
             monkeypatch.setattr("ai_second_brain.search.query.CHAT_TEXT_POOL", 1)
             narrow = await query(conn, "", vector=None, mode="chat", terms=terms, limit=16)
         assert narrow.hits == []  # Dense.md ranks first on OR, then fails the rule
+
+    indexed(db_url, tmp_path, fake, body)
+
+
+def test_default_space_uses_hnsw_index(
+    db_url: str, tmp_path: Path, make_fake_ollama: MakeFake
+) -> None:
+    fake = make_fake_ollama()
+    VaultBuilder(tmp_path).write("a.md", "# A\nzebra")
+
+    async def body(h: Harness) -> None:
+        async with h.pool.connection() as conn:
+            await conn.execute("SET enable_seqscan = off")
+            plan = await (
+                await conn.execute(
+                    "EXPLAIN SELECT chunk_id FROM chunk_embeddings WHERE space_id = 1"
+                    " ORDER BY embedding::halfvec(1024) <=> %s::halfvec(1024) LIMIT 5",
+                    ("[" + ",".join(["0.1"] * 1024) + "]",),
+                )
+            ).fetchall()
+        assert any("chunk_emb_s1_hnsw" in row[0] for row in plan)
+
+    indexed(db_url, tmp_path, fake, body)
+
+
+async def drop_scratch_space(conn: AsyncConnection[Any]) -> None:
+    await conn.execute("DELETE FROM chunk_embeddings WHERE space_id = 101")
+    await conn.execute("DELETE FROM embedding_spaces WHERE id = 101")
+
+
+def test_other_space_and_text_off(db_url: str, tmp_path: Path, make_fake_ollama: MakeFake) -> None:
+    fake = make_fake_ollama()
+    vault = VaultBuilder(tmp_path)
+    vault.write("a.md", "# A\nzebra one")
+    vault.write("b.md", "# B\nzebra two")
+
+    async def body(h: Harness) -> None:
+        async with h.pool.connection() as conn:
+            await drop_scratch_space(conn)  # the db fixture is shared across tests
+            await conn.execute(
+                "INSERT INTO embedding_spaces (id, model, dims, is_default)"
+                " VALUES (101, 'tiny', 3, false)"
+            )
+            rows = await (
+                await conn.execute(
+                    "SELECT c.id, s.external_ref FROM chunks c"
+                    " JOIN sources s ON s.current_revision_id = c.revision_id"
+                )
+            ).fetchall()
+            for chunk_id, path in rows:
+                vec = "[1,0,0]" if path == "b.md" else "[0,1,0]"
+                await conn.execute(
+                    "INSERT INTO chunk_embeddings (chunk_id, space_id, embedding)"
+                    " VALUES (%s, 101, %s::halfvec)",
+                    (chunk_id, vec),
+                )
+            vector_only = await query(
+                conn, "zebra", vector=[1.0, 0.0, 0.0], space_id=101, dims=3, text=False
+            )
+            assert [hit.path for hit in vector_only.hits][0] == "b.md"
+            assert all(hit.matched == frozenset({"vector"}) for hit in vector_only.hits)
+            text_only = await query(conn, "zebra", vector=None, space_id=101, dims=3)
+            assert {hit.path for hit in text_only.hits} == {"a.md", "b.md"}
+            with pytest.raises(ValueError):
+                await query(conn, "x", vector=None, space_id=0)
+            await drop_scratch_space(conn)
 
     indexed(db_url, tmp_path, fake, body)

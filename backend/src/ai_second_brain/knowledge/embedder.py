@@ -26,7 +26,12 @@ class EmbedRetryable(Exception):  # noqa: N818 - name fixed by the task interfac
 
 class Embedder:
     def __init__(
-        self, url: str, model: str, dims: int, client: httpx2.AsyncClient, timeouts: ChatTimeouts
+        self,
+        url: str,
+        model: str,
+        dims: int | None,
+        client: httpx2.AsyncClient,
+        timeouts: ChatTimeouts,
     ) -> None:
         self.url, self.model, self.dims = url, model, dims
         self._client, self._timeouts = client, timeouts
@@ -66,10 +71,15 @@ class Embedder:
             raise EmbedError("embed_bad_response") from None
         if not isinstance(vectors, list) or len(vectors) != len(texts):
             raise EmbedError("embed_bad_response")
-        return [self._checked(vector) for vector in vectors]
+        checked = [self._checked(vector) for vector in vectors]
+        if len({len(v) for v in checked}) > 1:
+            raise EmbedError("embed_bad_response")
+        return checked
 
     def _checked(self, vector: object) -> list[float]:
-        if not isinstance(vector, list) or len(vector) != self.dims:
+        if not isinstance(vector, list) or (
+            len(vector) != self.dims if self.dims is not None else not vector
+        ):
             raise EmbedError("embed_bad_response")
         values: list[float] = []
         for v in vector:
