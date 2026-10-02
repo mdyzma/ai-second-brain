@@ -103,7 +103,7 @@ vault-status:
 eval-prepare:
     uv run --directory backend ai-second-brain eval prepare
 
-# Print a starter queries.yaml (redirect it into SB_EVAL_QUERIES and edit)
+# Draft a starter query set: just eval-suggest --out ~/.second-brain/eval/queries.yaml
 eval-suggest *args:
     uv run --directory backend ai-second-brain eval suggest {{ args }}
 

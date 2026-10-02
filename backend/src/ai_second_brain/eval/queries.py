@@ -30,6 +30,14 @@ class EvalQuery:
 
 
 def load_queries(path: Path) -> list[EvalQuery]:
+    queries, errors = parse_queries(path)
+    if errors:
+        raise EvalConfigError(errors)
+    return queries
+
+
+def parse_queries(path: Path) -> tuple[list[EvalQuery], list[str]]:
+    """The entries that validated, plus every error (file-level problems still raise)."""
     if not path.is_file():
         raise EvalConfigError([f"queries file not found: {path}"])
     try:
@@ -51,6 +59,7 @@ def load_queries(path: Path) -> list[EvalQuery]:
         if not isinstance(item, dict):
             errors.append(f"#{index}: entry must be a mapping")
             continue
+        before = len(errors)
         qid = str(item.get("id", f"#{index}"))
         if not ID.match(qid):
             errors.append(f"{qid}: id must match [a-z0-9-]{{1,64}}")
@@ -72,6 +81,8 @@ def load_queries(path: Path) -> list[EvalQuery]:
         ):
             errors.append(f"{qid}: targets must be 1-10 vault paths")
             targets = []
+        if len(errors) > before:
+            continue
         out.append(
             EvalQuery(
                 qid,
@@ -81,6 +92,4 @@ def load_queries(path: Path) -> list[EvalQuery]:
                 tuple(t.strip() for t in targets),
             )
         )
-    if errors:
-        raise EvalConfigError(errors)
-    return out
+    return out, errors

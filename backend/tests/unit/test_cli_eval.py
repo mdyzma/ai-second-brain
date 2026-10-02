@@ -1,3 +1,4 @@
+import io
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -199,3 +200,106 @@ def test_check_reports_counts_and_missing_targets(
     assert result.exit_code == 1
     assert "a: target not in the index: Gone.md" in result.stderr
     assert "secret question" not in result.output
+
+
+def test_utf8_console_survives_a_cp1250_pipe() -> None:
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="cp1250")
+    main.utf8_stream(stream)
+    print("→ zażółć", file=stream)
+    stream.flush()
+    assert raw.getvalue().decode("utf-8").strip() == "→ zażółć"
+    main.utf8_stream(object())  # streams without reconfigure() are left alone
+
+
+def test_suggest_out_writes_utf8_and_refuses_overwrite(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path
+) -> None:
+    async def paths(settings: Settings, n: int) -> list[str]:
+        return ["Projekty/Zażółć gęślą.md"]
+
+    monkeypatch.setattr(main, "_suggest_paths", paths)
+    target = tmp_path / "eval" / "queries.yaml"
+    result = runner.invoke(app, ["eval", "suggest", "--out", str(target)])
+    assert result.exit_code == 0, result.output
+    data = yaml.safe_load(target.read_bytes().decode("utf-8"))
+    assert data["queries"][0]["targets"] == ["Projekty/Zażółć gęślą.md"]
+    assert "Zażółć" not in result.stdout  # written to the file, not printed
+
+    target.write_text("keep me", encoding="utf-8")
+    result = runner.invoke(app, ["eval", "suggest", "--out", str(target)])
+    assert result.exit_code == 1
+    assert "already exists" in result.stderr
+    assert target.read_text(encoding="utf-8") == "keep me"
+
+
+def test_suggest_out_expands_home(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path
+) -> None:
+    async def paths(settings: Settings, n: int) -> list[str]:
+        return ["a.md"]
+
+    monkeypatch.setattr(main, "_suggest_paths", paths)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    result = runner.invoke(app, ["eval", "suggest", "--out", "~/q.yaml"])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "q.yaml").is_file()
+
+
+def test_check_reports_loader_and_target_errors_together(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path
+) -> None:
+    async def live(settings: Settings) -> set[str]:
+        return {"Projects/NAS.md"}
+
+    monkeypatch.setattr(main, "_dev_live_paths", live)
+    queries = _write(
+        tmp_path / "q.yaml",
+        "  - {id: empty, q: '', lang: pl, kind: topic, targets: [Projects/NAS.md]}\n"
+        "  - {id: gone, q: 'secret text', lang: pl, kind: topic, targets: [Gone.md]}\n",
+    )
+    result = runner.invoke(app, ["eval", "check", "--queries", str(queries)])
+    assert result.exit_code == 1
+    assert "empty: q must be" in result.stderr
+    assert "gone: target not in the index: Gone.md" in result.stderr
+    assert "secret text" not in result.output
+
+
+def test_run_falls_back_to_temp_when_report_dir_fails(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(main, "run_eval", _fake_run(_result()))
+    real = main.write_report
+    fallback_root = tmp_path / "tmp"
+    fallback_root.mkdir()
+    monkeypatch.setattr(main.tempfile, "gettempdir", lambda: str(fallback_root))
+
+    def flaky(result: Any, out_dir: Path, now: Any) -> Path:
+        if out_dir == settings.eval_report_dir:
+            raise PermissionError("denied")
+        return real(result, out_dir, now)
+
+    monkeypatch.setattr(main, "write_report", flaky)
+    result = runner.invoke(app, ["eval", "run"])
+    assert result.exit_code == 0, result.output
+    [folder] = list(fallback_root.iterdir())
+    assert folder.name.startswith("sb-eval-")
+    [run_folder] = list(folder.iterdir())
+    assert (run_folder / "report.md").is_file()
+    assert "could not write" in result.stderr.lower()
+    assert str(run_folder) in result.stdout
+
+
+def test_run_exits_2_when_fallback_also_fails(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    monkeypatch.setattr(main, "run_eval", _fake_run(_result()))
+
+    def broken(result: Any, out_dir: Path, now: Any) -> Path:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(main, "write_report", broken)
+    result = runner.invoke(app, ["eval", "run"])
+    assert result.exit_code == 2
+    assert "OSError" in result.stderr

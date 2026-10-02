@@ -5,6 +5,8 @@ import copy
 import json
 import logging.config
 import os
+import sys
+import tempfile
 from collections import Counter
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -33,7 +35,7 @@ from ai_second_brain.eval.database import DbmateError
 from ai_second_brain.eval.database import prepare as prepare_eval_db
 from ai_second_brain.eval.embedding import PreflightError
 from ai_second_brain.eval.guards import check_eval_url
-from ai_second_brain.eval.queries import EvalConfigError, load_queries
+from ai_second_brain.eval.queries import EvalConfigError, parse_queries
 from ai_second_brain.eval.report import SUMMARY_HEADER, summary_rows, write_report
 from ai_second_brain.eval.runner import RunResult, run_eval
 from ai_second_brain.eval.snapshot import read_only_transaction
@@ -315,6 +317,20 @@ SUGGEST_SQL: LiteralString = (
 )
 
 
+def utf8_stream(stream: object) -> None:
+    """Make a console stream UTF-8 (errors replaced): a cp1250 pipe must not kill a long run."""
+    reconfigure = getattr(stream, "reconfigure", None)
+    if callable(reconfigure):
+        reconfigure(encoding="utf-8", errors="replace")
+
+
+@eval_app.callback()
+def eval_callback() -> None:
+    """Embedding evaluation commands."""
+    utf8_stream(sys.stdout)
+    utf8_stream(sys.stderr)
+
+
 def _eval_errors(error: EvalConfigError) -> None:
     """Config errors name query ids and paths (owner's terminal only), never query text."""
     if isinstance(error, DbmateError) and error.output:
@@ -364,9 +380,25 @@ def eval_prepare() -> None:
 @eval_app.command("suggest")
 def eval_suggest(
     n: Annotated[int, typer.Option("--n", min=1, max=1000, help="How many notes to sample.")] = 60,
+    out: Annotated[
+        Path | None,
+        typer.Option(
+            "--out",
+            help="Write UTF-8 to this new file (e.g. ~/.second-brain/eval/queries.yaml)"
+            " instead of stdout; an existing file is never overwritten.",
+        ),
+    ] = None,
 ) -> None:
-    """Print a starter queries.yaml to stdout (write a question for each entry)."""
+    """Draft a starter queries.yaml (write a question for each entry).
+
+    Recommended: just eval-suggest --out ~/.second-brain/eval/queries.yaml
+    (a PowerShell `>` redirect writes UTF-16, which the loader rejects).
+    """
     settings = _load_settings()
+    target = out.expanduser() if out else None
+    if target is not None and target.exists():
+        typer.echo(f"{target} already exists; not overwriting it.", err=True)
+        raise typer.Exit(code=1)
     try:
         paths = asyncio.run(_suggest_paths(settings, n), loop_factory=new_event_loop)
     except Exception as error:
@@ -376,11 +408,21 @@ def eval_suggest(
         {"id": f"q{i:02d}", "q": "", "lang": "pl", "kind": "topic", "targets": [path]}
         for i, path in enumerate(paths, start=1)
     ]
-    typer.echo(
-        yaml.safe_dump(
-            {"version": 1, "queries": queries}, allow_unicode=True, sort_keys=False
-        ).rstrip()
-    )
+    text = yaml.safe_dump({"version": 1, "queries": queries}, allow_unicode=True, sort_keys=False)
+    if target is None:
+        typer.echo(text.rstrip())
+        return
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("x", encoding="utf-8", newline="\n") as handle:  # "x": never overwrite
+            handle.write(text)
+    except FileExistsError as error:
+        typer.echo(f"{target} already exists; not overwriting it.", err=True)
+        raise typer.Exit(code=1) from error
+    except OSError as error:
+        typer.echo(f"Could not write {target} ({type(error).__name__}).", err=True)
+        raise typer.Exit(code=2) from error
+    typer.echo(f"Wrote {len(queries)} entries to {target}; write a question for each.")
 
 
 @eval_app.command("check")
@@ -392,16 +434,16 @@ def eval_check(
     """Validate the query set and its targets against the current index."""
     settings = _load_settings()
     try:
-        loaded = load_queries(queries or settings.eval_queries_path)
+        loaded, errors = parse_queries(queries or settings.eval_queries_path)
         live = asyncio.run(_dev_live_paths(settings), loop_factory=new_event_loop)
-        missing = [
+        errors += [
             f"{q.id}: target not in the index: {target}"
             for q in loaded
             for target in q.targets
             if target not in live
         ]
-        if missing:
-            raise EvalConfigError(missing)
+        if errors:
+            raise EvalConfigError(errors)
     except EvalConfigError as error:
         _eval_errors(error)
         raise typer.Exit(code=1) from error
@@ -426,6 +468,24 @@ async def _eval_run(settings: Settings, queries_path: Path, models: list[str]) -
             client=client,
             progress=typer.echo,
         )
+
+
+def _save_report(result: RunResult, out_dir: Path, now: datetime) -> Path:
+    """Write the report; if out_dir fails, keep the (possibly hours-long) run in the temp dir."""
+    try:
+        return write_report(result, out_dir, now)
+    except OSError as error:
+        typer.echo(
+            f"Warning: could not write the report to {out_dir} ({type(error).__name__});"
+            " writing it to the temp directory instead.",
+            err=True,
+        )
+    fallback = Path(tempfile.gettempdir()) / f"sb-eval-{now.strftime('%Y%m%d-%H%M%S')}"
+    try:
+        return write_report(result, fallback, now)
+    except OSError as error:
+        typer.echo(f"Evaluation failed ({type(error).__name__}).", err=True)
+        raise typer.Exit(code=2) from error
 
 
 @eval_app.command("run")
@@ -456,7 +516,6 @@ def eval_run(
             _eval_run(settings, queries or settings.eval_queries_path, model_list),
             loop_factory=new_event_loop,
         )
-        folder = write_report(result, out_dir, datetime.now())
     except EvalConfigError as error:
         _eval_errors(error)
         raise typer.Exit(code=1) from error
@@ -471,6 +530,7 @@ def eval_run(
     except Exception as error:
         typer.echo(f"Evaluation failed ({type(error).__name__}).", err=True)
         raise typer.Exit(code=2) from error
+    folder = _save_report(result, out_dir, datetime.now())
     typer.echo(result.verdict.line)
     rows = summary_rows(result)
     widths = [max(len(r[i]) for r in [SUMMARY_HEADER, *rows]) for i in range(len(SUMMARY_HEADER))]
