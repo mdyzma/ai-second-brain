@@ -26,3 +26,8 @@ def test_winner_line_and_tie_break() -> None:
         ],
     )
     assert v.winner == "b" and v.line == "b wins → Phase 3b"
+
+
+def test_exact_margin_and_equal_mrr_pass() -> None:
+    v = decide(INC, [ModelScore("edge", 0.75, 0.50, 299.9)])
+    assert v.winner == "edge"
