@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Literal
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -107,6 +107,30 @@ class Settings(BaseSettings):
     obsidian_vault: str = ""
     chat_num_ctx: int = Field(default=8192, ge=2048, le=131072)
     retrieval_min_similarity: float = Field(default=0.45, ge=0.0, le=1.0)
+    eval_queries: Path = Path("~/.second-brain/eval/queries.yaml")
+    eval_dir: Path = Path("~/.second-brain/eval/reports")
+    eval_database_url_override: str = Field(default="", validation_alias="SB_EVAL_DATABASE_URL")
+    eval_models: str = (
+        "bge-m3,snowflake-arctic-embed2,granite-embedding:278m,paraphrase-multilingual"
+    )
+
+    @field_validator("eval_models")
+    @classmethod
+    def _eval_models_local(cls, value: str) -> str:
+        tags = [t.strip() for t in value.split(",") if t.strip()]
+        if not tags:
+            raise ValueError("SB_EVAL_MODELS needs at least one model")
+        for tag in tags:
+            local_model_name(tag)
+        return ",".join(tags)
+
+    @field_validator("eval_dir")
+    @classmethod
+    def _eval_dir_outside_repo(cls, value: Path) -> Path:
+        resolved = value.expanduser().resolve()
+        if resolved == REPO_ROOT or REPO_ROOT in resolved.parents:
+            raise ValueError("SB_EVAL_DIR must be outside the repository (reports name your notes)")
+        return value
 
     @field_validator("vault_path")
     @classmethod
@@ -161,6 +185,28 @@ class Settings(BaseSettings):
         if len(labels) != len(set(labels)):
             raise ValueError("endpoint labels must be unique")
         return value
+
+    @property
+    def eval_queries_path(self) -> Path:
+        return self.eval_queries.expanduser()
+
+    @property
+    def eval_report_dir(self) -> Path:
+        return self.eval_dir.expanduser()
+
+    @property
+    def eval_database_url(self) -> str:
+        if self.eval_database_url_override.strip():
+            return self.eval_database_url_override.strip()
+        parts = urlsplit(self.database_url)
+        return urlunsplit(parts._replace(path=f"{parts.path.rstrip('/')}_eval"))
+
+    @property
+    def eval_model_list(self) -> list[str]:
+        tags = self.eval_models.split(",")
+        if model_matches_space(self.embed_model, tags[0]):
+            tags[0] = self.embed_model
+        return tags
 
     @property
     def cloud_available(self) -> bool:
