@@ -32,6 +32,8 @@ The discarded MVP used `all-MiniLM-L6-v2` (384-d, English-centric). The prompt a
 
 **Note (Phase 2a):** Space 1 is bge-m3 (1024-d) from Phase 2a; the bake-off against MiniLM/e5 moves to Phase 3 as an evaluation of this default.
 
+**Phase 3 (2026-10-02):** The bake-off harness exists ([spec](../../superpowers/specs/2026-10-02-phase-3-embedding-evaluation-design.md)). It replaces the MiniLM/e5 candidates above with the incumbent `bge-m3` against `snowflake-arctic-embed2`, `granite-embedding:278m` and `paraphrase-multilingual`, run on the owner's own PL/EN questions. A challenger wins only if its hybrid recall@10 ≥ the incumbent's + 0.05, its hybrid MRR@10 ≥ the incumbent's, and its query-embedding p95 < 300 ms. The result is pending the owner's first run; a second space is added (Phase 3b) only if a challenger wins.
+
 ## Action Items
 1. [ ] Build the labelled retrieval set (50 queries, PL/EN, known target notes) — reusable by Phase 0.
 2. [ ] Backfill job with checkpointing and progress in `doctor`.

@@ -42,6 +42,7 @@ cloud model is used only when you explicitly choose it. It never reads your note
 - [Repository layout](#repository-layout)
 - [How it works](#how-it-works)
 - [Configuration](#configuration)
+- [Evaluating search](#evaluating-search)
 - [Commit messages and releases](#commit-messages-and-releases)
 - [Troubleshooting](#troubleshooting)
 - [Documentation](#documentation)
@@ -114,7 +115,7 @@ Each phase gets its own spec and plan before any code is written, in
 | 1b | **Ask** privately: chat answered by a local model (Ollama), with sources shown first; settings | ✅ Done |
 | 2a | **Sources**: durable Obsidian ingestion (watcher, reconcile, bge-m3 embeddings), with its state on the Sources screen | ✅ Done |
 | 2b | **Search**, chat retrieval and quick capture: hybrid full-text and vector search, your notes in private chat, a capture box | ✅ Done |
-| 3 | Embedding evaluation: bge-m3 against MiniLM/e5 on a Polish/English retrieval set; a new space only if it wins | Planned |
+| 3 | Embedding evaluation: bge-m3 against three challengers on your own Polish/English questions; a new space only if one wins | 🟡 Harness built; result pending your first run |
 | 4 | **Digest** and **Review**: nightly consolidation links notes to projects, people and machines; a morning digest; a review queue | Planned |
 | 5 | **Nodes**: see and wake your machines (RTX workstation, MacBook, Proxmox) with truthful online, offline and unknown states | Planned |
 | 6 | Paperwork and history: invoices and contracts from PDF, email archives, git history | Planned |
@@ -170,6 +171,10 @@ command from the repository root.
 | `just db::new <name>`, then `just db::migrate` and `just db::dump` | Add a migration and refresh `db/schema.sql` |
 | `just db::up` / `just db::down` / `just db::status` | Start or stop the database container, or list migrations |
 | `just hash-password` | Hash a new owner password |
+| `just eval-prepare` | Create or migrate the scratch evaluation database (`SB_EVAL_DATABASE_URL`) |
+| `just eval-suggest --out FILE` | Draft a starter queries file from a sample of your notes |
+| `just eval-check` | Validate the queries file against the index; lists every problem at once |
+| `just eval-run` | Prepare, then run the embedding bake-off and write a report |
 | `just chat-smoke` | Ask your configured local model one question (nothing is saved) |
 | `just release-dry-run` | Preview the next release version (needs `GITHUB_TOKEN`) |
 | `just --list` | Everything else |
@@ -187,11 +192,12 @@ ai-second-brain/
 │   │   ├── chat/               Private/cloud routing, Ollama and Anthropic clients, conversations
 │   │   ├── vault/              Reading the vault: observe, parse, chunk, watcher, reconcile, moves and deletions; the capture writer
 │   │   ├── search/             Hybrid query (full text + vectors, fused by RRF), query terms, the chat retriever
+│   │   ├── eval/               The embedding bake-off: query file, snapshot of the index, per-model embedding, metrics, verdict, report
 │   │   ├── knowledge/          Sources, revisions, chunks and embeddings in Postgres; the index and embed jobs and the status summary
 │   │   ├── ingest/             The worker process (procrastinate queues, watcher, scheduled reconcile)
 │   │   └── interfaces/
 │   │       ├── api/            FastAPI app, routes (health, auth), cross-site check, API schemas
-│   │       └── cli/            `ai-second-brain serve | openapi | hash-password | chat-smoke | worker | vault reconcile|status`
+│   │       └── cli/            `ai-second-brain serve | openapi | hash-password | chat-smoke | worker | vault reconcile|status | eval prepare|suggest|check|run`
 │   ├── scripts/                search_bench.py, the one-off search benchmark (see Search performance)
 │   └── tests/                  unit/ (no database) and integration/ (real Postgres)
 ├── web/                        React + TypeScript single-page app (pnpm, Vite)
@@ -204,6 +210,7 @@ ai-second-brain/
 │   └── tests/e2e/              Playwright browser tests
 ├── db/
 │   ├── migrations/             dbmate SQL migrations (the source of truth for the schema)
+│   ├── eval/migrations/        Migrations for the scratch evaluation database (its own schema_migrations_eval table)
 │   └── schema.sql              Generated schema snapshot; CI checks it is current
 ├── infra/compose.yaml          PostgreSQL 17 + pgvector for development (127.0.0.1:5433)
 ├── scripts/                    Cross-platform helper scripts (TypeScript run with tsx): database
@@ -353,6 +360,61 @@ runs and PostgreSQL then uses a generic plan, about 4x slower for this query, so
 A two-word query over this synthetic set matches about every chunk, so full text alone ranks around 50,000 rows (about 180 ms). Real notes are
 less uniform, so treat these numbers as an upper bound for a vault of this size.
 
+## Evaluating search
+
+Search ranks with `bge-m3` vectors. The bake-off decides whether any other embedding model finds your notes
+better, measured on **your own** questions in Polish and English. A second embedding space is built (Phase 3b)
+only if a challenger wins. The harness is built; the result is **pending your first run**. Details are in the
+[Phase 3 spec](docs/superpowers/specs/2026-10-02-phase-3-embedding-evaluation-design.md).
+
+1. **Draft the queries.** `just eval-suggest --out ~/.second-brain/eval/queries.yaml` samples about 60 notes
+   across your folders and writes UTF-8. It never overwrites an existing file. Prefer `--out` to a shell
+   redirect: in Windows PowerShell 5.1, `>` writes UTF-16, which the loader rejects.
+2. **Write a question for each entry** (the `q` field starts empty). Write some `paraphrase` ones without the
+   note open, so they do not copy its words. Delete entries you cannot phrase a question for.
+3. **Check it.** `just eval-check` lists every problem at once, each with its query id, and prints counts by
+   `lang` and `kind`.
+4. **Run it.** `just eval-run` prepares the scratch database, embeds the notes with each model, runs every
+   query in hybrid mode and writes a report. It also takes `--models`, `--out` and `--queries`.
+
+```yaml
+version: 1
+queries:
+  - id: backup-nas            # unique, [a-z0-9-], up to 64 characters
+    q: Jak odtworzyc kopie zapasowa z NAS-a?   # 1 to 500 characters
+    lang: pl                  # pl or en: the language of the question
+    kind: paraphrase          # identifier, paraphrase or topic
+    targets:                  # 1 to 10 vault-relative paths that answer it
+      - Homelab/NAS restore.md
+```
+
+`kind` says what the question tests: `identifier` is an exact term (a host name, a ticket number), `paraphrase`
+means the same thing in different words, and `topic` is a broad subject. Results are split by `lang` and `kind`.
+
+**The win rule.** A challenger wins only if (1) its hybrid recall@10 ≥ the incumbent's + 0.05, (2) its hybrid
+MRR@10 ≥ the incumbent's, and (3) its query-embedding p95 < 300 ms. With several winners, the highest recall@10
+wins, then the highest MRR@10. The verdict line is `<incumbent tag> stays` or `<model> wins → Phase 3b`.
+
+**Models.** The incumbent is your `SB_EMBED_MODEL` tag (for example `bge-m3:567m`). The challengers are
+`snowflake-arctic-embed2`, `granite-embedding:278m` and `paraphrase-multilingual`. Pull each on the embedding
+host first (`ollama pull snowflake-arctic-embed2` and so on); a missing model stops the run with the
+`ollama pull <model>` hint. The first run embeds the whole vault once per model and prints an ETA. Later runs
+reuse the cache.
+
+**Files.** Reports go to `SB_EVAL_DIR/<YYYYMMDD-HHMMSS>/` as `report.md` and `results.json`. The queries file and
+the reports name your notes, so they are private: they live outside the repository (an `SB_EVAL_DIR` inside it is
+refused) and are never committed. Notes are copied read-only from the dev database into a scratch database,
+`SB_EVAL_DATABASE_URL`, which can never be the dev or test database. Exit codes of `eval run`: 0 when the run
+completes (whatever the verdict), 1 for a setup or model problem, 2 for a runtime failure. If the report cannot
+be written to `SB_EVAL_DIR`, it is written to a temporary folder and the path is printed.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SB_EVAL_QUERIES` | `~/.second-brain/eval/queries.yaml` | The queries file |
+| `SB_EVAL_DIR` | `~/.second-brain/eval/reports` | Where reports are written; must be outside the repository |
+| `SB_EVAL_DATABASE_URL` | `DATABASE_URL` with `_eval` added to the database name | The scratch database. It must differ from the dev and test databases |
+| `SB_EVAL_MODELS` | `bge-m3,snowflake-arctic-embed2,granite-embedding:278m,paraphrase-multilingual` | Comma-separated; the first is the incumbent |
+
 ## Commit messages and releases
 
 **Commit messages** follow Conventional Commits:
@@ -423,6 +485,7 @@ version files, commits `chore(release): vX.Y.Z [skip ci]`, tags `vX.Y.Z` and pub
 - [Tech stack evaluation](docs/architecture/tech-stack-evaluation.md), including why the backend is Python and the UI is TypeScript
 - [Architecture decision records](docs/architecture/adr/)
 - [Design system](docs/architecture/design-system-audit.md): tokens, components and the accessibility bar
+- [Phase 3 spec (embedding evaluation)](docs/superpowers/specs/2026-10-02-phase-3-embedding-evaluation-design.md)
 - [Phase 2b spec (search, retrieval, capture)](docs/superpowers/specs/2026-10-01-phase-2b-search-retrieval-capture-design.md)
 - [Phase 2a spec (vault ingestion)](docs/superpowers/specs/2026-09-30-phase-2a-vault-ingestion-design.md)
 - [Phase 1a spec](docs/superpowers/specs/2026-09-29-phase-1a-foundation-design.md) and

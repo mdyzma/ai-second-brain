@@ -594,7 +594,8 @@ Aligns with the assessment's decomposition; each phase ends with a usable system
 | 1b | Private chat (web) | Routing rules from the [routing spec](../superpowers/specs/2026-09-29-private-chat-routing-design.md) §4–§8 reimplemented behind `/api/sessions` with SSE; chat screen with mode badge and source list; egress tests pass — **delivered** ([spec](../superpowers/specs/2026-09-29-phase-1b-private-chat-design.md)) | 1a |
 | 2a | Durable vault ingestion | Initial vault scan + watcher + reconcile; crash/retry/delete fixtures pass; Sources screen — **delivered** ([spec](../superpowers/specs/2026-09-30-phase-2a-vault-ingestion-design.md)) | 1a |
 | 2b | Search + chat retrieval + capture | Hybrid FTS + vector search API and page; the real Retriever in private chat; the capture box — **delivered** ([spec](../superpowers/specs/2026-10-01-phase-2b-search-retrieval-capture-design.md)) | 2a |
-| 3 | Embedding evaluation (bake-off vs bge-m3; add a space only if it wins) | recall@10 on the eval set compares MiniLM/e5 against the bge-m3 default; a second space is built only if it wins | 2b |
+| 3 | Embedding evaluation (bake-off vs bge-m3 on the owner's PL/EN questions) | The harness compares bge-m3 with three challengers by recall@10, MRR@10 and query latency; the result is pending the owner's first run: **delivered (harness)** ([spec](../superpowers/specs/2026-10-02-phase-3-embedding-evaluation-design.md)) | 2b |
+| 3b | Switch embedding space (only if a challenger wins) | A new space is backfilled and made the default; the old one is dropped after a month | 3 |
 | 4 | Knowledge graph + sleep cycle | Entities/edges from nightly job; digest; review queue; idempotent reruns | 2a, 2b |
 | 5 | Hardware observe/wake | Truthful state fixtures; WoL measured per node; sleep cycle uses workstation | 1 |
 | 6 | Document intelligence | PDF invoice/contract, email, git adapters with fixtures and provenance | 2, 4 |
