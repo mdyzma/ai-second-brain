@@ -47,6 +47,9 @@ class OllamaBehaviour:
     embed_delay: float = 0.0
     embed_raw_vector: list[Any] | None = None  # replaces the first vector verbatim
     embed_topics: dict[str, str] = field(default_factory=dict)  # substring → shared topic vector
+    # model → substring → topic; when non-empty, topic vectors also depend on the model
+    embed_topics_by_model: dict[str, dict[str, str]] = field(default_factory=dict)
+    missing_models: set[str] = field(default_factory=set)
 
 
 def fake_vector(text: str, dims: int = 1024) -> list[float]:
@@ -96,13 +99,21 @@ class FakeOllama:
             return JSONResponse({"error": "boom"}, status_code=500)
         if b.embed_status != 200:
             return JSONResponse({"error": b.embed_error_text}, status_code=b.embed_status)
+        model = body["model"]
+        if model in b.missing_models:
+            return JSONResponse(
+                {"error": f'model "{model}" not found, try pulling it first'}, status_code=404
+            )
+        per_model = bool(b.embed_topics_by_model)
+        topics = b.embed_topics_by_model.get(model, b.embed_topics) if per_model else b.embed_topics
         inputs = body["input"] if isinstance(body["input"], list) else [body["input"]]
 
         def vector_for(text: str) -> list[float]:
             lowered = text.lower()
-            for needle, topic in b.embed_topics.items():
+            for needle, topic in topics.items():
                 if needle.lower() in lowered:
-                    return fake_vector(f"topic:{topic}", b.embed_dims)
+                    key = f"topic:{model}:{topic}" if per_model else f"topic:{topic}"
+                    return fake_vector(key, b.embed_dims)
             return fake_vector(text, b.embed_dims)
 
         vectors = [vector_for(text) for text in inputs]
