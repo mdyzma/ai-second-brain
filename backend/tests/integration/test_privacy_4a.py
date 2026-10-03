@@ -27,6 +27,7 @@ REPLY: dict[str, Any] = {
     "entities": [
         {"name": "SecretPersonQX", "type": "person", "aliases": [], "confidence": 0.9},
         {"name": "SecretToolQX", "type": "tool", "aliases": ["SecretAliasQX"], "confidence": 0.9},
+        {"name": "SecretOtherQX", "type": "tool", "aliases": [], "confidence": 0.9},
     ],
     "relations": [
         {"subject": "NOTE", "relation": "about", "object": "SecretToolQX", "chunk": "c1",
@@ -100,7 +101,7 @@ def test_extraction_decisions_and_entity_pages_log_nothing_private(
 
     review = client.get("/api/review/entities").json()["items"]
     ids = {item["name"]: item["id"] for item in review}
-    assert set(ids) == {"SecretPersonQX", "SecretToolQX"}
+    assert set(ids) == {"SecretPersonQX", "SecretToolQX", "SecretOtherQX"}
     assert review[0]["samples"][0]["summary"] == "SecretSummaryQX"
     for entity_id in ids.values():
         accepted = client.post(
@@ -121,6 +122,19 @@ def test_extraction_decisions_and_entity_pages_log_nothing_private(
         headers=SAME_ORIGIN,
     )
     assert decided.json() == {"updated": 1}
+    taken = client.post(
+        f"/api/entities/{ids['SecretOtherQX']}/decide",
+        json={"action": "rename", "name": "SecretRenamedQX"},
+        headers=SAME_ORIGIN,
+    )
+    assert taken.status_code == 409 and taken.json() == {"detail": "name_taken"}
+    merged = client.post(
+        f"/api/entities/{ids['SecretOtherQX']}/decide",
+        json={"action": "merge", "into_id": ids["SecretToolQX"]},
+        headers=SAME_ORIGIN,
+    )
+    assert merged.status_code == 200
+    assert "SecretOtherQX" in merged.json()["entity"]["aliases"]
     page = client.get(f"/api/entities/{ids['SecretToolQX']}").json()
     assert page["notes"][0]["summary"] == "SecretSummaryQX"
     assert page["related"][0]["entity"]["name"] == "SecretPersonQX"
@@ -137,10 +151,12 @@ def test_extraction_decisions_and_entity_pages_log_nothing_private(
 
     app_log = "\n".join(caplog.handler.format(r) for r in caplog.records if not is_test_client(r))
     assert "extract revision=" in app_log and "decide action=accept" in app_log  # it did log
+    assert "code=name_taken" in app_log and "decide action=merge" in app_log
     secrets = [
         "SecretPersonQX",
         "SecretToolQX",
         "SecretAliasQX",
+        "SecretOtherQX",
         "SecretRenamedQX",
         "SecretSummaryQX",
         "SecretTitleQX",

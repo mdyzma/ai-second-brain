@@ -3,7 +3,6 @@
 import json
 import logging
 import time
-from pathlib import PurePosixPath
 from typing import Any, Literal
 from uuid import UUID
 
@@ -27,16 +26,14 @@ logger = logging.getLogger("ai_second_brain.graph")
 Outcome = Literal["ok", "skipped", "failed"]
 
 
-async def _call(
-    ctx: GraphContext, messages: list[dict[str, str]], stem: str
-) -> ExtractionOutput | None:
+async def _call(ctx: GraphContext, messages: list[dict[str, str]]) -> ExtractionOutput | None:
     """One window; one retry carrying only the short reason (never note content)."""
     assert ctx.client is not None  # noqa: S101 - checked by the caller
     schema = output_json_schema()
     for attempt in range(2):
         reply = await ctx.client.chat_json(messages, schema)
         try:
-            return filter_output(json.loads(reply), filename_stem=stem)
+            return filter_output(json.loads(reply))
         except (ValueError, InvalidOutput) as error:  # JSONDecodeError is a ValueError
             if attempt == 1:
                 return None
@@ -131,7 +128,6 @@ async def extract_revision(ctx: GraphContext, revision_id: UUID) -> Outcome:
     if ctx.client is None:
         return await fail("extraction_unavailable")
     windows = split_windows(chunks, max_chars=ctx.settings.extract_window_chars)
-    stem = PurePosixPath(info.path).stem
     outputs: list[ExtractionOutput] = []
     evidence: dict[str, str] = {}
     for index, window in enumerate(windows, 1):
@@ -139,7 +135,7 @@ async def extract_revision(ctx: GraphContext, revision_id: UUID) -> Outcome:
             title=info.title, path=info.path, window=window, index=index, total=len(windows)
         )
         messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}]
-        out = await _call(ctx, messages, stem)
+        out = await _call(ctx, messages)
         if out is None:
             return await fail("invalid_output")
         _evidence(window, out, evidence)  # before the merge makes chunk labels stale

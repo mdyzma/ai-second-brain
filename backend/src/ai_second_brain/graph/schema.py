@@ -93,13 +93,12 @@ def _aliases(value: object, name_key: str) -> list[str]:
     return out
 
 
-def filter_output(raw: object, *, filename_stem: str) -> ExtractionOutput:
+def filter_output(raw: object) -> ExtractionOutput:
     if not isinstance(raw, dict):
         raise InvalidOutput("not an object")
     summary, ents, rels = raw.get("summary", ""), raw.get("entities", []), raw.get("relations", [])
     if not isinstance(summary, str) or not isinstance(ents, list) or not isinstance(rels, list):
         raise InvalidOutput("wrong field types")
-    stem = norm(filename_stem)
     entities: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in ents:
@@ -107,7 +106,7 @@ def filter_output(raw: object, *, filename_stem: str) -> ExtractionOutput:
             continue
         name = _clean(item.get("name"))
         key = norm(name)
-        if not key or key in (stem, "note") or key in seen:
+        if not key or key == "note" or key in seen:
             continue
         seen.add(key)
         entities.append(

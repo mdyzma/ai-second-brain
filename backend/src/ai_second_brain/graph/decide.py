@@ -11,6 +11,7 @@ Logs carry ids and codes only, never names or aliases.
 """
 
 import logging
+import unicodedata
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 from uuid import UUID
@@ -151,10 +152,15 @@ async def reject_entity(conn: AsyncConnection, entity_id: UUID) -> None:
     logger.info("decide action=reject entity=%s", entity_id)
 
 
+def _has_control(text: str) -> bool:
+    """NUL or any other control character, plain whitespace (tab, newline, ...) excepted."""
+    return any(unicodedata.category(c) == "Cc" and not c.isspace() for c in text)
+
+
 def _clean_name(name: str) -> tuple[str, str]:
     display = name.strip()
     key = norm(name)
-    if not key or len(display) > MAX_NAME_CHARS or len(key) > MAX_NAME_CHARS:
+    if not key or _has_control(name) or len(display) > MAX_NAME_CHARS or len(key) > MAX_NAME_CHARS:
         raise DecisionError("invalid_action")
     return display, key
 

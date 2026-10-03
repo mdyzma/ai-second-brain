@@ -17,8 +17,8 @@ Entities: only named, specific things of these types:
 - tool: software, a service or a technology ("Proxmox", "ZFS")
 - device: a specific physical machine or gadget ("nas01")
 - topic: a broader subject ("backups")
-Never invent. Dates, times, generic words ("meeting", "today", "notes") and the note's own
-file name are NOT entities. Use the note's own spelling for names. Add aliases only if the note
+Never invent. Dates, times and generic words ("meeting", "today", "notes") are NOT
+entities. Use the note's own spelling for names. Add aliases only if the note
 uses another name for the same thing.
 
 Relations: subject and object must be names from your entities, or subject "NOTE" meaning this

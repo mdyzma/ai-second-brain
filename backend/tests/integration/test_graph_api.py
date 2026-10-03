@@ -25,12 +25,12 @@ pytestmark = pytest.mark.integration
 
 EVIL = {"Origin": "http://evil.example"}
 NOTES = {
-    "Projects/Homelab.md": "# Homelab\n## Dyski\nCztery dyski i Proxmox.",
+    "Projects/NAS.md": "# NAS\n## Dyski\nCztery dyski i Proxmox.",
     "Journal/day.md": "# Day\n## Rano\nNAS restart, Docker update.",
     "Notes/Old.md": "# Old\n## Archiwum\nThe old NAS.",
 }
 REPLIES: dict[str, list[Any]] = {
-    "Note path: Projects/Homelab.md": [
+    "Note path: Projects/NAS.md": [
         {
             "summary": "Building the home NAS.",
             "entities": [
@@ -228,12 +228,12 @@ def test_review_entities(graph_api: tuple[TestClient, dict[str, str]], db_url: s
     nas = items["NAS"]
     assert nas["type"] == "device" and nas["mention_count"] == 3 and nas["suggestion"] is None
     assert len(nas["samples"]) == 3
-    sample = next(s for s in nas["samples"] if s["path"] == "Projects/Homelab.md")
+    sample = next(s for s in nas["samples"] if s["path"] == "Projects/NAS.md")
     assert sample == {
-        "path": "Projects/Homelab.md",
-        "title": "Homelab",
+        "path": "Projects/NAS.md",
+        "title": "NAS",
         "summary": "Building the home NAS.",
-        "obsidian_url": "obsidian://open?vault=Brain&file=Projects%2FHomelab.md",
+        "obsidian_url": "obsidian://open?vault=Brain&file=Projects%2FNAS.md",
     }
     assert items["Proxmox"]["aliases"] == ["PVE"] and items["Proxmox"]["mention_count"] == 2
     tools = client.get("/api/review/entities", params={"type": "tool"}).json()["items"]
@@ -289,6 +289,9 @@ def test_decide_entity(
     assert mismatch.status_code == 422 and mismatch.json() == {"detail": "type_mismatch"}
     for body in ({"action": "explode"}, {"action": "rename"}, {"action": "merge"}):
         resp = decide_entity(client, ids["NAS"], **body)
+        assert resp.status_code == 422 and resp.json() == {"detail": "invalid_action"}
+    for bad_name in ("a\u0000b", "a\u0007b"):  # NUL and other control characters
+        resp = decide_entity(client, ids["NAS box"], action="rename", name=bad_name)
         assert resp.status_code == 422 and resp.json() == {"detail": "invalid_action"}
     retype = decide_entity(client, ids["NAS"], action="retype", type="bogus")
     assert retype.json() == {"detail": "invalid_action"}
@@ -347,9 +350,9 @@ def test_review_and_decide_links(graph_api: tuple[TestClient, dict[str, str]], d
     assert proxmox["object"] == {"id": ids["NAS"], "name": "NAS", "type": "device"}
     assert proxmox["confidence"] == pytest.approx(0.8)
     assert proxmox["evidence"] == {
-        "path": "Projects/Homelab.md",
-        "heading": "Homelab Dyski",
-        "obsidian_url": "obsidian://open?vault=Brain&file=Projects%2FHomelab.md",
+        "path": "Projects/NAS.md",
+        "heading": "Dyski",
+        "obsidian_url": "obsidian://open?vault=Brain&file=Projects%2FNAS.md",
     }
     # Journal mentions Proxmox at 0.4: below the accept bar, so still proposed.
     assert mention["relation"] == "mentions" and mention["object"]["name"] == "Proxmox"
@@ -362,6 +365,12 @@ def test_review_and_decide_links(graph_api: tuple[TestClient, dict[str, str]], d
     sql(db_url, "UPDATE entities SET status = 'rejected' WHERE id = %s", ids["Docker"])
     items = client.get("/api/review/links").json()["items"]
     assert {i["id"] for i in items} == {proxmox["id"], mention["id"]}
+
+    # Evidence from a tombstoned note is null (the relation itself stays reviewable).
+    sql(db_url, "UPDATE sources SET deleted_at = now() WHERE external_ref = 'Projects/NAS.md'")
+    items = {i["id"]: i for i in client.get("/api/review/links").json()["items"]}
+    assert items[proxmox["id"]]["evidence"] is None
+    sql(db_url, "UPDATE sources SET deleted_at = NULL WHERE external_ref = 'Projects/NAS.md'")
 
     too_many = {"items": [{"id": str(uuid4()), "decision": "accept"}] * 101}
     assert client.post("/api/review/links", json=too_many, headers=SAME_ORIGIN).status_code == 422
@@ -395,7 +404,7 @@ def test_review_and_decide_links(graph_api: tuple[TestClient, dict[str, str]], d
             "entity": {"id": ids["NAS"], "name": "NAS", "type": "device"},
         }
     ]
-    assert [n["path"] for n in pve["notes"]] == ["Projects/Homelab.md"]  # journal edge rejected
+    assert [n["path"] for n in pve["notes"]] == ["Projects/NAS.md"]  # journal edge rejected
 
     bad = client.get("/api/review/links", params={"cursor": "e30"})  # "{}"
     assert bad.status_code == 422 and bad.json() == {"detail": "invalid_cursor"}
@@ -434,25 +443,25 @@ def test_list_entities_and_detail(
     assert nas["parent"] is None
     assert nas["children"] == [{"id": ids["NAS box"], "name": "NAS box", "type": "device"}]
     notes = {n["path"]: n for n in nas["notes"]}
-    assert set(notes) == {"Projects/Homelab.md", "Journal/day.md", "Notes/Old.md"}
-    main = notes["Projects/Homelab.md"]
+    assert set(notes) == {"Projects/NAS.md", "Journal/day.md", "Notes/Old.md"}
+    main = notes["Projects/NAS.md"]
     assert main == {
         "source_id": main["source_id"],
-        "path": "Projects/Homelab.md",
-        "title": "Homelab",
+        "path": "Projects/NAS.md",
+        "title": "NAS",
         "summary": "Building the home NAS.",
-        "heading": "Homelab Dyski",
+        "heading": "Dyski",
         "relation": "about",
-        "obsidian_url": "obsidian://open?vault=Brain&file=Projects%2FHomelab.md",
+        "obsidian_url": "obsidian://open?vault=Brain&file=Projects%2FNAS.md",
     }
     assert notes["Journal/day.md"]["relation"] == "mentions"
-    assert notes["Journal/day.md"]["heading"] == "Day Rano"
+    assert notes["Journal/day.md"]["heading"] == "Rano"
     assert notes["Notes/Old.md"]["heading"] is None  # no evidence chunk named
 
     # A tombstoned note drops out of the notes and the counts.
     sql(db_url, "UPDATE sources SET deleted_at = now() WHERE external_ref = 'Notes/Old.md'")
     nas = client.get(f"/api/entities/{ids['NAS']}").json()
-    assert {n["path"] for n in nas["notes"]} == {"Projects/Homelab.md", "Journal/day.md"}
+    assert {n["path"] for n in nas["notes"]} == {"Projects/NAS.md", "Journal/day.md"}
     listed = client.get("/api/entities", params={"type": "device"}).json()["items"]
     assert listed[0] == {"id": ids["NAS"], "name": "NAS", "type": "device", "note_count": 2}
 

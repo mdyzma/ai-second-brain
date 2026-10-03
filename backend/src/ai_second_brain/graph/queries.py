@@ -149,6 +149,7 @@ def _time_id_cursor(cursor: str | None) -> tuple[datetime | None, UUID | None]:
 
 
 def _heading(text: str | None) -> str | None:
+    """The evidence heading: the last element of the chunk's heading_path, or None."""
     return text or None
 
 
@@ -283,7 +284,8 @@ async def review_links(
             " d.id AS dst_id, d.name AS dst_name, d.type::text AS dst_type,"
             " se.id AS se_id, se.name AS se_name, se.type::text AS se_type,"
             " ns.id AS note_id, ns.external_ref AS note_path, ns.title AS note_title,"
-            " c.heading_text AS ev_heading, evs.external_ref AS ev_path"
+            " c.heading_path[cardinality(c.heading_path)] AS ev_heading,"
+            " evs.external_ref AS ev_path"
             " FROM edges g JOIN entities d ON d.id = g.dst_entity_id"
             " LEFT JOIN entities se ON g.src_type = 'entity' AND se.id = g.src_id"
             " LEFT JOIN sources ns ON g.src_type = 'source' AND ns.id = g.src_id"
@@ -447,7 +449,8 @@ async def get_entity(
             ]
             await cur.execute(
                 "SELECT * FROM (SELECT DISTINCT ON (s.id) s.id AS source_id,"  # noqa: S608
-                " s.external_ref AS path, s.title, ex.summary, c.heading_text, g.relation,"
+                " s.external_ref AS path, s.title, ex.summary,"
+                " c.heading_path[cardinality(c.heading_path)] AS heading, g.relation,"
                 " r.observed_at"
                 " FROM edges g JOIN sources s ON s.id = g.src_id"
                 " LEFT JOIN source_revisions r ON r.id = s.current_revision_id"
@@ -464,7 +467,7 @@ async def get_entity(
                     "path": r["path"],
                     "title": r["title"],
                     "summary": r["summary"],
-                    "heading": _heading(r["heading_text"]),
+                    "heading": _heading(r["heading"]),
                     "relation": r["relation"],
                     "obsidian_url": obsidian_url(vault_name, r["path"]),
                 }

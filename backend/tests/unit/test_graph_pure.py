@@ -3,6 +3,7 @@ import json
 import pytest
 
 from ai_second_brain.graph.names import norm
+from ai_second_brain.graph.prompt import SYSTEM_PROMPT
 from ai_second_brain.graph.rules import initial_edge_status
 from ai_second_brain.graph.schema import InvalidOutput, filter_output, output_json_schema
 
@@ -34,7 +35,7 @@ GOOD = {
 
 
 def test_filter_accepts_good_output() -> None:
-    out = filter_output(GOOD, filename_stem="NAS notes")
+    out = filter_output(GOOD)
     assert [e.name for e in out.entities] == ["NAS", "Proxmox"]
     assert len(out.relations) == 2
 
@@ -53,12 +54,13 @@ def test_filter_ignores_extra_keys_and_unknown_values() -> None:
             {"subject": "Ghost", "relation": "uses", "object": "NAS", "confidence": 1},
         ],
     }
-    out = filter_output(raw, filename_stem="x")
+    out = filter_output(raw)
     assert {e.name for e in out.entities} == {"NAS", "Proxmox"}
     assert len(out.relations) == 2
 
 
-def test_filter_drops_filename_stem_and_empty_names_and_clamps() -> None:
+def test_filter_keeps_note_subject_drops_empty_names_and_clamps() -> None:
+    """A note is usually named after its subject (Proxmox.md is about Proxmox): keep it."""
     raw = {
         "summary": "s" * 500,
         "entities": [
@@ -73,9 +75,10 @@ def test_filter_drops_filename_stem_and_empty_names_and_clamps() -> None:
         ],
         "relations": [],
     }
-    out = filter_output(raw, filename_stem="NAS notes")
-    assert [e.name for e in out.entities] == ["ZFS"]
-    assert out.entities[0].confidence == 0.0 and len(out.entities[0].aliases) == 5
+    out = filter_output(raw)
+    assert [e.name for e in out.entities] == ["NAS notes", "ZFS"]
+    assert out.entities[0].confidence == 1.0
+    assert out.entities[1].confidence == 0.0 and len(out.entities[1].aliases) == 5
     assert len(out.summary) == 200
 
 
@@ -87,13 +90,13 @@ def test_filter_caps_lists() -> None:
         ],
         "relations": [],
     }
-    assert len(filter_output(raw, filename_stem="x").entities) == 30
+    assert len(filter_output(raw).entities) == 30
 
 
 @pytest.mark.parametrize("raw", ["not json", None, [], {"entities": "x"}, {"summary": 3}])
 def test_filter_rejects_wrong_shapes(raw: object) -> None:
     with pytest.raises(InvalidOutput):
-        filter_output(raw, filename_stem="x")
+        filter_output(raw)
 
 
 @pytest.mark.parametrize(
@@ -125,21 +128,19 @@ def _ent(**over: object) -> dict[str, object]:
 
 @pytest.mark.parametrize("aliases", [5, True, "abc", {"a": 1}])
 def test_filter_non_list_aliases_mean_none(aliases: object) -> None:
-    out = filter_output(
-        {"summary": "", "entities": [_ent(aliases=aliases)], "relations": []}, filename_stem="x"
-    )
+    out = filter_output({"summary": "", "entities": [_ent(aliases=aliases)], "relations": []})
     assert out.entities[0].aliases == []
 
 
 def test_filter_alias_list_keeps_only_strings() -> None:
     raw = {"summary": "", "entities": [_ent(aliases=["ok", 3, None, {"a": 1}])], "relations": []}
-    assert filter_output(raw, filename_stem="x").entities[0].aliases == ["ok"]
+    assert filter_output(raw).entities[0].aliases == ["ok"]
 
 
 @pytest.mark.parametrize("conf", [10**400, True, "0.9", float("nan"), float("inf")])
 def test_filter_bad_confidence_becomes_zero(conf: object) -> None:
     raw = {"summary": "", "entities": [_ent(confidence=conf)], "relations": []}
-    assert filter_output(raw, filename_stem="x").entities[0].confidence == 0.0
+    assert filter_output(raw).entities[0].confidence == 0.0
 
 
 def test_filter_aliases_deduped_and_exclude_name() -> None:
@@ -148,7 +149,7 @@ def test_filter_aliases_deduped_and_exclude_name() -> None:
         "entities": [_ent(aliases=["a", "A", "a", " zfs ", "b"])],
         "relations": [],
     }
-    assert filter_output(raw, filename_stem="x").entities[0].aliases == ["a", "b"]
+    assert filter_output(raw).entities[0].aliases == ["a", "b"]
 
 
 def test_output_json_schema_has_no_refs() -> None:
@@ -191,7 +192,12 @@ def test_filter_minor_rules() -> None:
             {"subject": "NOTE", "relation": "about", "object": "Note", "confidence": 1},
         ],
     }
-    out = filter_output(raw, filename_stem="x")
+    out = filter_output(raw)
     assert out.summary == "a b c"
     assert [e.name for e in out.entities] == ["NAS", "Proxmox"]
     assert [(r.relation, r.chunk) for r in out.relations] == [("uses", "c12"), ("about", None)]
+
+
+def test_prompt_no_longer_excludes_the_file_name() -> None:
+    assert "file name" not in SYSTEM_PROMPT
+    assert "generic words" in SYSTEM_PROMPT
