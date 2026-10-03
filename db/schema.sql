@@ -37,6 +37,29 @@ CREATE TYPE public.chat_mode AS ENUM (
 );
 
 --
+-- Name: entity_type; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.entity_type AS ENUM (
+    'project',
+    'person',
+    'organization',
+    'tool',
+    'device',
+    'topic'
+);
+
+--
+-- Name: graph_status; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.graph_status AS ENUM (
+    'proposed',
+    'accepted',
+    'rejected'
+);
+
+--
 -- Name: ingest_state; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -694,6 +717,30 @@ CREATE TABLE public.chunks (
 );
 
 --
+-- Name: edges; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.edges (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    src_type text NOT NULL,
+    src_id uuid NOT NULL,
+    relation text NOT NULL,
+    dst_entity_id uuid NOT NULL,
+    confidence real NOT NULL,
+    origin text NOT NULL,
+    status public.graph_status DEFAULT 'proposed'::public.graph_status NOT NULL,
+    decided_by text DEFAULT 'auto'::text NOT NULL,
+    evidence_chunk_id uuid,
+    revision_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT edges_confidence_check CHECK (((confidence >= (0)::double precision) AND (confidence <= (1)::double precision))),
+    CONSTRAINT edges_decided_by_check CHECK ((decided_by = ANY (ARRAY['auto'::text, 'user'::text]))),
+    CONSTRAINT edges_relation_check CHECK ((relation = ANY (ARRAY['mentions'::text, 'about'::text, 'uses'::text, 'runs_on'::text, 'works_with'::text, 'part_of'::text]))),
+    CONSTRAINT edges_src_type_check CHECK ((src_type = ANY (ARRAY['source'::text, 'entity'::text])))
+);
+
+--
 -- Name: embedding_spaces; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -703,6 +750,62 @@ CREATE TABLE public.embedding_spaces (
     dims integer NOT NULL,
     is_default boolean DEFAULT false NOT NULL,
     CONSTRAINT embedding_spaces_dims_check CHECK ((dims > 0))
+);
+
+--
+-- Name: entities; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.entities (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    type public.entity_type NOT NULL,
+    name text NOT NULL,
+    norm_name text NOT NULL,
+    status public.graph_status DEFAULT 'proposed'::public.graph_status NOT NULL,
+    parent_id uuid,
+    parent_status public.graph_status,
+    attributes jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    reviewed_at timestamp with time zone,
+    CONSTRAINT entities_check CHECK (((parent_id IS NULL) OR (parent_id <> id))),
+    CONSTRAINT entities_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 200)))
+);
+
+--
+-- Name: entity_aliases; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.entity_aliases (
+    entity_id uuid NOT NULL,
+    type public.entity_type NOT NULL,
+    alias text NOT NULL,
+    norm_alias text NOT NULL
+);
+
+--
+-- Name: entity_embeddings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.entity_embeddings (
+    entity_id uuid NOT NULL,
+    space_id smallint NOT NULL,
+    embedding public.halfvec NOT NULL
+);
+
+--
+-- Name: extractions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.extractions (
+    revision_id uuid NOT NULL,
+    extractor_version text NOT NULL,
+    status text NOT NULL,
+    error text,
+    model text NOT NULL,
+    summary text,
+    output jsonb,
+    attempted_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT extractions_status_check CHECK ((status = ANY (ARRAY['ok'::text, 'failed'::text])))
 );
 
 --
@@ -940,6 +1043,20 @@ ALTER TABLE ONLY public.chunks
     ADD CONSTRAINT chunks_revision_id_ordinal_key UNIQUE (revision_id, ordinal);
 
 --
+-- Name: edges edges_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.edges
+    ADD CONSTRAINT edges_id_key UNIQUE (id);
+
+--
+-- Name: edges edges_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.edges
+    ADD CONSTRAINT edges_pkey PRIMARY KEY (src_type, src_id, relation, dst_entity_id);
+
+--
 -- Name: embedding_spaces embedding_spaces_model_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -952,6 +1069,41 @@ ALTER TABLE ONLY public.embedding_spaces
 
 ALTER TABLE ONLY public.embedding_spaces
     ADD CONSTRAINT embedding_spaces_pkey PRIMARY KEY (id);
+
+--
+-- Name: entities entities_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entities
+    ADD CONSTRAINT entities_pkey PRIMARY KEY (id);
+
+--
+-- Name: entities entities_type_norm_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entities
+    ADD CONSTRAINT entities_type_norm_name_key UNIQUE (type, norm_name);
+
+--
+-- Name: entity_aliases entity_aliases_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entity_aliases
+    ADD CONSTRAINT entity_aliases_pkey PRIMARY KEY (type, norm_alias);
+
+--
+-- Name: entity_embeddings entity_embeddings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entity_embeddings
+    ADD CONSTRAINT entity_embeddings_pkey PRIMARY KEY (entity_id, space_id);
+
+--
+-- Name: extractions extractions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.extractions
+    ADD CONSTRAINT extractions_pkey PRIMARY KEY (revision_id, extractor_version);
 
 --
 -- Name: ingest_runs ingest_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -1048,10 +1200,34 @@ CREATE INDEX chunk_emb_s1_hnsw ON public.chunk_embeddings USING hnsw (((embeddin
 CREATE INDEX chunks_tsv_gin ON public.chunks USING gin (tsv);
 
 --
+-- Name: edges_dst; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX edges_dst ON public.edges USING btree (dst_entity_id, status);
+
+--
+-- Name: edges_review; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX edges_review ON public.edges USING btree (status, created_at) WHERE (status = 'proposed'::public.graph_status);
+
+--
+-- Name: edges_src; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX edges_src ON public.edges USING btree (src_type, src_id);
+
+--
 -- Name: embedding_spaces_one_default; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE UNIQUE INDEX embedding_spaces_one_default ON public.embedding_spaces USING btree (is_default) WHERE is_default;
+
+--
+-- Name: entities_review; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX entities_review ON public.entities USING btree (status, created_at) WHERE (status = 'proposed'::public.graph_status);
 
 --
 -- Name: idx_procrastinate_jobs_worker_not_null; Type: INDEX; Schema: public; Owner: -
@@ -1194,6 +1370,48 @@ ALTER TABLE ONLY public.chunk_embeddings
 
 ALTER TABLE ONLY public.chunks
     ADD CONSTRAINT chunks_revision_id_fkey FOREIGN KEY (revision_id) REFERENCES public.source_revisions(id) ON DELETE CASCADE;
+
+--
+-- Name: edges edges_dst_entity_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.edges
+    ADD CONSTRAINT edges_dst_entity_id_fkey FOREIGN KEY (dst_entity_id) REFERENCES public.entities(id) ON DELETE CASCADE;
+
+--
+-- Name: entities entities_parent_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entities
+    ADD CONSTRAINT entities_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES public.entities(id) ON DELETE SET NULL;
+
+--
+-- Name: entity_aliases entity_aliases_entity_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entity_aliases
+    ADD CONSTRAINT entity_aliases_entity_id_fkey FOREIGN KEY (entity_id) REFERENCES public.entities(id) ON DELETE CASCADE;
+
+--
+-- Name: entity_embeddings entity_embeddings_entity_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entity_embeddings
+    ADD CONSTRAINT entity_embeddings_entity_id_fkey FOREIGN KEY (entity_id) REFERENCES public.entities(id) ON DELETE CASCADE;
+
+--
+-- Name: entity_embeddings entity_embeddings_space_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entity_embeddings
+    ADD CONSTRAINT entity_embeddings_space_id_fkey FOREIGN KEY (space_id) REFERENCES public.embedding_spaces(id);
+
+--
+-- Name: extractions extractions_revision_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.extractions
+    ADD CONSTRAINT extractions_revision_id_fkey FOREIGN KEY (revision_id) REFERENCES public.source_revisions(id) ON DELETE CASCADE;
 
 --
 -- Name: procrastinate_events procrastinate_events_job_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
