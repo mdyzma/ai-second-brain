@@ -29,7 +29,15 @@ from ai_second_brain.chat.service import ChatService
 from ai_second_brain.chat.wiring import make_cloud_factory
 from ai_second_brain.config import Settings, get_settings
 from ai_second_brain.db import create_pool
-from ai_second_brain.interfaces.api.routes import auth, capture, chat, health, search, sources
+from ai_second_brain.interfaces.api.routes import (
+    auth,
+    capture,
+    chat,
+    graph,
+    health,
+    search,
+    sources,
+)
 from ai_second_brain.knowledge.embedder import Embedder
 from ai_second_brain.knowledge.jobs import create_job_app
 from ai_second_brain.knowledge.queue import JobQueue, ProcrastinateQueue
@@ -88,6 +96,17 @@ class IngestAccess:
         result = await self.embedder.reachable()
         self._cache = (now, result)
         return result
+
+
+@dataclass(frozen=True)
+class GraphAccess:
+    """What the graph routes need: the extraction model, if any, and whether runs can start."""
+
+    model: str | None
+
+    @property
+    def available(self) -> bool:
+        return self.model is not None
 
 
 def utc_now() -> datetime:
@@ -180,6 +199,7 @@ def create_app(
         # space 1 is seeded by the migration
         app.state.ingest = IngestAccess(job_app, 1, embedder)
         await app.state.ingest.get_queue()  # None when the database is down; retried per request
+        app.state.graph = GraphAccess(settings.extract_model_name)
         try:
             await app.state.sessions.purge_expired()
         except (PoolTimeout, psycopg.Error, OSError):
@@ -218,6 +238,7 @@ def create_app(
     app.include_router(sources.router, prefix="/api")
     app.include_router(search.router, prefix="/api")
     app.include_router(capture.router, prefix="/api")
+    app.include_router(graph.router, prefix="/api")
     return app
 
 

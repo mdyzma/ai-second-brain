@@ -40,6 +40,14 @@ def test_openapi_writes_file_with_lf_and_sorted_keys(tmp_path: Path) -> None:
         "searchNotes",
         "searchFacets",
         "captureNote",
+        "graphStatus",
+        "graphExtract",
+        "reviewEntities",
+        "decideEntity",
+        "reviewLinks",
+        "decideLinks",
+        "listEntities",
+        "getEntity",
     }
 
 

@@ -89,6 +89,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/entities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Entities */
+        get: operations["listEntities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/entities/{entity_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Entity */
+        get: operations["getEntity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/entities/{entity_id}/decide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decide Entity */
+        post: operations["decideEntity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/graph/extract": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Graph Extract */
+        post: operations["graphExtract"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/graph/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Graph Status */
+        get: operations["graphStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -117,6 +202,41 @@ export interface paths {
         get: operations["ready"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/review/entities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Entities */
+        get: operations["reviewEntities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/review/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Links */
+        get: operations["reviewLinks"];
+        put?: never;
+        /** Decide Links */
+        post: operations["decideLinks"];
         delete?: never;
         options?: never;
         head?: never;
@@ -376,6 +496,139 @@ export interface components {
             /** Reachable */
             reachable: boolean;
         };
+        /** EntityDecided */
+        EntityDecided: {
+            entity: components["schemas"]["EntityDetail"];
+        };
+        /**
+         * EntityDecision
+         * @description ``action`` is accept, reject, rename (name), retype (type), parent (parent_id, null
+         *     clears) or merge (into_id). An unknown action or a missing argument is invalid_action.
+         */
+        EntityDecision: {
+            /** Action */
+            action: string;
+            /** Into Id */
+            into_id?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Parent Id */
+            parent_id?: string | null;
+            /** Type */
+            type?: string | null;
+        };
+        /** EntityDetail */
+        EntityDetail: {
+            /** Aliases */
+            aliases: string[];
+            /** Children */
+            children: components["schemas"]["EntityRef"][];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Notes */
+            notes: components["schemas"]["EntityNote"][];
+            parent: components["schemas"]["EntityRef"] | null;
+            /** Related */
+            related: components["schemas"]["RelatedEntity"][];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "proposed" | "accepted" | "rejected";
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "project" | "person" | "organization" | "tool" | "device" | "topic";
+        };
+        /** EntityNote */
+        EntityNote: {
+            /** Heading */
+            heading: string | null;
+            /** Obsidian Url */
+            obsidian_url: string | null;
+            /** Path */
+            path: string;
+            /**
+             * Relation
+             * @enum {string}
+             */
+            relation: "mentions" | "about" | "uses" | "runs_on" | "works_with" | "part_of";
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /** Summary */
+            summary: string | null;
+            /** Title */
+            title: string | null;
+        };
+        /** EntityPage */
+        EntityPage: {
+            /** Items */
+            items: components["schemas"]["EntitySummary"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** EntityRef */
+        EntityRef: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "project" | "person" | "organization" | "tool" | "device" | "topic";
+        };
+        /** EntityStatusCounts */
+        EntityStatusCounts: {
+            /** Accepted */
+            accepted: number;
+            /** Proposed */
+            proposed: number;
+            /** Rejected */
+            rejected: number;
+        };
+        /** EntitySuggestion */
+        EntitySuggestion: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Similarity */
+            similarity: number;
+        };
+        /** EntitySummary */
+        EntitySummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Note Count */
+            note_count: number;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "project" | "person" | "organization" | "tool" | "device" | "topic";
+        };
         /** ErrorEvent */
         ErrorEvent: {
             /** Code */
@@ -395,12 +648,41 @@ export interface components {
             /** Detail */
             detail: string;
         };
+        /** ExtractQueued */
+        ExtractQueued: {
+            /** Queued */
+            queued: number;
+        };
         /** FolderFacet */
         FolderFacet: {
             /** Count */
             count: number;
             /** Path */
             path: string;
+        };
+        /** GraphExtractRequest */
+        GraphExtractRequest: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "new" | "failed";
+        };
+        /** GraphStatus */
+        GraphStatus: {
+            /** Available */
+            available: boolean;
+            /** Entities */
+            entities: {
+                [key: string]: components["schemas"]["EntityStatusCounts"];
+            };
+            /** Extractor Version */
+            extractor_version: string;
+            /** Model */
+            model: string | null;
+            /** Queued */
+            queued: number;
+            revisions: components["schemas"]["RevisionProgress"];
         };
         /** HealthResponse */
         HealthResponse: {
@@ -437,6 +719,50 @@ export interface components {
             /** Waiting */
             waiting: number;
         };
+        /** LinkDecision */
+        LinkDecision: {
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "accept" | "reject";
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+        };
+        /** LinkDecisions */
+        LinkDecisions: {
+            /** Items */
+            items: components["schemas"]["LinkDecision"][];
+        };
+        /** LinkEvidence */
+        LinkEvidence: {
+            /** Heading */
+            heading: string | null;
+            /** Obsidian Url */
+            obsidian_url: string | null;
+            /** Path */
+            path: string;
+        };
+        /** LinkNote */
+        LinkNote: {
+            /** Path */
+            path: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
+            source_id: string;
+            /** Title */
+            title: string | null;
+        };
+        /** LinksUpdated */
+        LinksUpdated: {
+            /** Updated */
+            updated: number;
+        };
         /** LoginRequest */
         LoginRequest: {
             /** Password */
@@ -454,6 +780,17 @@ export interface components {
              * Format: date-time
              */
             expires_at: string;
+        };
+        /** NoteSample */
+        NoteSample: {
+            /** Obsidian Url */
+            obsidian_url: string | null;
+            /** Path */
+            path: string;
+            /** Summary */
+            summary: string | null;
+            /** Title */
+            title: string | null;
         };
         /** PrivateTierStatus */
         PrivateTierStatus: {
@@ -509,6 +846,84 @@ export interface components {
             /** Run Id */
             run_id: number;
         };
+        /** RelatedEntity */
+        RelatedEntity: {
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "out" | "in";
+            entity: components["schemas"]["EntityRef"];
+            /**
+             * Relation
+             * @enum {string}
+             */
+            relation: "mentions" | "about" | "uses" | "runs_on" | "works_with" | "part_of";
+        };
+        /** ReviewEntity */
+        ReviewEntity: {
+            /** Aliases */
+            aliases: string[];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Mention Count */
+            mention_count: number;
+            /** Name */
+            name: string;
+            /** Samples */
+            samples: components["schemas"]["NoteSample"][];
+            suggestion: components["schemas"]["EntitySuggestion"] | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "project" | "person" | "organization" | "tool" | "device" | "topic";
+        };
+        /** ReviewEntityPage */
+        ReviewEntityPage: {
+            /** Items */
+            items: components["schemas"]["ReviewEntity"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /**
+         * ReviewLink
+         * @description kind ``relation``: ``subject`` is the source entity and ``note`` is null.
+         *     kind ``mention``: ``note`` is the note and ``subject`` is null.
+         */
+        ReviewLink: {
+            /** Confidence */
+            confidence: number;
+            evidence: components["schemas"]["LinkEvidence"] | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "relation" | "mention";
+            note: components["schemas"]["LinkNote"] | null;
+            object: components["schemas"]["EntityRef"];
+            /**
+             * Relation
+             * @enum {string}
+             */
+            relation: "mentions" | "about" | "uses" | "runs_on" | "works_with" | "part_of";
+            subject: components["schemas"]["EntityRef"] | null;
+        };
+        /** ReviewLinkPage */
+        ReviewLinkPage: {
+            /** Items */
+            items: components["schemas"]["ReviewLink"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
         /** RevisionCounts */
         RevisionCounts: {
             /** Failed */
@@ -517,6 +932,17 @@ export interface components {
             indexed: number;
             /** Pending */
             pending: number;
+        };
+        /** RevisionProgress */
+        RevisionProgress: {
+            /** Extracted */
+            extracted: number;
+            /** Failed */
+            failed: number;
+            /** Pending */
+            pending: number;
+            /** Total */
+            total: number;
         };
         /** SearchFacets */
         SearchFacets: {
@@ -1050,6 +1476,338 @@ export interface operations {
             };
         };
     };
+    listEntities: {
+        parameters: {
+            query?: {
+                type?: ("project" | "person" | "organization" | "tool" | "device" | "topic") | null;
+                q?: string | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntityPage"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getEntity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntityDetail"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    decideEntity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EntityDecision"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntityDecided"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    graphExtract: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GraphExtractRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtractQueued"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    graphStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphStatus"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     health: {
         parameters: {
             query?: never;
@@ -1095,6 +1853,192 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReadyResponse"];
+                };
+            };
+        };
+    };
+    reviewEntities: {
+        parameters: {
+            query?: {
+                type?: ("project" | "person" | "organization" | "tool" | "device" | "topic") | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewEntityPage"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    reviewLinks: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewLinkPage"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    decideLinks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkDecisions"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinksUpdated"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

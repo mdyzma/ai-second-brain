@@ -186,3 +186,177 @@ class CaptureResponse(BaseModel):
     path: str
     title: str
     obsidian_url: str | None
+
+
+# --- knowledge graph (Phase 4a) ---
+
+EntityType = Literal["project", "person", "organization", "tool", "device", "topic"]
+EntityStatus = Literal["proposed", "accepted", "rejected"]
+Relation = Literal["mentions", "about", "uses", "runs_on", "works_with", "part_of"]
+
+
+class RevisionProgress(BaseModel):
+    total: int
+    extracted: int
+    failed: int
+    pending: int
+
+
+class EntityStatusCounts(BaseModel):
+    proposed: int
+    accepted: int
+    rejected: int
+
+
+class GraphStatus(BaseModel):
+    model: str | None
+    extractor_version: str
+    available: bool
+    revisions: RevisionProgress
+    entities: dict[str, EntityStatusCounts]  # by entity type; raw counts by entity status
+    queued: int
+
+
+class GraphExtractRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scope: Literal["new", "failed"]
+
+
+class ExtractQueued(BaseModel):
+    queued: int
+
+
+class EntityRef(BaseModel):
+    id: UUID
+    name: str
+    type: EntityType
+
+
+class NoteSample(BaseModel):
+    path: str
+    title: str | None
+    summary: str | None
+    obsidian_url: str | None
+
+
+class EntitySuggestion(BaseModel):
+    id: UUID
+    name: str
+    similarity: float
+
+
+class ReviewEntity(BaseModel):
+    id: UUID
+    name: str
+    type: EntityType
+    aliases: list[str]
+    mention_count: int
+    samples: list[NoteSample]
+    suggestion: EntitySuggestion | None
+
+
+class ReviewEntityPage(BaseModel):
+    items: list[ReviewEntity]
+    next_cursor: str | None
+
+
+class EntityDecision(BaseModel):
+    """``action`` is accept, reject, rename (name), retype (type), parent (parent_id, null
+    clears) or merge (into_id). An unknown action or a missing argument is invalid_action."""
+
+    model_config = ConfigDict(extra="forbid")
+    action: str = Field(max_length=32)
+    name: str | None = Field(default=None, max_length=1000)
+    type: str | None = Field(default=None, max_length=32)
+    parent_id: UUID | None = None
+    into_id: UUID | None = None
+
+
+class LinkNote(BaseModel):
+    source_id: UUID
+    path: str
+    title: str | None
+
+
+class LinkEvidence(BaseModel):
+    path: str
+    heading: str | None
+    obsidian_url: str | None
+
+
+class ReviewLink(BaseModel):
+    """kind ``relation``: ``subject`` is the source entity and ``note`` is null.
+    kind ``mention``: ``note`` is the note and ``subject`` is null."""
+
+    id: UUID
+    kind: Literal["relation", "mention"]
+    subject: EntityRef | None
+    note: LinkNote | None
+    relation: Relation
+    object: EntityRef
+    confidence: float
+    evidence: LinkEvidence | None
+
+
+class ReviewLinkPage(BaseModel):
+    items: list[ReviewLink]
+    next_cursor: str | None
+
+
+class LinkDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: UUID
+    decision: Literal["accept", "reject"]
+
+
+class LinkDecisions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[LinkDecision] = Field(max_length=100)
+
+
+class LinksUpdated(BaseModel):
+    updated: int
+
+
+class EntitySummary(BaseModel):
+    id: UUID
+    name: str
+    type: EntityType
+    note_count: int
+
+
+class EntityPage(BaseModel):
+    items: list[EntitySummary]
+    next_cursor: str | None
+
+
+class RelatedEntity(BaseModel):
+    relation: Relation
+    direction: Literal["out", "in"]  # out: this entity is the source; in: it is the target
+    entity: EntityRef
+
+
+class EntityNote(BaseModel):
+    source_id: UUID
+    path: str
+    title: str | None
+    summary: str | None
+    heading: str | None
+    relation: Relation
+    obsidian_url: str | None
+
+
+class EntityDetail(BaseModel):
+    id: UUID
+    name: str
+    type: EntityType
+    status: EntityStatus
+    aliases: list[str]
+    parent: EntityRef | None
+    children: list[EntityRef]
+    related: list[RelatedEntity]
+    notes: list[EntityNote]
+
+
+class EntityDecided(BaseModel):
+    entity: EntityDetail
