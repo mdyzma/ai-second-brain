@@ -94,20 +94,28 @@ async def _finish(
     )
 
 
+async def mark_failed(ctx: GraphContext, revision_id: UUID, code: str) -> Outcome:
+    """Record `failed` for the current extractor version; stale revisions and ok rows are left."""
+    model = ctx.client.model if ctx.client else ""
+    async with ctx.pool.connection() as conn:
+        if not await _still_current(conn, revision_id) or await store.has_ok_extraction(
+            conn, revision_id, EXTRACTOR_VERSION
+        ):
+            logger.info("extract revision=%s outcome=skipped code=stale", revision_id)
+            return "skipped"
+        await store.record_extraction(
+            conn, revision_id, EXTRACTOR_VERSION, status="failed", model=model, error=code
+        )
+    logger.info("extract revision=%s outcome=failed code=%s", revision_id, code)
+    return "failed"
+
+
 async def extract_revision(ctx: GraphContext, revision_id: UUID) -> Outcome:
     started = time.monotonic()
     model = ctx.client.model if ctx.client else ""
 
     async def fail(code: str) -> Outcome:
-        async with ctx.pool.connection() as conn:
-            if not await _still_current(conn, revision_id):
-                logger.info("extract revision=%s outcome=skipped code=stale", revision_id)
-                return "skipped"
-            await store.record_extraction(
-                conn, revision_id, EXTRACTOR_VERSION, status="failed", model=model, error=code
-            )
-        logger.info("extract revision=%s outcome=failed code=%s", revision_id, code)
-        return "failed"
+        return await mark_failed(ctx, revision_id, code)
 
     async with ctx.pool.connection() as conn:
         info = await store.revision_info(conn, revision_id)

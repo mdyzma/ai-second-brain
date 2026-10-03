@@ -99,6 +99,14 @@ vault-scan *args:
 vault-status:
     uv run --directory backend ai-second-brain vault status
 
+# Queue knowledge-graph extraction for new notes (add --failed to retry failures)
+graph-extract *args:
+    uv run --project backend ai-second-brain graph extract {{ args }}
+
+# Print knowledge-graph extraction and entity counts
+graph-status:
+    uv run --project backend ai-second-brain graph status
+
 # Create/migrate the scratch evaluation database (SB_EVAL_DATABASE_URL)
 eval-prepare:
     uv run --project backend ai-second-brain eval prepare

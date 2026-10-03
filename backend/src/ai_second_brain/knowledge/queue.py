@@ -12,6 +12,7 @@ from procrastinate.types import JSONValue
 # hours-long) embedding backlog, so an edit is searchable within seconds.
 INGEST_PRIORITY = 10
 EMBED_PRIORITY = 0
+EXTRACT_PRIORITY = -10  # below everything: a vault-wide extraction must never delay search
 
 
 class JobQueue(Protocol):
@@ -23,6 +24,9 @@ class JobQueue(Protocol):
 
     async def reset_stalled(self, seconds_since_heartbeat: int) -> int: ...
     async def embed_entity(self, entity_id: UUID) -> None: ...
+    async def extract_revision(self, revision_id: UUID) -> bool:
+        """False when an extraction job for this revision is already waiting."""
+        ...
 
 
 class ProcrastinateQueue:
@@ -63,6 +67,14 @@ class ProcrastinateQueue:
             f"entity-embed:{entity_id}",
             EMBED_PRIORITY,
             entity_id=str(entity_id),
+        )
+
+    async def extract_revision(self, revision_id: UUID) -> bool:
+        return await self._defer(
+            "ingest:graph_extract_revision",
+            f"extract:{revision_id}",
+            EXTRACT_PRIORITY,
+            revision_id=str(revision_id),
         )
 
     async def reset_stalled(self, seconds_since_heartbeat: int) -> int:

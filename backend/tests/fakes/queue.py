@@ -22,8 +22,9 @@ class RecordingQueue:
     async def embed_entity(self, entity_id: UUID) -> None:
         self.calls.append(("embed_entity", entity_id))
 
-    async def extract_revision(self, revision_id: UUID) -> None:
+    async def extract_revision(self, revision_id: UUID) -> bool:
         self.calls.append(("extract", revision_id))
+        return True
 
 
 FakeQueue = RecordingQueue

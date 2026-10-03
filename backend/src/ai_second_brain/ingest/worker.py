@@ -6,6 +6,7 @@ import logging
 import signal
 from collections.abc import Awaitable, Callable
 
+import httpx2
 import psycopg
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
@@ -13,11 +14,19 @@ from ai_second_brain.chat.providers.base import ChatTimeouts
 from ai_second_brain.chat.providers.ollama import create_http_client
 from ai_second_brain.config import Settings, model_matches_space
 from ai_second_brain.db import create_pool
+from ai_second_brain.graph.context import GraphContext
+from ai_second_brain.graph.llm import ExtractClient
 from ai_second_brain.knowledge import store
 from ai_second_brain.knowledge.context import IngestContext
 from ai_second_brain.knowledge.embedder import Embedder
-from ai_second_brain.knowledge.jobs import EMBED_QUEUE, INGEST_QUEUE, create_job_app
+from ai_second_brain.knowledge.jobs import (
+    EMBED_QUEUE,
+    EXTRACT_QUEUE,
+    INGEST_QUEUE,
+    create_job_app,
+)
 from ai_second_brain.knowledge.queue import ProcrastinateQueue
+from ai_second_brain.search.embedding import QueryEmbedder
 from ai_second_brain.vault.batch import apply_batch
 from ai_second_brain.vault.paths import Vault
 from ai_second_brain.vault.reconcile import reconcile
@@ -155,6 +164,20 @@ async def _supervise(run_once: Callable[[], Awaitable[None]], stop: asyncio.Even
         delay = _backoff(delay)
 
 
+def build_graph_context(ctx: IngestContext, http_client: httpx2.AsyncClient) -> GraphContext:
+    """No client without SB_EXTRACT_MODEL: extraction then records `extraction_unavailable`."""
+    settings = ctx.settings
+    model = settings.extract_model_name
+    client = (
+        ExtractClient(
+            http_client, settings.ollama_endpoints, model, ChatTimeouts(), settings.chat_num_ctx
+        )
+        if model
+        else None
+    )
+    return GraphContext(ctx.pool, settings, client, QueryEmbedder(ctx.embedder), ctx.queue)
+
+
 async def run_worker(settings: Settings, *, stop_event: asyncio.Event | None = None) -> int:
     """Returns 1 only when SB_EMBED_MODEL doesn't match the default space; 0 on stop."""
     stop = stop_event or asyncio.Event()
@@ -188,13 +211,15 @@ async def run_worker(settings: Settings, *, stop_event: asyncio.Event | None = N
                 pool, settings, vault, embedder, ProcrastinateQueue(app), space_id, model, dims
             )
 
+            graph_ctx = build_graph_context(ctx, client)
+
             def run_jobs() -> Awaitable[None]:
                 return app.run_worker_async(
-                    queues=[INGEST_QUEUE, EMBED_QUEUE],
+                    queues=[INGEST_QUEUE, EMBED_QUEUE, EXTRACT_QUEUE],
                     concurrency=2,
                     install_signal_handlers=False,
                     shutdown_graceful_timeout=30,
-                    additional_context={"ingest": ctx},
+                    additional_context={"ingest": ctx, "graph": graph_ctx},
                 )
 
             # The watcher and the reconcile timer guard their own errors and keep running

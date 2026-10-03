@@ -12,7 +12,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, LiteralString
+from typing import Annotated, Any, Literal, LiteralString
 
 import typer
 import uvicorn
@@ -558,3 +558,73 @@ def eval_run(
     for row in [SUMMARY_HEADER, *rows]:
         typer.echo("  ".join(cell.ljust(w) for cell, w in zip(row, widths, strict=True)).rstrip())
     typer.echo(f"Report: {folder}")
+
+
+graph_app = typer.Typer(no_args_is_help=True, help="Knowledge graph commands.")
+app.add_typer(graph_app, name="graph")
+
+
+async def _graph_extract(settings: Settings, scope: Literal["new", "failed"]) -> int:
+    from ai_second_brain.graph.prompt import EXTRACTOR_VERSION
+    from ai_second_brain.graph.queries import queue_extraction
+
+    pool = create_pool(settings.database_url)
+    await pool.open(wait=True, timeout=30)
+    try:
+        job_app = create_job_app(settings.database_url)
+        async with job_app.open_async(), pool.connection() as conn:
+            return await queue_extraction(
+                conn, ProcrastinateQueue(job_app), EXTRACTOR_VERSION, scope
+            )
+    finally:
+        await pool.close()
+
+
+@graph_app.command("extract")
+def graph_extract(
+    failed: Annotated[
+        bool, typer.Option("--failed", help="Retry notes whose extraction failed.")
+    ] = False,
+) -> None:
+    """Queue knowledge-graph extraction (the worker runs the jobs)."""
+    settings = _load_settings()
+    if settings.extract_model_name is None:
+        typer.echo("No local chat model is configured for extraction (SB_EXTRACT_MODEL).")
+        raise typer.Exit(code=1)
+    logging.config.dictConfig(build_log_config())
+    try:
+        queued = asyncio.run(
+            _graph_extract(settings, "failed" if failed else "new"), loop_factory=new_event_loop
+        )
+    except Exception as error:
+        typer.echo(f"Queueing failed: {type(error).__name__}")
+        raise typer.Exit(code=1) from error
+    typer.echo(f"Queued {queued} notes for extraction.")
+
+
+async def _graph_status(settings: Settings) -> list[tuple[str, Any]]:
+    from ai_second_brain.graph.prompt import EXTRACTOR_VERSION
+    from ai_second_brain.graph.queries import graph_status
+
+    pool = create_pool(settings.database_url)
+    await pool.open(wait=True, timeout=30)
+    try:
+        async with pool.connection() as conn:
+            summary = await graph_status(conn, EXTRACTOR_VERSION)
+    finally:
+        await pool.close()
+    return [("model", settings.extract_model_name or "none"), *_flatten("", summary)]
+
+
+@graph_app.command("status")
+def graph_status_command() -> None:
+    """Print extraction progress and entity counts (never entity names)."""
+    settings = _load_settings()
+    try:
+        rows = asyncio.run(_graph_status(settings), loop_factory=new_event_loop)
+    except Exception as error:
+        typer.echo(f"Status unavailable: {type(error).__name__}")
+        raise typer.Exit(code=1) from error
+    width = max(len(key) for key, _ in rows)
+    for key, value in rows:
+        typer.echo(f"{key + ':':<{width + 1}} {value}")

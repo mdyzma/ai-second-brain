@@ -18,10 +18,12 @@ from psycopg_pool import AsyncConnectionPool
 from ai_second_brain.knowledge.embedder import EMBED_RETRY_SECONDS, EmbedRetryable
 
 if TYPE_CHECKING:
+    from ai_second_brain.graph.context import GraphContext
     from ai_second_brain.knowledge.context import IngestContext
 
 INGEST_QUEUE = "ingest"
 EMBED_QUEUE = "embed"
+EXTRACT_QUEUE = "extract"
 
 blueprint = Blueprint()
 
@@ -47,6 +49,10 @@ class ScheduleRetry(BaseRetryStrategy):
 
 def _ctx(context: JobContext) -> "IngestContext":
     return context.additional_context["ingest"]
+
+
+def _graph(context: JobContext) -> "GraphContext":
+    return context.additional_context["graph"]
 
 
 @blueprint.task(
@@ -79,6 +85,63 @@ async def embed_revision_task(context: JobContext, revision_id: str, space_id: i
     from ai_second_brain.knowledge.embed import embed_revision
 
     await embed_revision(_ctx(context), UUID(revision_id), space_id)
+
+
+# Unreachable model or a database conflict: retried on the first five embed delays.
+EXTRACT_RETRY_SECONDS = EMBED_RETRY_SECONDS[:5]
+
+
+class _ExtractRetry(ScheduleRetry):
+    """Reads the module constant per call, so tests can shorten the schedule."""
+
+    def get_retry_decision(self, *, exception: BaseException, job: Job) -> RetryDecision | None:
+        self.schedule = EXTRACT_RETRY_SECONDS
+        return super().get_retry_decision(exception=exception, job=job)
+
+
+def _extract_retryable() -> tuple[type[BaseException], ...]:
+    from psycopg.errors import DeadlockDetected, SerializationFailure
+
+    from ai_second_brain.graph.llm import ExtractUnreachable
+
+    return (ExtractUnreachable, DeadlockDetected, SerializationFailure)
+
+
+@blueprint.task(
+    name="graph_extract_revision",
+    queue=EXTRACT_QUEUE,
+    pass_context=True,
+    retry=_ExtractRetry(EXTRACT_RETRY_SECONDS, only=_extract_retryable()),
+)
+async def graph_extract_revision_task(context: JobContext, revision_id: str) -> None:
+    from psycopg.errors import DeadlockDetected, SerializationFailure
+
+    from ai_second_brain.graph.extract import extract_revision, mark_failed
+    from ai_second_brain.graph.llm import ExtractUnreachable
+
+    ctx = _graph(context)
+    try:
+        await extract_revision(ctx, UUID(revision_id))
+    except (ExtractUnreachable, DeadlockDetected, SerializationFailure) as error:
+        if context.job.attempts < len(EXTRACT_RETRY_SECONDS):
+            raise  # the retry strategy reschedules it
+        # Out of retries: record it (a failed row is re-queued only by "Retry failed") and end
+        # normally. A database conflict that outlasts every retry is reported as its own code.
+        unreachable = isinstance(error, ExtractUnreachable)
+        code = "extract_unreachable" if unreachable else "extract_db_conflict"
+        await mark_failed(ctx, UUID(revision_id), code)
+
+
+@blueprint.task(
+    name="graph_embed_entity",
+    queue=EMBED_QUEUE,
+    pass_context=True,
+    retry=ScheduleRetry(EMBED_RETRY_SECONDS, only=(EmbedRetryable,)),
+)
+async def graph_embed_entity_task(context: JobContext, entity_id: str) -> None:
+    from ai_second_brain.graph.embed import embed_entity
+
+    await embed_entity(_ctx(context), UUID(entity_id))
 
 
 @blueprint.task(name="reconcile_vault", queue=INGEST_QUEUE, pass_context=True)

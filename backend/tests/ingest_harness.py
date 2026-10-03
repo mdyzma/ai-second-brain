@@ -13,11 +13,19 @@ from psycopg_pool import AsyncConnectionPool
 
 from ai_second_brain.chat.providers.base import ChatTimeouts
 from ai_second_brain.chat.providers.ollama import create_http_client
-from ai_second_brain.config import Settings
+from ai_second_brain.config import OllamaEndpointConfig, Settings
+from ai_second_brain.graph.context import GraphContext
+from ai_second_brain.graph.llm import ExtractClient
 from ai_second_brain.knowledge.context import IngestContext
 from ai_second_brain.knowledge.embedder import Embedder
-from ai_second_brain.knowledge.jobs import EMBED_QUEUE, INGEST_QUEUE, create_job_app
+from ai_second_brain.knowledge.jobs import (
+    EMBED_QUEUE,
+    EXTRACT_QUEUE,
+    INGEST_QUEUE,
+    create_job_app,
+)
 from ai_second_brain.knowledge.queue import ProcrastinateQueue
+from ai_second_brain.search.embedding import QueryEmbedder
 from ai_second_brain.vault.paths import Vault
 
 from .conftest import TEST_HASH
@@ -34,15 +42,21 @@ class Harness:
     ctx: IngestContext
     app: App
     pool: AsyncConnectionPool
+    graph: GraphContext | None = None  # set by `extract_url`; also puts `extract` in drain()
 
     async def drain(self) -> None:
+        queues = [INGEST_QUEUE, EMBED_QUEUE]
+        context: dict[str, Any] = {"ingest": self.ctx}
+        if self.graph is not None:
+            queues.append(EXTRACT_QUEUE)
+            context["graph"] = self.graph
         await self.app.run_worker_async(
-            queues=[INGEST_QUEUE, EMBED_QUEUE],
+            queues=queues,
             wait=False,
             concurrency=1,
             install_signal_handlers=False,
             listen_notify=False,
-            additional_context={"ingest": self.ctx},
+            additional_context=context,
         )
 
     async def rows(self, sql: LiteralString, *params: Any) -> list[dict[str, Any]]:
@@ -58,9 +72,11 @@ async def ingest_harness(
     embed_url: str | None,
     *,
     fresh: bool = True,
+    extract_url: str | None = None,
     **overrides: Any,
 ) -> AsyncIterator[Harness]:
-    """`fresh=False` keeps the database as it is (e.g. an API-created run row)."""
+    """`fresh=False` keeps the database as it is (e.g. an API-created run row).
+    `extract_url` adds a graph context (fake chat model at that URL) and the `extract` queue."""
     values: dict[str, Any] = {
         "DATABASE_URL": db_url,
         "owner_password_hash": TEST_HASH,
@@ -82,4 +98,11 @@ async def ingest_harness(
             ctx = IngestContext(
                 pool, settings, vault, embedder, ProcrastinateQueue(app), 1, "bge-m3", 1024
             )
-            yield Harness(ctx, app, pool)
+            graph = None
+            if extract_url is not None:
+                endpoint = OllamaEndpointConfig(label="t", url=extract_url, model="fake")
+                extract_client = ExtractClient(client, [endpoint], "fake", FAST, 8192)
+                graph = GraphContext(
+                    pool, settings, extract_client, QueryEmbedder(embedder), ctx.queue
+                )
+            yield Harness(ctx, app, pool, graph)
