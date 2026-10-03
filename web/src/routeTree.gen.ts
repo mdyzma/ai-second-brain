@@ -22,6 +22,8 @@ import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppSourcesRouteImport } from './routes/_app/sources'
 import { Route as AppAskIndexRouteImport } from './routes/_app/ask.index'
 import { Route as AppAskSessionIdRouteImport } from './routes/_app/ask.$sessionId'
+import { Route as AppEntitiesIndexRouteImport } from './routes/_app/entities.index'
+import { Route as AppEntitiesEntityIdRouteImport } from './routes/_app/entities.$entityId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -87,6 +89,16 @@ const AppAskSessionIdRoute = AppAskSessionIdRouteImport.update({
   path: '/$sessionId',
   getParentRoute: () => AppAskRoute,
 } as any)
+const AppEntitiesIndexRoute = AppEntitiesIndexRouteImport.update({
+  id: '/entities/',
+  path: '/entities/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppEntitiesEntityIdRoute = AppEntitiesEntityIdRouteImport.update({
+  id: '/entities/$entityId',
+  path: '/entities/$entityId',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -100,7 +112,9 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRoute
   '/sources': typeof AppSourcesRoute
   '/ask/$sessionId': typeof AppAskSessionIdRoute
+  '/entities/$entityId': typeof AppEntitiesEntityIdRoute
   '/ask/': typeof AppAskIndexRoute
+  '/entities/': typeof AppEntitiesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -113,7 +127,9 @@ export interface FileRoutesByTo {
   '/settings': typeof AppSettingsRoute
   '/sources': typeof AppSourcesRoute
   '/ask/$sessionId': typeof AppAskSessionIdRoute
+  '/entities/$entityId': typeof AppEntitiesEntityIdRoute
   '/ask': typeof AppAskIndexRoute
+  '/entities': typeof AppEntitiesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -129,7 +145,9 @@ export interface FileRoutesById {
   '/_app/settings': typeof AppSettingsRoute
   '/_app/sources': typeof AppSourcesRoute
   '/_app/ask/$sessionId': typeof AppAskSessionIdRoute
+  '/_app/entities/$entityId': typeof AppEntitiesEntityIdRoute
   '/_app/ask/': typeof AppAskIndexRoute
+  '/_app/entities/': typeof AppEntitiesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -145,7 +163,9 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sources'
     | '/ask/$sessionId'
+    | '/entities/$entityId'
     | '/ask/'
+    | '/entities/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -158,7 +178,9 @@ export interface FileRouteTypes {
     | '/settings'
     | '/sources'
     | '/ask/$sessionId'
+    | '/entities/$entityId'
     | '/ask'
+    | '/entities'
   id:
     | '__root__'
     | '/'
@@ -173,7 +195,9 @@ export interface FileRouteTypes {
     | '/_app/settings'
     | '/_app/sources'
     | '/_app/ask/$sessionId'
+    | '/_app/entities/$entityId'
     | '/_app/ask/'
+    | '/_app/entities/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -275,6 +299,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAskSessionIdRouteImport
       parentRoute: typeof AppAskRoute
     }
+    '/_app/entities/': {
+      id: '/_app/entities/'
+      path: '/entities'
+      fullPath: '/entities/'
+      preLoaderRoute: typeof AppEntitiesIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/entities/$entityId': {
+      id: '/_app/entities/$entityId'
+      path: '/entities/$entityId'
+      fullPath: '/entities/$entityId'
+      preLoaderRoute: typeof AppEntitiesEntityIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -300,6 +338,8 @@ interface AppRouteChildren {
   AppSearchRoute: typeof AppSearchRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppSourcesRoute: typeof AppSourcesRoute
+  AppEntitiesEntityIdRoute: typeof AppEntitiesEntityIdRoute
+  AppEntitiesIndexRoute: typeof AppEntitiesIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -311,6 +351,8 @@ const AppRouteChildren: AppRouteChildren = {
   AppSearchRoute: AppSearchRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppSourcesRoute: AppSourcesRoute,
+  AppEntitiesEntityIdRoute: AppEntitiesEntityIdRoute,
+  AppEntitiesIndexRoute: AppEntitiesIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

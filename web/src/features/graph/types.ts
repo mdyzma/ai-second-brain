@@ -10,3 +10,4 @@ export type LinkDecision = S["LinkDecision"];
 export type EntityType = ReviewEntity["type"];
 export type Relation = ReviewLink["relation"];
 export type ExtractScope = S["GraphExtractRequest"]["scope"];
+export type EntityDetail = S["EntityDetail"];

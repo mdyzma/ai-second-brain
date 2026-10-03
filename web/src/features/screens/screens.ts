@@ -4,6 +4,7 @@ import {
   Library,
   type LucideIcon,
   MessageSquare,
+  Network,
   Search,
   Server,
   Settings,
@@ -14,6 +15,7 @@ export type ScreenId =
   | "ask"
   | "search"
   | "projects"
+  | "entities"
   | "digest"
   | "review"
   | "nodes"
@@ -49,6 +51,13 @@ export const SCREENS: Record<ScreenId, Screen> = {
     icon: FolderKanban,
     phase: "8",
     purpose: "Resume any project: decisions, commits, open threads and where it runs.",
+  },
+  entities: {
+    path: "/entities",
+    label: "Entities",
+    icon: Network,
+    phase: "4a",
+    purpose: "Browse the people, tools, devices and projects found in your notes.",
   },
   digest: {
     path: "/digest",
@@ -91,6 +100,7 @@ export const NAV_ORDER: ScreenId[] = [
   "ask",
   "search",
   "projects",
+  "entities",
   "digest",
   "review",
   "nodes",

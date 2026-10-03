@@ -103,3 +103,40 @@ export async function searchEntities(
     return [];
   }
 }
+
+export const entityKeys = {
+  list: (type: EntityType | undefined, q: string) => ["graph", "entities", type ?? "", q] as const,
+  detail: (id: string) => ["graph", "entity", id] as const,
+};
+
+/** Accepted entities for the Entities list, filtered by type and name. */
+export function entitiesQuery(type: EntityType | undefined, q: string) {
+  return infiniteQueryOptions({
+    queryKey: entityKeys.list(type, q),
+    initialPageParam: undefined as string | undefined,
+    queryFn: async ({ pageParam }) => {
+      const query: { type?: EntityType; q?: string; cursor?: string } = {};
+      if (type) query.type = type;
+      if (q.trim()) query.q = q.trim();
+      if (pageParam) query.cursor = pageParam;
+      const { data, response } = await api.GET("/api/entities", { params: { query } });
+      if (!data) throw new HttpError(response.status);
+      return data;
+    },
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+  });
+}
+
+export function entityQuery(id: string) {
+  return queryOptions({
+    queryKey: entityKeys.detail(id),
+    retry: false,
+    queryFn: async () => {
+      const { data, response } = await api.GET("/api/entities/{entity_id}", {
+        params: { path: { entity_id: id } },
+      });
+      if (!data) throw new HttpError(response.status);
+      return data;
+    },
+  });
+}

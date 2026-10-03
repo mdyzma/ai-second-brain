@@ -1,6 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { PlaceholderScreen } from "@/features/screens/PlaceholderScreen";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/_app/projects")({
-  component: () => <PlaceholderScreen id="projects" />,
+  beforeLoad: () => {
+    throw redirect({ to: "/entities", search: { type: "project" }, replace: true });
+  },
 });
