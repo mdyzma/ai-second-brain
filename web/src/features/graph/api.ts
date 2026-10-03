@@ -27,9 +27,9 @@ export const GRAPH_POLL_SLOW_MS = 60_000;
 
 type CountsInput = { revisions: { pending: number; extracted: number; failed: number } };
 
-/** Fast while notes wait for extraction, slow when idle. */
-export function graphPollInterval(data: CountsInput | undefined): number {
-  return (data?.revisions.pending ?? 0) > 0 ? GRAPH_POLL_FAST_MS : GRAPH_POLL_SLOW_MS;
+/** Fast only while extract jobs are waiting or running; never-extracted notes alone do not count. */
+export function graphPollInterval(data: { queued: number } | undefined): number {
+  return (data?.queued ?? 0) > 0 ? GRAPH_POLL_FAST_MS : GRAPH_POLL_SLOW_MS;
 }
 
 export function countsKey(data: CountsInput): string {

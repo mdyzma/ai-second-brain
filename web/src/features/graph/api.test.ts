@@ -13,11 +13,11 @@ const counts = (pending: number, extracted: number, failed = 0) => ({
 });
 
 describe("graphPollInterval", () => {
-  it("is fast while notes are pending", () => {
-    expect(graphPollInterval(counts(3, 1))).toBe(GRAPH_POLL_FAST_MS);
+  it("is fast while extract jobs are queued", () => {
+    expect(graphPollInterval({ queued: 2 })).toBe(GRAPH_POLL_FAST_MS);
   });
-  it("is slow when idle or before the first load", () => {
-    expect(graphPollInterval(counts(0, 5))).toBe(GRAPH_POLL_SLOW_MS);
+  it("is slow when nothing is queued, even with notes not yet extracted", () => {
+    expect(graphPollInterval({ queued: 0, ...counts(3, 1) })).toBe(GRAPH_POLL_SLOW_MS);
     expect(graphPollInterval(undefined)).toBe(GRAPH_POLL_SLOW_MS);
   });
 });

@@ -6,13 +6,27 @@ test("extract, review and browse the graph", async ({ page }) => {
   await page.goto("/review");
   await page.getByLabel("Password").fill("e2e-test-password");
   await page.getByRole("button", { name: "Sign in" }).click();
+  // Extraction only sees notes the ingest has already recorded, so wait for the fixture vault.
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get("/api/graph/status");
+        return res.ok()
+          ? ((await res.json()) as { revisions: { total: number } }).revisions.total
+          : 0;
+      },
+      { timeout: 60_000 },
+    )
+    .toBeGreaterThanOrEqual(5);
   await page.getByRole("button", { name: "Run extraction" }).click();
   await page.getByRole("menuitem", { name: "New notes" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: /Queued [1-9]\d* notes? for extraction/ }),
+  ).toBeVisible();
 
-  // Extraction runs in the worker; the cards appear once it has finished.
-  const nas = page.getByRole("article", { name: "NAS" });
-  const proxmox = page.getByRole("article", { name: "Proxmox" });
   // The worker extracts in the background; the Review queue refreshes by itself.
+  const nas = page.getByRole("article", { name: "NAS", exact: true });
+  const proxmox = page.getByRole("article", { name: "Proxmox", exact: true });
   await expect(nas).toBeVisible({ timeout: 90_000 });
   await expect(proxmox).toBeVisible({ timeout: 90_000 });
   await nas.getByRole("button", { name: "Accept" }).click();
