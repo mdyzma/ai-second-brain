@@ -23,12 +23,14 @@ Extraction also reads every note, so it is bound by the same privacy rule as cha
 3. **Auto-accept is narrow.** A note-to-entity link (`mentions` or `about`) is accepted automatically only when all three hold: the entity is already `accepted`, the match was exact or through an alias (not an embedding match and not a new entity), and the confidence is at least `SB_EXTRACT_AUTO_ACCEPT` (0.8). Everything else is `proposed`. New entities are always proposed, and relations between entities are never auto-accepted.
 4. **Propose, then the owner decides.**
    - The owner's decisions are never overwritten. Edges carry `decided_by` (`auto` or `user`); re-extraction replaces only machine edges (`origin` `llm:...`, `decided_by='auto'`) and never changes the status of a user-decided one.
+   - A machine edge that was `accepted` (for example by accepting its entity) stays `accepted` when re-extraction re-creates it and both ends are still accepted. An edge the new revision no longer produces is dropped.
    - **Rejected names are remembered.** A rejected entity stays in the table, and a later mention of its name or alias is dropped, with every relation that names it. The model cannot bring it back.
    - **A merge keeps the losing name as an alias** of the winner, moves its edges and children, and only works within one type.
-   - Rename, retype and re-parent are owner actions too. A re-parent that would form a 2-cycle is refused (`parent_cycle`).
+   - Rename, retype and re-parent are owner actions too. A re-parent that would form any cycle is refused (`parent_cycle`).
+   - **A retype keeps the old type's names** (the old name and aliases stay as alias rows under the old type), so a model that still gives the old type resolves to the retyped entity. The cost: that old-type name can't be used by a new entity without a merge or rename.
 5. **Entities are never deleted by extraction.** A proposed entity whose last edge disappeared is still listed in Review, with zero mentions.
 6. **`EXTRACTOR_VERSION` drives re-extraction.** It is a code constant, bumped when the prompt, schema or merge rules change. A note is extracted once per version, so bumping it makes every note eligible again, and a normal run (`just graph-extract`) skips the notes already done. A failed row for the current version is retried only with `--failed`.
-7. **Duplicates are caught by exact match, aliases and name embeddings.** A new name is matched, in order, by exact normalised name or alias, then by the nearest same-type entity whose name embedding has cosine similarity of at least `SB_ENTITY_MATCH_SIMILARITY` (0.90). An embedding match links to the existing entity but is recorded as `similar`, so it is never auto-accepted, and the extracted name is offered in Review as an alias.
+7. **Duplicates are caught by exact match, aliases and name embeddings.** A new name is matched, in order, by exact normalised name or alias, then by the nearest same-type entity whose name embedding has cosine similarity of at least `SB_ENTITY_MATCH_SIMILARITY` (0.90). An embedding match links to the existing entity but is recorded as `similar`, so it is never auto-accepted. The extracted name is stored on the entity as a suggested alias (`attributes.suggested_aliases`) for later; Review does not show it yet.
 
 ## Options Considered
 

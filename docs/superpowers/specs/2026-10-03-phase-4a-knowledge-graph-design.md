@@ -1,6 +1,6 @@
 # Phase 4a: the knowledge graph (extraction, entities, review)
 
-Date: 2026-10-03 · Status: **approved design, spec under review** · Owner: Michal Dyzma
+Date: 2026-10-03 · Status: **approved, implemented** · Owner: Michal Dyzma
 Parent docs: [system design](../../architecture/system-design.md) §3 (graph tables), §4.2 (sleep cycle), §9 · [ADR-0012](../../architecture/adr/0012-salience-without-popularity-bias.md) · builds on [Phase 2a](2026-09-30-phase-2a-vault-ingestion-design.md), [2b](2026-10-01-phase-2b-search-retrieval-capture-design.md), [3](2026-10-02-phase-3-embedding-evaluation-design.md)
 
 ## 1. Purpose and success
@@ -76,7 +76,7 @@ CREATE TABLE entities (
 
 CREATE TABLE entity_aliases (
   entity_id  uuid NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-  type       entity_type NOT NULL,           -- copied from the entity, kept in sync on retype
+  type       entity_type NOT NULL,           -- the type it is matched under; retype keeps the old-type rows
   alias      text NOT NULL,
   norm_alias text NOT NULL,
   PRIMARY KEY (type, norm_alias)
@@ -265,7 +265,7 @@ Entities are never deleted by extraction. A proposed entity with no remaining ed
 
   Edges decided by the user are untouched.
 - **`rename {name}`:** set `name` and `norm_name`, and add the old name as an alias. If the new `norm_name` collides with another entity of the same type, return `409 name_taken` and suggest `merge`.
-- **`retype {type}`:** change the type and update the alias rows' type. Return `409` on a uniqueness collision.
+- **`retype {type}`:** change the type and add the name and aliases under the new type. The old-type alias rows stay, and the old name is added under the old type, so a re-extraction that still gives the old type resolves to this entity. Return `409` on a uniqueness collision.
 - **`parent {parent_id | null}`:** set the parent with `parent_status='accepted'`, or clear it. Reject cycles with `422 parent_cycle` (recursive CTE check).
 - **`merge {into_id}`:** same type only, otherwise `422 type_mismatch`.
   - Move every edge from the loser to `into` (both `dst_entity_id` and `src` for entity edges). On a PK conflict keep the user-decided row, else the higher confidence.
@@ -356,7 +356,7 @@ All server text is rendered as text, never HTML, and colours come from tokens on
    - a user-rejected edge is not resurrected.
 8. A tombstoned note's edges vanish from the entity page and counts; restoring the note brings them back.
 9. Merge moves edges without PK violations, moves aliases and children, and removes the loser.
-10. Rename collision gives `409`; a parent cycle gives `422`; retype updates the alias types.
+10. Rename collision gives `409`; a parent cycle gives `422`; retype adds the aliases under the new type and keeps the old type's names.
 11. API routes: auth, same-origin, validation, cursors, `extraction_unavailable`.
 12. A `:cloud` extract model is refused at settings and at job time.
 13. Privacy (§10).

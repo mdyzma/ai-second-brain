@@ -114,7 +114,7 @@ cloud model is used only when you explicitly choose it. It never reads your note
 
 A local model reads each indexed note and extracts a one-line summary, the entities in it (project, person, organization, tool, device, topic) and the relations between them (`mentions`, `about`, `uses`, `runs_on`, `works_with`, `part_of`). Extraction uses local Ollama models only: private text never reaches a cloud model, and a hosted `:cloud` tag is refused. Names and summaries are not written to logs.
 
-**You decide what the graph believes.** New entities and relations between entities are always proposed and wait on the **Review** screen. Only a confident exact or alias link from a note to an entity you already accepted is accepted automatically. Your decisions survive re-extraction and note edits, a rejected name is remembered, and a merge keeps the losing name as an alias. The design is in [ADR-0013](docs/architecture/adr/0013-knowledge-graph-review.md) and the [Phase 4a spec](docs/superpowers/specs/2026-10-03-phase-4a-knowledge-graph-design.md).
+**You decide what the graph believes.** New entities and relations between entities are always proposed and wait on the **Review** screen. Only a confident exact or alias link from a note to an entity you already accepted is accepted automatically. Your decisions survive re-extraction and note edits, a rejected name is remembered, a merge keeps the losing name as an alias, and a retype keeps the old type's names pointing at the entity. The design is in [ADR-0013](docs/architecture/adr/0013-knowledge-graph-review.md) and the [Phase 4a spec](docs/superpowers/specs/2026-10-03-phase-4a-knowledge-graph-design.md).
 
 - **Run it.** `just graph-extract` queues extraction for notes not yet extracted (`just graph-extract --failed` retries the failures); the worker runs the jobs. The **Run extraction** button on Review does the same. `just graph-status` prints the counts.
 - **Review.** Entities and Links tabs. Move between cards with `j` and `k`; `a` accepts, `r` rejects and `m` opens the merge picker. Renaming, changing the type and setting a parent are on each card. The queue refreshes by itself while extraction runs.
@@ -135,7 +135,7 @@ A local model reads each indexed note and extracts a one-line summary, the entit
 | `r` | Reject it |
 | `m` | Merge it into another entity |
 
-Known limitations: a proposed relation shared by two notes is dropped when one of them is re-extracted and returns when its own note is; relations named through an alias are dropped; and the parent check only catches two-entity cycles.
+Known limitations: a proposed relation shared by two notes is dropped when one of them is re-extracted and returns when its own note is; relations named through an alias are dropped; the parent check during extraction only catches two-entity cycles; and a name that only resembles an entity is stored as a suggested alias for later but is not yet shown in Review.
 
 ## Roadmap
 
