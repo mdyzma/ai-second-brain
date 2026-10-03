@@ -17,6 +17,7 @@ from ai_second_brain.config import Settings, model_matches_space
 from ai_second_brain.db import create_pool
 from ai_second_brain.graph.context import GraphContext
 from ai_second_brain.graph.llm import ExtractClient
+from ai_second_brain.graph.prompt import estimated_prompt_tokens, window_fits_context
 from ai_second_brain.knowledge import store
 from ai_second_brain.knowledge.context import IngestContext
 from ai_second_brain.knowledge.embedder import Embedder
@@ -169,6 +170,13 @@ def build_graph_context(ctx: IngestContext, http_client: httpx2.AsyncClient) -> 
     """No client without a local endpoint: extraction then records `extraction_unavailable`."""
     settings = ctx.settings
     model = settings.extract_model_name
+    if model and not window_fits_context(settings.extract_window_chars, settings.chat_num_ctx):
+        logger.warning(
+            "extract_window_too_large window_chars=%d num_ctx=%d estimated_tokens=%d",
+            settings.extract_window_chars,
+            settings.chat_num_ctx,
+            estimated_prompt_tokens(settings.extract_window_chars),
+        )
     client = (
         ExtractClient(
             http_client, settings.ollama_endpoints, model, ChatTimeouts(), settings.chat_num_ctx

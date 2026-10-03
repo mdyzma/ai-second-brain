@@ -30,6 +30,24 @@ project), "part_of" (child→parent). If a chunk label like [c2] supports a rela
 summary: one sentence, at most 200 characters, in the note's language.
 confidence: 0..1, how sure you are."""
 
+# A rough context budget: ~3 characters per token, plus the wrapper and room for the answer.
+CHARS_PER_TOKEN = 3
+_WRAPPER_CHARS = 400  # <note> tags, title, path, part label, chunk labels
+ANSWER_TOKENS = 2048  # the JSON answer (up to 30 entities and 50 relations)
+
+
+def estimated_prompt_tokens(window_chars: int) -> int:
+    """A rough token count of one extraction call for a window of ``window_chars``."""
+    chars = len(SYSTEM_PROMPT) + _WRAPPER_CHARS + window_chars
+    return chars // CHARS_PER_TOKEN + ANSWER_TOKENS
+
+
+def window_fits_context(window_chars: int, num_ctx: int) -> bool:
+    """False when SB_EXTRACT_WINDOW_CHARS likely overflows SB_CHAT_NUM_CTX (Ollama would
+    then truncate the prompt silently, possibly dropping the system prompt)."""
+    return estimated_prompt_tokens(window_chars) <= num_ctx
+
+
 _TAG = re.compile(r"<(/?note>)", re.IGNORECASE)
 
 
