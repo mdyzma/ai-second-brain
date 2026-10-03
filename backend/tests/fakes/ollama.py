@@ -51,6 +51,9 @@ class OllamaBehaviour:
     embed_topics_by_model: dict[str, dict[str, str]] = field(default_factory=dict)
     missing_models: set[str] = field(default_factory=set)
     tags: dict[str, str] = field(default_factory=dict)  # /api/tags name → digest; empty → 404
+    # non-streaming JSON chat: first-user-message substring → replies in order
+    chat_json_by_title: dict[str, list[Any]] = field(default_factory=dict)
+    chat_json_requests: list[dict[str, Any]] = field(default_factory=list)
 
 
 def fake_vector(text: str, dims: int = 1024) -> list[float]:
@@ -155,6 +158,19 @@ class FakeOllama:
         await self._record(request)
         return Response(status_code=404)
 
+    def _chat_json(self, body: dict[str, Any]) -> Response:
+        b = self.behaviour
+        b.chat_json_requests.append(body)
+        user = next((m["content"] for m in body["messages"] if m["role"] == "user"), "")
+        reply: object = {"summary": "", "entities": [], "relations": []}
+        for key, replies in b.chat_json_by_title.items():
+            if key in user:
+                reply = replies.pop(0) if replies else reply
+                break
+        content = reply if isinstance(reply, str) else json.dumps(reply)
+        message = {"role": "assistant", "content": content}
+        return JSONResponse({"model": body["model"], "message": message, "done": True})
+
     async def _chat(self, request: Request) -> Response:
         body = await self._record(request)
         b = self.behaviour
@@ -162,6 +178,8 @@ class FakeOllama:
             return RedirectResponse(b.redirect_to, status_code=307)
         if b.chat_status != 200:
             return JSONResponse({"error": b.error_text}, status_code=b.chat_status)
+        if body.get("stream") is False and "format" in body:
+            return self._chat_json(body)
         model = body["model"]
 
         def line(payload: dict[str, Any]) -> bytes:
