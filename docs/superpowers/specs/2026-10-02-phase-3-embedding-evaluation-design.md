@@ -172,6 +172,11 @@ A missing model (`embed_model_missing`) fails with `ollama pull <tag>`. If the h
 - A test pins that the default statement still uses `chunk_emb_s1_hnsw`, via EXPLAIN on the test database.
 - In the eval database there is no HNSW index on spaces ≥ 100, so vector ranking there is exact.
 
+### 6.4a Query prompts and cache identity (added during the final review)
+
+- **Query prefixes.** Each candidate's query text gets the prefix its model card prescribes. Note text never gets a prefix. Today only `snowflake-arctic-embed2` has one: `query: `. bge-m3, granite-embedding and paraphrase-multilingual use none. The same prefixed text is used for the latency timing and for the ranking vector. The report and `results.json` list each model's prefix. **If a prefixed model ever wins, Phase 3b must apply the same query prefix in production search and chat**; otherwise production quality will be lower than the bake-off measured.
+- **Cache identity.** The cache's `model` column stores `<tag>@<digest>`, using the digest from Ollama `/api/tags`, or the bare tag when the digest is unknown. A re-pulled model is therefore re-embedded instead of being scored with stale vectors. Spaces and report labels use the plain tag.
+
 ### 6.5 Query runs
 
 For each model and each query, with `limit=10` and `mode="search"`:
