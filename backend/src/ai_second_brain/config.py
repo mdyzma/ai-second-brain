@@ -265,9 +265,10 @@ class Settings(BaseSettings):
 
     @property
     def extract_model_name(self) -> str | None:
-        if self.extract_model:
-            return self.extract_model
-        return self.ollama_endpoints[0].model if self.ollama_endpoints else None
+        """The extraction model, or None (extraction disabled) with no local endpoint."""
+        if not self.ollama_endpoints:
+            return None
+        return self.extract_model or self.ollama_endpoints[0].model
 
     @property
     def allowed_origin_set(self) -> frozenset[str]:

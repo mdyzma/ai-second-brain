@@ -166,7 +166,7 @@ async def _supervise(run_once: Callable[[], Awaitable[None]], stop: asyncio.Even
 
 
 def build_graph_context(ctx: IngestContext, http_client: httpx2.AsyncClient) -> GraphContext:
-    """No client without SB_EXTRACT_MODEL: extraction then records `extraction_unavailable`."""
+    """No client without a local endpoint: extraction then records `extraction_unavailable`."""
     settings = ctx.settings
     model = settings.extract_model_name
     client = (

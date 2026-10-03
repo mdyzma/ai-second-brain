@@ -51,7 +51,7 @@ def test_extract_without_model_exits_1(
     monkeypatch.setattr(main, "get_settings", lambda: make_settings())
     result = runner.invoke(app, ["graph", "extract"])
     assert result.exit_code == 1
-    message = "No local chat model is configured for extraction (SB_EXTRACT_MODEL)."
+    message = "No local model is configured for extraction (SB_OLLAMA_ENDPOINTS)."
     assert message in result.stderr and message not in result.stdout
 
 

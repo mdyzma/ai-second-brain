@@ -589,7 +589,7 @@ def graph_extract(
     """Queue knowledge-graph extraction (the worker runs the jobs)."""
     settings = _load_settings()
     if settings.extract_model_name is None:
-        typer.echo("No local chat model is configured for extraction (SB_EXTRACT_MODEL).", err=True)
+        typer.echo("No local model is configured for extraction (SB_OLLAMA_ENDPOINTS).", err=True)
         raise typer.Exit(code=1)
     logging.config.dictConfig(build_log_config())
     try:

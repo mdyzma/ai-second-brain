@@ -22,7 +22,16 @@ def test_extract_model_defaults_to_first_endpoint() -> None:
     )
     assert s.extract_model_name == "qwen3:14b"
     assert make().extract_model_name is None
-    assert make(SB_EXTRACT_MODEL="llama3.1:8b").extract_model_name == "llama3.1:8b"
+    with_override = make(
+        ollama_endpoints=[{"label": "ws", "url": "http://127.0.0.1:11434", "model": "qwen3:14b"}],
+        SB_EXTRACT_MODEL="llama3.1:8b",
+    )
+    assert with_override.extract_model_name == "llama3.1:8b"
+
+
+def test_extract_model_needs_an_endpoint() -> None:
+    # SB_EXTRACT_MODEL alone does not enable extraction: there is nowhere to run it.
+    assert make(SB_EXTRACT_MODEL="llama3.1:8b").extract_model_name is None
 
 
 def test_extract_defaults() -> None:
