@@ -1,8 +1,10 @@
+import json
+
 import pytest
 
 from ai_second_brain.graph.names import norm
 from ai_second_brain.graph.rules import initial_edge_status
-from ai_second_brain.graph.schema import InvalidOutput, filter_output
+from ai_second_brain.graph.schema import InvalidOutput, filter_output, output_json_schema
 
 
 def test_norm() -> None:
@@ -115,3 +117,81 @@ def test_initial_edge_status(match: str, status: str, conf: float, expected: str
         )
         == expected
     )
+
+
+def _ent(**over: object) -> dict[str, object]:
+    return {"name": "ZFS", "type": "tool", "aliases": [], "confidence": 0.5, **over}
+
+
+@pytest.mark.parametrize("aliases", [5, True, "abc", {"a": 1}])
+def test_filter_non_list_aliases_mean_none(aliases: object) -> None:
+    out = filter_output(
+        {"summary": "", "entities": [_ent(aliases=aliases)], "relations": []}, filename_stem="x"
+    )
+    assert out.entities[0].aliases == []
+
+
+def test_filter_alias_list_keeps_only_strings() -> None:
+    raw = {"summary": "", "entities": [_ent(aliases=["ok", 3, None, {"a": 1}])], "relations": []}
+    assert filter_output(raw, filename_stem="x").entities[0].aliases == ["ok"]
+
+
+@pytest.mark.parametrize("conf", [10**400, True, "0.9", float("nan"), float("inf")])
+def test_filter_bad_confidence_becomes_zero(conf: object) -> None:
+    raw = {"summary": "", "entities": [_ent(confidence=conf)], "relations": []}
+    assert filter_output(raw, filename_stem="x").entities[0].confidence == 0.0
+
+
+def test_filter_aliases_deduped_and_exclude_name() -> None:
+    raw = {
+        "summary": "",
+        "entities": [_ent(aliases=["a", "A", "a", " zfs ", "b"])],
+        "relations": [],
+    }
+    assert filter_output(raw, filename_stem="x").entities[0].aliases == ["a", "b"]
+
+
+def test_output_json_schema_has_no_refs() -> None:
+    dump = json.dumps(output_json_schema())
+    assert "$ref" not in dump and "$defs" not in dump
+    assert "entities" in dump and "runs_on" in dump
+
+
+def test_filter_minor_rules() -> None:
+    raw = {
+        "summary": "a \n  b\t c",
+        "entities": [
+            _ent(name="NAS"),
+            _ent(name="Proxmox"),
+            _ent(name="Note"),
+        ],
+        "relations": [
+            {
+                "subject": "NAS",
+                "relation": "uses",
+                "object": "Proxmox",
+                "chunk": "c12",
+                "confidence": 1,
+            },
+            {
+                "subject": "nas",
+                "relation": "uses",
+                "object": "PROXMOX",
+                "chunk": "c1",
+                "confidence": 1,
+            },
+            {"subject": "NAS", "relation": "uses", "object": "NAS", "confidence": 1},
+            {
+                "subject": "NAS",
+                "relation": "about",
+                "object": "Proxmox",
+                "chunk": "x1",
+                "confidence": 1,
+            },
+            {"subject": "NOTE", "relation": "about", "object": "Note", "confidence": 1},
+        ],
+    }
+    out = filter_output(raw, filename_stem="x")
+    assert out.summary == "a b c"
+    assert [e.name for e in out.entities] == ["NAS", "Proxmox"]
+    assert [(r.relation, r.chunk) for r in out.relations] == [("uses", "c12"), ("about", None)]

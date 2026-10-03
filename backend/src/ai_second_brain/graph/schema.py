@@ -1,5 +1,7 @@
 """Extraction output: lenient filter (drop, never repair), then strict validation."""
 
+import math
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -41,20 +43,54 @@ class ExtractionOutput(BaseModel):
     relations: list[ExtractedRelation] = Field(max_length=MAX_RELATIONS)
 
 
+def _inline_refs(node: Any, defs: dict[str, Any]) -> Any:
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str):
+            return _inline_refs(defs[ref.rsplit("/", 1)[-1]], defs)
+        return {k: _inline_refs(v, defs) for k, v in node.items() if k != "$defs"}
+    if isinstance(node, list):
+        return [_inline_refs(v, defs) for v in node]
+    return node
+
+
 def output_json_schema() -> dict[str, Any]:
-    return ExtractionOutput.model_json_schema()
+    """Schema with every definition inlined (grammar-based decoders may not follow $ref)."""
+    schema = ExtractionOutput.model_json_schema()
+    return _inline_refs(schema, schema.get("$defs", {}))
 
 
 def _clamp(value: object) -> float:
-    try:
-        number = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    if isinstance(value, bool) or not isinstance(value, int | float):
         return 0.0
-    return min(1.0, max(0.0, number))
+    try:
+        number = float(value)
+    except OverflowError:
+        return 0.0
+    return min(1.0, max(0.0, number)) if math.isfinite(number) else 0.0
 
 
 def _clean(value: object) -> str:
     return " ".join(value.split())[:MAX_NAME] if isinstance(value, str) else ""
+
+
+_CHUNK = re.compile(r"c\d{1,4}")
+
+
+def _aliases(value: object, name_key: str) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    seen = {name_key}
+    for item in value:
+        alias = _clean(item)
+        key = norm(alias)
+        if key and key not in seen:
+            seen.add(key)
+            out.append(alias)
+        if len(out) == MAX_ALIASES:
+            break
+    return out
 
 
 def filter_output(raw: object, *, filename_stem: str) -> ExtractionOutput:
@@ -71,39 +107,38 @@ def filter_output(raw: object, *, filename_stem: str) -> ExtractionOutput:
             continue
         name = _clean(item.get("name"))
         key = norm(name)
-        if not key or key == stem or key in seen:
+        if not key or key in (stem, "note") or key in seen:
             continue
         seen.add(key)
-        aliases = [
-            a
-            for a in (_clean(x) for x in item.get("aliases") or [] if isinstance(x, str))
-            if norm(a)
-        ]
         entities.append(
             {
                 "name": name,
                 "type": item["type"],
-                "aliases": aliases[:MAX_ALIASES],
+                "aliases": _aliases(item.get("aliases"), key),
                 "confidence": _clamp(item.get("confidence")),
             }
         )
         if len(entities) == MAX_ENTITIES:
             break
-    known = {norm(e["name"]) for e in entities}
     relations: list[dict[str, Any]] = []
+    rel_seen: set[tuple[str, str, str]] = set()
     for item in rels:
         if not isinstance(item, dict) or item.get("relation") not in RELATIONS:
             continue
         subject, obj = _clean(item.get("subject")), _clean(item.get("object"))
-        if (subject != "NOTE" and norm(subject) not in known) or norm(obj) not in known:
+        subject_key, obj_key = norm(subject), norm(obj)
+        if (subject != "NOTE" and subject_key not in seen) or obj_key not in seen:
             continue
-        chunk = item.get("chunk") if isinstance(item.get("chunk"), str) else None
+        if subject_key == obj_key or (subject_key, item["relation"], obj_key) in rel_seen:
+            continue
+        rel_seen.add((subject_key, item["relation"], obj_key))
+        chunk = item.get("chunk")
         relations.append(
             {
                 "subject": subject,
                 "relation": item["relation"],
                 "object": obj,
-                "chunk": chunk,
+                "chunk": chunk if isinstance(chunk, str) and _CHUNK.fullmatch(chunk) else None,
                 "confidence": _clamp(item.get("confidence")),
             }
         )
