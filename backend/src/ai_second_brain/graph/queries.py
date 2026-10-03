@@ -274,9 +274,10 @@ async def review_links(
 ) -> dict[str, Any]:
     """Proposed links, oldest first.
 
-    Entity-to-entity edges whose two entities are both not rejected (kind ``relation``), and
-    mention/about edges from a live note to an accepted entity (kind ``mention``). Evidence is
-    the evidence chunk's note and heading, else the note that produced the edge.
+    Entity-to-entity edges whose two entities are both not rejected, and whose producing
+    note (if any) is not tombstoned (kind ``relation``), and mention/about edges from a live
+    note to an accepted entity (kind ``mention``). Evidence is the evidence chunk's note and
+    heading, else the note that produced the edge.
     """
     after_at, after_id = _time_id_cursor(cursor)
     async with conn.cursor(row_factory=dict_row) as cur:
@@ -295,7 +296,11 @@ async def review_links(
             " LEFT JOIN sources evs ON evs.id = coalesce(er.source_id, ns.id)"
             "  AND evs.deleted_at IS NULL"
             " WHERE g.status = 'proposed' AND ("
-            "  (g.src_type = 'entity' AND d.status <> 'rejected' AND se.status <> 'rejected')"
+            "  (g.src_type = 'entity' AND d.status <> 'rejected' AND se.status <> 'rejected'"
+            # hidden while the note that produced it is tombstoned
+            "   AND NOT EXISTS (SELECT 1 FROM source_revisions pr"
+            "    JOIN sources ps ON ps.id = pr.source_id"
+            "    WHERE pr.id = g.revision_id AND ps.deleted_at IS NOT NULL))"
             "  OR (g.src_type = 'source' AND g.relation IN ('mentions', 'about')"
             "   AND d.status = 'accepted' AND ns.deleted_at IS NULL))"
             " AND (%(at)s::timestamptz IS NULL"

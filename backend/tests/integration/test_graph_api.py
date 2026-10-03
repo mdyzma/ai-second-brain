@@ -366,11 +366,13 @@ def test_review_and_decide_links(graph_api: tuple[TestClient, dict[str, str]], d
     items = client.get("/api/review/links").json()["items"]
     assert {i["id"] for i in items} == {proxmox["id"], mention["id"]}
 
-    # Evidence from a tombstoned note is null (the relation itself stays reviewable).
+    # A proposed relation produced only by a tombstoned note is hidden until it is restored.
     sql(db_url, "UPDATE sources SET deleted_at = now() WHERE external_ref = 'Projects/NAS.md'")
     items = {i["id"]: i for i in client.get("/api/review/links").json()["items"]}
-    assert items[proxmox["id"]]["evidence"] is None
+    assert proxmox["id"] not in items and mention["id"] in items
     sql(db_url, "UPDATE sources SET deleted_at = NULL WHERE external_ref = 'Projects/NAS.md'")
+    items = {i["id"]: i for i in client.get("/api/review/links").json()["items"]}
+    assert items[proxmox["id"]]["evidence"] is not None
 
     too_many = {"items": [{"id": str(uuid4()), "decision": "accept"}] * 101}
     assert client.post("/api/review/links", json=too_many, headers=SAME_ORIGIN).status_code == 422
