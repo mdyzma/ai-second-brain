@@ -4,15 +4,18 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+from psycopg.errors import DeadlockDetected
 from psycopg_pool import AsyncConnectionPool
 
 from ai_second_brain.chat.providers.ollama import create_http_client
 from ai_second_brain.config import OllamaEndpointConfig
+from ai_second_brain.graph import extract as extract_module
 from ai_second_brain.graph import store
 from ai_second_brain.graph.context import GraphContext
 from ai_second_brain.graph.extract import extract_revision
 from ai_second_brain.graph.llm import ExtractClient
 from ai_second_brain.graph.names import norm
+from ai_second_brain.graph.resolve import resolve
 from ai_second_brain.knowledge.embedder import Embedder
 from ai_second_brain.search.embedding import QueryEmbedder
 from ai_second_brain.vault.observe import observe
@@ -553,5 +556,212 @@ def test_resolution_logs_carry_no_names(
         assert "created=2" in text and "proposed=3" in text
         for name in ("NAS", "Proxmox", norm("Proxmox")):
             assert name not in text
+
+    scenario(db_url, vault(tmp_path), fake, body)
+
+
+def test_resolve_order_is_deterministic(
+    db_url: str,
+    tmp_path: Path,
+    make_fake_ollama: Callable[[], FakeOllama],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = make_fake_ollama()
+    scrambled = reply(
+        [
+            ent("Zeta", "tool"),
+            ent("Rack", "device"),
+            ent("alpha", "tool"),
+            ent("Beta", "tool"),
+            ent("Attic", "device"),
+        ],
+        [
+            rel("Zeta", "runs_on", "Rack"),
+            rel("Beta", "part_of", "Zeta"),
+            rel("alpha", "runs_on", "Attic"),
+            rel("Zeta", "works_with", "alpha"),
+            rel("NOTE", "about", "Rack"),
+            rel("alpha", "part_of", "Beta"),
+        ],
+    )
+    fake.behaviour.chat_json_by_title = {TITLE: [scrambled]}
+    created: list[tuple[str, str]] = []
+    upserts: list[tuple[str, UUID, str, UUID]] = []
+    parents: list[tuple[UUID, UUID]] = []
+    real_create, real_upsert = store.create_entity, store.upsert_edge
+    real_parent = store.set_proposed_parent
+
+    async def create_entity(conn: Any, type_: str, name: str, aliases: Any) -> Any:
+        created.append((type_, norm(name)))
+        return await real_create(conn, type_, name, aliases)
+
+    async def upsert_edge(conn: Any, **kw: Any) -> None:
+        upserts.append((kw["src_type"], kw["src_id"], kw["relation"], kw["dst_entity_id"]))
+        await real_upsert(conn, **kw)
+
+    async def set_proposed_parent(conn: Any, child: UUID, parent: UUID) -> None:
+        parents.append((child, parent))
+        await real_parent(conn, child, parent)
+
+    monkeypatch.setattr(store, "create_entity", create_entity)
+    monkeypatch.setattr(store, "upsert_edge", upsert_edge)
+    monkeypatch.setattr(store, "set_proposed_parent", set_proposed_parent)
+
+    async def body(h: Harness, ctx: GraphContext, rev: UUID) -> None:
+        assert await extract_revision(ctx, rev) == "ok"
+        assert created == sorted(created)  # (type, norm(name)), not model-output order
+        assert created[0] == ("device", "attic") and len(created) == 5
+        assert len(upserts) == 5 + 5  # five entity links, five mention edges
+        assert upserts == sorted(upserts)  # (src_type, src_id, relation, dst_entity_id)
+        assert upserts[0][0] == "entity" and upserts[-1][0] == "source"
+        assert parents == sorted(parents) and len(parents) == 2
+
+    scenario(db_url, vault(tmp_path), fake, body)
+
+
+class _Flaky:
+    """Wraps extract._finish: does the real work, then raises on the first `fail` calls."""
+
+    def __init__(self, real: Any, fail: int) -> None:
+        self.real, self.fail, self.calls = real, fail, 0
+
+    async def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        self.calls += 1
+        result = await self.real(*args, **kwargs)
+        if self.calls <= self.fail:
+            raise DeadlockDetected("simulated deadlock")
+        return result
+
+
+def test_deadlock_retries_the_write_once_without_calling_the_model_again(
+    db_url: str,
+    tmp_path: Path,
+    make_fake_ollama: Callable[[], FakeOllama],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = make_fake_ollama()
+    fake.behaviour.chat_json_by_title = {TITLE: [GOOD, GOOD]}
+    flaky = _Flaky(extract_module._finish, fail=1)
+    monkeypatch.setattr(extract_module, "_finish", flaky)
+
+    async def body(h: Harness, ctx: GraphContext, rev: UUID) -> None:
+        assert await extract_revision(ctx, rev) == "ok"
+        assert flaky.calls == 2
+        assert len(fake.behaviour.chat_json_requests) == 1  # the model is not called again
+        ents = await entities(h)
+        assert set(ents) == {"NAS", "Proxmox"}
+        assert len(await edges(h)) == 3
+        [row] = await h.rows("SELECT status FROM extractions")
+        assert row["status"] == "ok"
+        expected = {("embed_entity", ents["NAS"]["id"]), ("embed_entity", ents["Proxmox"]["id"])}
+        assert len(calls(ctx)) == 2 and set(calls(ctx)) == expected  # committed attempt only
+
+    scenario(db_url, vault(tmp_path), fake, body)
+
+
+def test_second_deadlock_raises_and_writes_nothing(
+    db_url: str,
+    tmp_path: Path,
+    make_fake_ollama: Callable[[], FakeOllama],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = make_fake_ollama()
+    fake.behaviour.chat_json_by_title = {TITLE: [GOOD, GOOD]}
+    flaky = _Flaky(extract_module._finish, fail=2)
+    monkeypatch.setattr(extract_module, "_finish", flaky)
+
+    async def body(h: Harness, ctx: GraphContext, rev: UUID) -> None:
+        with pytest.raises(DeadlockDetected):
+            await extract_revision(ctx, rev)
+        assert flaky.calls == 2
+        assert len(fake.behaviour.chat_json_requests) == 1
+        assert await h.rows("SELECT 1 FROM extractions") == []
+        assert await entities(h) == {}
+        assert await edges(h) == []
+        assert calls(ctx) == []
+
+    scenario(db_url, vault(tmp_path), fake, body)
+
+
+def test_lost_create_race_counts_as_exact_link(
+    db_url: str,
+    tmp_path: Path,
+    make_fake_ollama: Callable[[], FakeOllama],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = make_fake_ollama()
+    fake.behaviour.chat_json_by_title = {TITLE: [reply([ent("NAS", "device", 0.9)], [])]}
+
+    async def body(h: Harness, ctx: GraphContext, rev: UUID) -> None:
+        nas = await seed(h, "device", "NAS")
+
+        async def not_found(*_: Any) -> None:
+            return None  # as if a concurrent note created NAS after our lookup
+
+        monkeypatch.setattr(store, "find_by_name", not_found)
+        assert await extract_revision(ctx, rev) == "ok"
+        [edge] = await edges(h)
+        assert edge["dst_entity_id"] == nas
+        assert edge["status"] == "accepted"  # exact match to an accepted entity
+        assert calls(ctx) == []  # no redundant embed job
+
+    scenario(db_url, vault(tmp_path), fake, body)
+
+
+def test_relation_naming_an_alias_resolves(db_url: str, tmp_path: Path) -> None:
+    async def go() -> None:
+        async with ingest_harness(db_url, vault(tmp_path), None) as h:
+            await h.rows("TRUNCATE entities CASCADE")
+            await observe(h.ctx, PATH)
+            await h.drain()
+            [row] = await h.rows(
+                "SELECT id, current_revision_id AS r FROM sources WHERE external_ref = %s", PATH
+            )
+            await seed(h, "organization", "Tuesday Club", "rejected")
+            output = reply(
+                [
+                    ent("Proxmox", "tool", aliases=["PVE"]),
+                    ent("NAS", "device"),
+                    ent("Alice", "person"),
+                    ent("The Crew", "organization", aliases=["Tuesday Club"]),
+                ],
+                [
+                    rel("PVE", "runs_on", "NAS"),
+                    rel("Alice", "works_with", "Tuesday Club"),  # alias of a rejected hit
+                ],
+            )
+            ctx = GraphContext(h.pool, h.ctx.settings, None, None, CommitCheckingQueue(h.pool))
+            async with h.pool.connection() as conn:
+                counts = await resolve(
+                    conn, ctx, source_id=row["id"], revision_id=row["r"], output=output
+                )
+            assert counts.dropped == 2  # the dropped mention and the relation naming it
+            got = by_key(await edges(h))
+            assert ("Proxmox", "runs_on", "NAS") in got
+            assert not any(k[0] == "Alice" for k in got)
+            assert "The Crew" not in await entities(h)
+
+    run_async(go())
+
+
+def test_self_loop_relation_is_dropped(
+    db_url: str, tmp_path: Path, make_fake_ollama: Callable[[], FakeOllama]
+) -> None:
+    fake = make_fake_ollama()
+    fake.behaviour.chat_json_by_title = {
+        TITLE: [
+            reply(
+                [ent("Proxmox", "tool"), ent("PVE", "tool")],
+                [rel("Proxmox", "runs_on", "PVE"), rel("PVE", "part_of", "Proxmox")],
+            )
+        ]
+    }
+
+    async def body(h: Harness, ctx: GraphContext, rev: UUID) -> None:
+        proxmox = await seed(h, "tool", "Proxmox", aliases=["pve"])
+        assert await extract_revision(ctx, rev) == "ok"
+        [edge] = await edges(h)  # one mention edge; both names are the same entity
+        assert edge["src_type"] == "source" and edge["dst_entity_id"] == proxmox
+        assert (await entities(h))["Proxmox"]["parent_id"] is None
 
     scenario(db_url, vault(tmp_path), fake, body)

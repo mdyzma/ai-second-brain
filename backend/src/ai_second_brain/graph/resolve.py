@@ -45,6 +45,10 @@ class _Mention:
     evidence: UUID | None
     about: bool
 
+    @property
+    def relation(self) -> str:
+        return "about" if self.about else "mentions"
+
 
 def _parse(output: Mapping[str, Any]) -> tuple[ExtractionOutput, dict[str, str]]:
     merged = ExtractionOutput.model_validate(
@@ -111,16 +115,20 @@ async def resolve(
     about = {
         norm(r.object) for r in merged.relations if r.subject == NOTE and r.relation == "about"
     }
-    resolved: dict[str, store.EntityRow] = {}  # norm(name) -> entity (first type wins)
-    dropped_names: set[str] = set()
+    # Relation endpoints are looked up by norm: entity names first, then their aliases.
+    # None marks a name that resolved to a rejected entity (dropped with its relations).
+    by_name: dict[str, store.EntityRow | None] = {}
+    by_alias: dict[str, store.EntityRow | None] = {}
     mentions: dict[UUID, _Mention] = {}
     created_ids: list[UUID] = []
     linked = dropped = 0
 
-    for ent in merged.entities:
+    # A stable lock order (type, norm(name)) so two notes never take entity locks crosswise.
+    for ent in sorted(merged.entities, key=lambda e: (e.type, norm(e.name))):
         key = norm(ent.name)
+        alias_keys = [k for k in (norm(a) for a in ent.aliases) if k]
         hit: tuple[store.EntityRow, MatchKind] | None = None
-        for candidate in [key, *(norm(a) for a in ent.aliases)]:
+        for candidate in [key, *alias_keys]:
             hit = await store.find_by_name(conn, ent.type, candidate) if candidate else None
             if hit is not None:
                 break
@@ -137,21 +145,26 @@ async def resolve(
                 )
                 if near is not None:
                     hit = (near[0], "similar")
-                    await store.add_suggested_alias(conn, near[0].id, ent.name)
         if hit is None:
             row = await store.create_entity(conn, ent.type, ent.name, ent.aliases)
-            # create_entity returns an existing row on a (type, norm_name) conflict.
-            hit = (row, "new")
-            if row.status != "rejected" and row.id not in created_ids:
-                created_ids.append(row.id)
+            # On a (type, norm_name) conflict (a concurrent note won) it is an exact match.
+            hit = (row, "new" if row.inserted else "exact")
         entity, match = hit
         if entity.status == "rejected":
-            dropped_names.add(key)
+            by_name.setdefault(key, None)
+            for alias_key in alias_keys:
+                by_alias.setdefault(alias_key, None)
             dropped += 1
             continue
-        if match != "new":
+        if match == "similar":
+            await store.add_suggested_alias(conn, entity.id, ent.name)
+        if match == "new":
+            created_ids.append(entity.id)
+        else:
             linked += 1
-        resolved.setdefault(key, entity)
+        by_name.setdefault(key, entity)
+        for alias_key in alias_keys:
+            by_alias.setdefault(alias_key, entity)
         mention = _Mention(
             entity,
             match,
@@ -169,10 +182,53 @@ async def resolve(
             kept.evidence = kept.evidence or mention.evidence
             kept.about = kept.about or mention.about
 
-    await store.replace_machine_edges(conn, source_id)
+    def lookup(name: str) -> tuple[bool, store.EntityRow | None]:
+        """(known, entity); known with entity None means the name was dropped."""
+        if name in by_name:
+            return True, by_name[name]
+        if name in by_alias:
+            return True, by_alias[name]
+        return False, None
 
-    accepted = proposed = 0
-    for mention in mentions.values():
+    await store.replace_machine_edges(conn, source_id)
+    # Edges are written in (src_type, src_id, relation, dst_entity_id) order: entity edges
+    # first, then this note's mention edges, then parent proposals.
+
+    links: dict[tuple[UUID, str, UUID], tuple[float, UUID | None]] = {}
+    for rel in merged.relations:
+        subject, obj = norm(rel.subject), norm(rel.object)
+        (s_known, src), (o_known, dst) = lookup(subject), lookup(obj)
+        if (s_known and src is None) or (o_known and dst is None):
+            dropped += 1  # a relation naming a rejected entity is dropped with it
+            continue
+        if rel.subject == NOTE or src is None or dst is None or src.id == dst.id:
+            continue  # NOTE relations became the mention edges; self-loops are dropped
+        link = (src.id, rel.relation, dst.id)
+        chunk = _chunk(evidence, [subject, rel.relation, obj])
+        previous = links.get(link)
+        if previous is None:
+            links[link] = (rel.confidence, chunk)
+        else:
+            links[link] = (max(previous[0], rel.confidence), previous[1] or chunk)
+    parents: list[tuple[UUID, UUID]] = []
+    for (src_id, relation, dst_id), (confidence, chunk) in sorted(links.items()):
+        await store.upsert_edge(
+            conn,
+            src_type="entity",
+            src_id=src_id,
+            relation=relation,
+            dst_entity_id=dst_id,
+            confidence=confidence,
+            origin=origin,
+            status="proposed",
+            evidence_chunk_id=chunk,
+            revision_id=revision_id,
+        )
+        if relation == "part_of":
+            parents.append((src_id, dst_id))
+    accepted = 0
+    proposed = len(links)
+    for mention in sorted(mentions.values(), key=lambda m: (m.relation, m.entity.id)):
         status = initial_edge_status(
             match=mention.match,
             entity_status=mention.entity.status,
@@ -183,7 +239,7 @@ async def resolve(
             conn,
             src_type="source",
             src_id=source_id,
-            relation="about" if mention.about else "mentions",
+            relation=mention.relation,
             dst_entity_id=mention.entity.id,
             confidence=mention.confidence,
             origin=origin,
@@ -196,31 +252,8 @@ async def resolve(
         else:
             proposed += 1
 
-    for rel in merged.relations:
-        subject, obj = norm(rel.subject), norm(rel.object)
-        if subject in dropped_names or obj in dropped_names:
-            dropped += 1  # a relation naming a rejected entity is dropped with it
-            continue
-        if rel.subject == NOTE:
-            continue  # NOTE relations became the mention edges above
-        src, dst = resolved.get(subject), resolved.get(obj)
-        if src is None or dst is None or src.id == dst.id:
-            continue
-        await store.upsert_edge(
-            conn,
-            src_type="entity",
-            src_id=src.id,
-            relation=rel.relation,
-            dst_entity_id=dst.id,
-            confidence=rel.confidence,
-            origin=origin,
-            status="proposed",
-            evidence_chunk_id=_chunk(evidence, [subject, rel.relation, obj]),
-            revision_id=revision_id,
-        )
-        proposed += 1
-        if rel.relation == "part_of":
-            await store.set_proposed_parent(conn, src.id, dst.id)
+    for child_id, parent_id in parents:
+        await store.set_proposed_parent(conn, child_id, parent_id)
 
     return ResolveCounts(
         created=len(created_ids),

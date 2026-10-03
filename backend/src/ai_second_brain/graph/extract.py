@@ -8,6 +8,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from psycopg import AsyncConnection
+from psycopg.errors import DeadlockDetected, SerializationFailure
 
 from ai_second_brain.graph import store
 from ai_second_brain.graph.context import GraphContext
@@ -138,27 +139,42 @@ async def extract_revision(ctx: GraphContext, revision_id: UUID) -> Outcome:
     merged = merge_outputs(outputs)
     output: dict[str, Any] = merged.model_dump() | {"evidence": evidence}
     vectors = await embed_names(ctx, merged)  # network first: never under the source lock
-    async with ctx.pool.connection() as conn:
-        if not await _still_current(conn, revision_id):
-            logger.info("extract revision=%s outcome=skipped code=stale", revision_id)
-            return "skipped"
-        await store.record_extraction(
-            conn,
-            revision_id,
-            EXTRACTOR_VERSION,
-            status="ok",
-            model=model,
-            summary=merged.summary,
-            output=output,
+    source_id = info.source_id
+
+    async def write() -> ResolveCounts | None:
+        """One write transaction; None when the revision went stale."""
+        async with ctx.pool.connection() as conn:
+            if not await _still_current(conn, revision_id):
+                return None
+            await store.record_extraction(
+                conn,
+                revision_id,
+                EXTRACTOR_VERSION,
+                status="ok",
+                model=model,
+                summary=merged.summary,
+                output=output,
+            )
+            return await _finish(
+                conn,
+                ctx,
+                source_id=source_id,
+                revision_id=revision_id,
+                output=output,
+                vectors=vectors,
+            )
+
+    try:
+        counts = await write()
+    except (DeadlockDetected, SerializationFailure) as error:
+        # Rolled back; re-run only the DB part with the same model output (never the model).
+        logger.warning(
+            "extract revision=%s code=write_retry error=%s", revision_id, type(error).__name__
         )
-        counts = await _finish(
-            conn,
-            ctx,
-            source_id=info.source_id,
-            revision_id=revision_id,
-            output=output,
-            vectors=vectors,
-        )
+        counts = await write()  # a second failure raises, for the job's retry
+    if counts is None:
+        logger.info("extract revision=%s outcome=skipped code=stale", revision_id)
+        return "skipped"
     for entity_id in counts.created_ids:  # after the commit (the 2a defer-after-commit rule)
         await ctx.queue.embed_entity(entity_id)
     logger.info(

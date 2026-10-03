@@ -18,6 +18,7 @@ class EntityRow:
     type: str
     name: str
     status: str
+    inserted: bool = False  # create_entity only: True when this call created the row
 
 
 @dataclass(frozen=True)
@@ -103,8 +104,10 @@ async def create_entity(
         row = await cur.fetchone()
         if row is None:
             raise RuntimeError("entity insert returned no row")
-        entity = _entity(row)
-        if not row["inserted"]:
+        entity = EntityRow(
+            row["id"], row["type"], row["name"], row["status"], inserted=bool(row["inserted"])
+        )
+        if not entity.inserted:
             return entity
         seen = {norm_name}
         for alias in aliases:
