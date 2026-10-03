@@ -26,6 +26,17 @@ NameVectors = Mapping[tuple[str, str], list[float]]  # (type, norm(name)) -> que
 
 _MATCH_RANK: dict[MatchKind, int] = {"exact": 3, "alias": 3, "similar": 1, "new": 0}
 
+# The endpoint types the prompt asks for, per relation: (subject types, object types). Used
+# only to choose between same-named entities of different types in one output.
+_ENDPOINT_TYPES: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    "uses": (frozenset({"project"}), frozenset({"tool"})),
+    "runs_on": (frozenset({"tool", "project"}), frozenset({"device"})),
+    "works_with": (frozenset({"person"}), frozenset({"organization", "project"})),
+}
+
+# (extracted type, norm) -> entity; None marks a name that resolved to a rejected entity.
+_Names = dict[tuple[str, str], store.EntityRow | None]
+
 
 @dataclass(frozen=True)
 class ResolveCounts:
@@ -115,10 +126,11 @@ async def resolve(
     about = {
         norm(r.object) for r in merged.relations if r.subject == NOTE and r.relation == "about"
     }
-    # Relation endpoints are looked up by norm: entity names first, then their aliases.
-    # None marks a name that resolved to a rejected entity (dropped with its relations).
-    by_name: dict[str, store.EntityRow | None] = {}
-    by_alias: dict[str, store.EntityRow | None] = {}
+    # Relation endpoints are looked up by (extracted type, norm): entity names first, then
+    # their aliases. None marks a name that resolved to a rejected entity (dropped with its
+    # relations).
+    by_name: _Names = {}
+    by_alias: _Names = {}
     mentions: dict[UUID, _Mention] = {}
     created_ids: list[UUID] = []
     linked = dropped = 0
@@ -151,9 +163,9 @@ async def resolve(
             hit = (row, "new" if row.inserted else "exact")
         entity, match = hit
         if entity.status == "rejected":
-            by_name.setdefault(key, None)
+            by_name.setdefault((ent.type, key), None)
             for alias_key in alias_keys:
-                by_alias.setdefault(alias_key, None)
+                by_alias.setdefault((ent.type, alias_key), None)
             dropped += 1
             continue
         if match == "similar":
@@ -162,9 +174,9 @@ async def resolve(
             created_ids.append(entity.id)
         else:
             linked += 1
-        by_name.setdefault(key, entity)
+        by_name.setdefault((ent.type, key), entity)
         for alias_key in alias_keys:
-            by_alias.setdefault(alias_key, entity)
+            by_alias.setdefault((ent.type, alias_key), entity)
         mention = _Mention(
             entity,
             match,
@@ -182,12 +194,19 @@ async def resolve(
             kept.evidence = kept.evidence or mention.evidence
             kept.about = kept.about or mention.about
 
-    def lookup(name: str) -> tuple[bool, store.EntityRow | None]:
-        """(known, entity); known with entity None means the name was dropped."""
-        if name in by_name:
-            return True, by_name[name]
-        if name in by_alias:
-            return True, by_alias[name]
+    def candidates(name: str) -> dict[str, store.EntityRow | None]:
+        """Extracted type -> entry for a relation name: entity names first, then aliases."""
+        found = {t: e for (t, k), e in by_name.items() if k == name}
+        return found or {t: e for (t, k), e in by_alias.items() if k == name}
+
+    def pick(
+        found: Mapping[str, store.EntityRow | None], types: frozenset[str]
+    ) -> tuple[bool, store.EntityRow | None]:
+        """(unique, entry): the one entry, else the one whose type fits ``types``."""
+        for pool in (found, {t: e for t, e in found.items() if t in types}):
+            distinct = {e.id if e is not None else None: e for e in pool.values()}
+            if len(distinct) == 1:
+                return True, next(iter(distinct.values()))
         return False, None
 
     prior_accepted = await store.replace_machine_edges(conn, source_id)
@@ -198,8 +217,15 @@ async def resolve(
     endpoints: dict[UUID, store.EntityRow] = {}
     for rel in merged.relations:
         subject, obj = norm(rel.subject), norm(rel.object)
-        (s_known, src), (o_known, dst) = lookup(subject), lookup(obj)
-        if (s_known and src is None) or (o_known and dst is None):
+        s_found, o_found = candidates(subject), candidates(obj)
+        if rel.relation == "part_of":  # a parent shares its child's type
+            s_types, o_types = frozenset(o_found), frozenset(s_found)
+        else:
+            s_types, o_types = _ENDPOINT_TYPES.get(rel.relation, (frozenset(), frozenset()))
+        (s_unique, src), (o_unique, dst) = pick(s_found, s_types), pick(o_found, o_types)
+        if (s_found and not s_unique) or (o_found and not o_unique):
+            continue  # a name shared by entities of different types, and no type fits
+        if (s_found and src is None) or (o_found and dst is None):
             dropped += 1  # a relation naming a rejected entity is dropped with it
             continue
         if rel.subject == NOTE or src is None or dst is None or src.id == dst.id:

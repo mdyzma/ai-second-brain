@@ -879,3 +879,46 @@ def test_retype_survives_reextraction_with_the_old_type(
 
     scenario(db_url, vault(tmp_path), fake, body)
 
+
+def test_relation_endpoints_are_matched_by_type(db_url: str, tmp_path: Path) -> None:
+    async def go() -> None:
+        async with ingest_harness(db_url, vault(tmp_path), None) as h:
+            await h.rows("TRUNCATE entities CASCADE")
+            await observe(h.ctx, PATH)
+            await h.drain()
+            [row] = await h.rows(
+                "SELECT id, current_revision_id AS r FROM sources WHERE external_ref = %s", PATH
+            )
+            # One output (e.g. merged windows) names "Proxmox" as a tool and as a project.
+            output = reply(
+                [
+                    ent("Proxmox", "tool"),
+                    ent("Proxmox", "project"),
+                    ent("ZFS", "tool"),
+                    ent("NAS", "device"),
+                ],
+                [
+                    rel("Proxmox", "uses", "ZFS"),  # the subject of uses is a project
+                    rel("ZFS", "part_of", "Proxmox"),  # a parent shares the child's type
+                    rel("Proxmox", "mentions", "NAS"),  # no type fits: skipped
+                    rel("ZFS", "runs_on", "NAS"),  # unambiguous names
+                ],
+            )
+            ctx = GraphContext(h.pool, h.ctx.settings, None, None, CommitCheckingQueue(h.pool))
+            async with h.pool.connection() as conn:
+                await resolve(conn, ctx, source_id=row["id"], revision_id=row["r"], output=output)
+            types = {
+                r["id"]: r["t"] for r in await h.rows("SELECT id, type::text AS t FROM entities")
+            }
+            got = {
+                (r["src"], types[r["src_id"]], r["relation"], r["dst"], types[r["dst_entity_id"]])
+                for r in await edges(h)
+                if r["src_type"] == "entity"
+            }
+            assert got == {
+                ("Proxmox", "project", "uses", "ZFS", "tool"),
+                ("ZFS", "tool", "part_of", "Proxmox", "tool"),
+                ("ZFS", "tool", "runs_on", "NAS", "device"),
+            }
+
+    run_async(go())
