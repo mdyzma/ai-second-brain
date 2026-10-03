@@ -59,10 +59,22 @@ def _evidence(window: Window, out: ExtractionOutput, evidence: dict[str, str]) -
         if chunk_id is None:
             continue
         subject, obj = norm(rel.subject), norm(rel.object)
-        evidence.setdefault(f"{subject}|{rel.relation}|{obj}", str(chunk_id))
+        evidence.setdefault(json.dumps([subject, rel.relation, obj]), str(chunk_id))
         for name in (subject, obj):
             if name in types:
-                evidence.setdefault(f"entity|{types[name]}|{name}", str(chunk_id))
+                evidence.setdefault(json.dumps(["entity", types[name], name]), str(chunk_id))
+
+
+async def _still_current(conn: AsyncConnection, revision_id: UUID) -> bool:
+    """Lock the source row and re-check, so a stale result is never written."""
+    cur = await conn.execute(
+        "SELECT s.current_revision_id = r.id AS current, s.deleted_at IS NULL AS live"
+        " FROM source_revisions r JOIN sources s ON s.id = r.source_id"
+        " WHERE r.id = %s FOR UPDATE OF s",
+        (revision_id,),
+    )
+    row = await cur.fetchone()
+    return row is not None and bool(row[0]) and bool(row[1])
 
 
 async def _finish(
@@ -81,6 +93,9 @@ async def extract_revision(ctx: GraphContext, revision_id: UUID) -> Outcome:
 
     async def fail(code: str) -> Outcome:
         async with ctx.pool.connection() as conn:
+            if not await _still_current(conn, revision_id):
+                logger.info("extract revision=%s outcome=skipped code=stale", revision_id)
+                return "skipped"
             await store.record_extraction(
                 conn, revision_id, EXTRACTOR_VERSION, status="failed", model=model, error=code
             )
@@ -117,6 +132,9 @@ async def extract_revision(ctx: GraphContext, revision_id: UUID) -> Outcome:
     merged = merge_outputs(outputs)
     output: dict[str, Any] = merged.model_dump() | {"evidence": evidence}
     async with ctx.pool.connection() as conn:
+        if not await _still_current(conn, revision_id):
+            logger.info("extract revision=%s outcome=skipped code=stale", revision_id)
+            return "skipped"
         await store.record_extraction(
             conn,
             revision_id,

@@ -1,5 +1,7 @@
 """Versioned extraction prompt. Bump EXTRACTOR_VERSION when the prompt, schema or merge changes."""
 
+import re
+
 from ai_second_brain.graph.windows import Window
 
 EXTRACTOR_VERSION = "4a.1"
@@ -27,7 +29,15 @@ project), "part_of" (child→parent). If a chunk label like [c2] supports a rela
 summary: one sentence, at most 200 characters, in the note's language.
 confidence: 0..1, how sure you are."""
 
+_TAG = re.compile(r"<(/?note>)", re.IGNORECASE)
+
+
+def _inert(text: str) -> str:
+    """The note is data: it must not be able to close or reopen the <note> block."""
+    return _TAG.sub("‹\\1", text)
+
 
 def build_user_message(*, title: str, path: str, window: Window, index: int, total: int) -> str:
     part = f" (part {index} of {total})" if total > 1 else ""
-    return f"Note title: {title}\nNote path: {path}{part}\n\n<note>\n{window.text}\n</note>"
+    head = f"Note title: {_inert(title)}\nNote path: {_inert(path)}{part}"
+    return f"<note>\n{head}\n\n{_inert(window.text)}\n</note>"

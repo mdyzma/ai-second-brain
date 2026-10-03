@@ -21,9 +21,11 @@ class ExtractClient:
         model: str,
         timeouts: ChatTimeouts,
         num_ctx: int,
+        read_timeout: float = 600.0,
     ) -> None:
         self._client, self._endpoints = client, list(endpoints)
         self._model, self._timeouts, self._num_ctx = local_model_name(model), timeouts, num_ctx
+        self._read_timeout = read_timeout
 
     @property
     def model(self) -> str:
@@ -41,7 +43,14 @@ class ExtractClient:
         for endpoint in self._endpoints:
             try:
                 response = await self._client.post(
-                    f"{endpoint.url}/api/chat", json=body, timeout=self._timeouts.http()
+                    f"{endpoint.url}/api/chat",
+                    json=body,
+                    timeout=httpx2.Timeout(
+                        connect=self._timeouts.connect,
+                        read=self._read_timeout,  # the whole non-streamed call
+                        write=self._timeouts.connect,
+                        pool=self._timeouts.connect,
+                    ),
                 )
             except (httpx2.TimeoutException, httpx2.TransportError):
                 continue
