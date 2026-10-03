@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ReviewScreen, type ReviewScreenProps } from "./ReviewScreen";
@@ -52,6 +52,10 @@ const link = (over: Partial<ReviewLink> = {}): ReviewLink => ({
 const ok = { ok: true } as const;
 
 function setup(over: Partial<ReviewScreenProps> = {}) {
+  return setupWith(over).props;
+}
+
+function setupWith(over: Partial<ReviewScreenProps> = {}) {
   const props: ReviewScreenProps = {
     status: STATUS,
     entities: [E1, E2],
@@ -72,8 +76,8 @@ function setup(over: Partial<ReviewScreenProps> = {}) {
     ]),
     ...over,
   };
-  render(<ReviewScreen {...props} />);
-  return props;
+  const view = render(<ReviewScreen {...props} />);
+  return { props, view };
 }
 
 afterEach(cleanup);
@@ -192,7 +196,7 @@ describe("entities tab", () => {
       await within(card).findByText("Another tool already has this name — merge instead?"),
     ).toBeInTheDocument();
     await userEvent.click(within(card).getByRole("button", { name: "Merge" }));
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Merge Proxmox into…");
   });
 
   it("retypes from the select", async () => {
@@ -213,7 +217,7 @@ describe("entities tab", () => {
       }),
     );
     const dialog = await screen.findByRole("dialog");
-    await waitFor(() => expect(props.onSearch).toHaveBeenCalledWith(undefined, ""));
+    await waitFor(() => expect(props.onSearch).toHaveBeenCalledWith("tool", ""));
     await userEvent.click(await within(dialog).findByRole("button", { name: /Proxmox VE/ }));
     expect(onDecide).toHaveBeenCalledWith("e1", { action: "parent", parent_id: "t1" });
     expect(await within(dialog).findByText("That would make a loop.")).toBeInTheDocument();
@@ -230,6 +234,75 @@ describe("entities tab", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "The database is unavailable. Try again in a moment.",
     );
+  });
+});
+
+describe("entities tab: fixes", () => {
+  it("focuses the empty state after the last card is decided", async () => {
+    const { props, view } = setupWith({ entities: [E1] });
+    screen.getByRole("article", { name: "Proxmox" }).focus();
+    await userEvent.keyboard("a");
+    expect(props.onDecide).toHaveBeenCalledWith("e1", { action: "accept" });
+    view.rerender(<ReviewScreen {...props} entities={[]} />);
+    await waitFor(() => expect(screen.getByText("Nothing to review.")).toHaveFocus());
+  });
+
+  it("announces decisions politely", async () => {
+    setup();
+    screen.getByRole("article", { name: "Proxmox" }).focus();
+    await userEvent.keyboard("a");
+    await waitFor(() => expect(screen.getByText("Accepted Proxmox.")).toBeInTheDocument());
+    expect(screen.getByText("Accepted Proxmox.")).toHaveAttribute("aria-live", "polite");
+  });
+
+  it("shows busy copy for a 409 busy", async () => {
+    setup({ onDecide: vi.fn(async () => ({ ok: false, status: 409, detail: "busy" }) as const) });
+    screen.getByRole("article", { name: "Proxmox" }).focus();
+    await userEvent.keyboard("a");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Someone else is changing the graph right now. Try again.",
+    );
+  });
+
+  it("blocks a rapid second action and says so", async () => {
+    let release: (r: { ok: true }) => void = () => {};
+    const onDecide = vi.fn(() => new Promise<{ ok: true }>((res) => (release = res)));
+    setup({ onDecide });
+    screen.getByRole("article", { name: "Proxmox" }).focus();
+    await userEvent.keyboard("a");
+    await userEvent.keyboard("r");
+    expect(onDecide).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Still saving the last change. Try again in a moment.",
+    );
+    release({ ok: true });
+  });
+
+  it("ignores shortcuts while a dialog is open", async () => {
+    const props = setup();
+    await userEvent.click(
+      within(screen.getByRole("article", { name: "Proxmox" })).getByRole("button", {
+        name: "Merge into…",
+      }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.keyDown(dialog, { key: "a" });
+    fireEvent.keyDown(dialog, { key: "r" });
+    expect(props.onDecide).not.toHaveBeenCalled();
+  });
+
+  it("shows a search error and ends loading when the picker search rejects", async () => {
+    setup({ onSearch: vi.fn(async () => Promise.reject(new Error("boom"))) });
+    await userEvent.click(
+      within(screen.getByRole("article", { name: "Proxmox" })).getByRole("button", {
+        name: "Merge into…",
+      }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      await within(dialog).findByText("Couldn't search entities. Try again."),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText("Loading…")).not.toBeInTheDocument();
   });
 });
 
@@ -260,6 +333,10 @@ describe("links tab", () => {
       { id: "l1", decision: "accept" },
       { id: "l2", decision: "accept" },
     ]);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Select Proxmox runs on NAS")).not.toBeChecked(),
+    );
+    expect(screen.getByLabelText("Select Proxmox runs on Backup")).not.toBeChecked();
   });
 
   it("rejects a single row", async () => {

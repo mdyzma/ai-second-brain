@@ -37,6 +37,7 @@ export function entityErrorCopy(status: number, detail?: string, type: string = 
   if (status === 401) return SESSION_ENDED;
   if (status === 503) return DB_DOWN;
   if (status === 0) return UNREACHABLE;
+  if (status === -1) return "Still saving the last change. Try again in a moment.";
   if (status === 404) return "That entity is no longer in the review queue.";
   if (status === 409) {
     if (detail === "name_taken")

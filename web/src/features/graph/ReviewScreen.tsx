@@ -216,10 +216,12 @@ function Feedback({
   loading,
   error,
   empty,
+  emptyRef,
 }: {
   loading: boolean;
   error: number | null;
   empty: boolean;
+  emptyRef?: React.RefObject<HTMLParagraphElement | null>;
 }) {
   if (error !== null)
     return (
@@ -228,7 +230,12 @@ function Feedback({
       </p>
     );
   if (loading) return <p className="text-sm text-fg-muted">Loading…</p>;
-  if (empty) return <p className="text-sm text-fg-muted">Nothing to review.</p>;
+  if (empty)
+    return (
+      <p ref={emptyRef} tabIndex={-1} className="text-sm text-fg-muted">
+        Nothing to review.
+      </p>
+    );
   return null;
 }
 
@@ -238,6 +245,16 @@ function EntitiesPanel(props: ReviewScreenProps) {
   const busy = useRef(new Set<string>());
   const [errors, setErrors] = useState<Record<string, CardError | null>>({});
   const [picker, setPicker] = useState<PickerState | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const emptyRef = useRef<HTMLParagraphElement>(null);
+  const wantEmptyFocus = useRef(false);
+
+  useEffect(() => {
+    if (wantEmptyFocus.current && entities.length === 0 && emptyRef.current) {
+      wantEmptyFocus.current = false;
+      emptyRef.current.focus();
+    }
+  }, [entities.length]);
 
   const cards = () =>
     Array.from(listRef.current?.querySelectorAll<HTMLElement>("article[data-entity-id]") ?? []);
@@ -248,8 +265,17 @@ function EntitiesPanel(props: ReviewScreenProps) {
         ?.focus();
   };
 
-  async function act(entity: ReviewEntity, body: EntityDecision, quiet = false): Promise<Result> {
-    if (busy.current.has(entity.id)) return { ok: false, status: -1 };
+  async function act(
+    entity: ReviewEntity,
+    body: EntityDecision,
+    quiet = false,
+    targetName?: string,
+  ): Promise<Result> {
+    if (busy.current.has(entity.id)) {
+      if (!quiet)
+        setErrors((e) => ({ ...e, [entity.id]: { text: entityErrorCopy(-1), nameTaken: false } }));
+      return { ok: false, status: -1 };
+    }
     busy.current.add(entity.id);
     setErrors((e) => ({ ...e, [entity.id]: null }));
     const index = entities.findIndex((x) => x.id === entity.id);
@@ -257,7 +283,15 @@ function EntitiesPanel(props: ReviewScreenProps) {
     const result = await onDecide(entity.id, body);
     busy.current.delete(entity.id);
     if (result.ok) {
-      if (["accept", "reject", "merge"].includes(body.action)) focusId(neighbour);
+      setErrors((e) => ({ ...e, [entity.id]: null }));
+      if (["accept", "reject", "merge"].includes(body.action)) {
+        if (body.action === "accept") setAnnouncement(`Accepted ${entity.name}.`);
+        else if (body.action === "reject") setAnnouncement(`Rejected ${entity.name}.`);
+        else setAnnouncement(`Merged ${entity.name} into ${targetName ?? "another entity"}.`);
+        if (neighbour) focusId(neighbour);
+        else if (emptyRef.current) emptyRef.current.focus();
+        else wantEmptyFocus.current = true;
+      }
     } else if (!quiet) {
       setErrors((e) => ({
         ...e,
@@ -301,7 +335,11 @@ function EntitiesPanel(props: ReviewScreenProps) {
         loading={props.entitiesLoading}
         error={props.entitiesError}
         empty={!props.entitiesLoading && props.entitiesError === null && entities.length === 0}
+        emptyRef={emptyRef}
       />
+      <p aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
       {/* biome-ignore lint/a11y/noStaticElementInteractions: shortcuts are handled for the whole list */}
       <div ref={listRef} onKeyDown={onKeyDown} className="space-y-4">
         {entities.map((entity, i) => (
@@ -310,7 +348,7 @@ function EntitiesPanel(props: ReviewScreenProps) {
             entity={entity}
             first={i === 0}
             error={errors[entity.id] ?? null}
-            act={act}
+            act={(e, b) => act(e, b, false, e.suggestion?.name)}
             openPicker={(mode) => setPicker({ entity, mode })}
           />
         ))}
@@ -330,7 +368,7 @@ function EntitiesPanel(props: ReviewScreenProps) {
                 picker.mode === "merge"
                   ? { action: "merge", into_id: target.id }
                   : { action: "parent", parent_id: target.id };
-              const result = await act(picker.entity, body, true);
+              const result = await act(picker.entity, body, true, target.name);
               if (result.ok) setPicker(null);
               return result.ok
                 ? null
@@ -487,14 +525,21 @@ function PickerContent({
   const [q, setQ] = useState("");
   const [results, setResults] = useState<EntitySummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     const t = setTimeout(
       () => {
-        void onSearch(mode === "merge" ? entity.type : undefined, q).then((items) => {
-          if (!cancelled) setResults(items.filter((i) => i.id !== entity.id));
-        });
+        onSearch(entity.type, q)
+          .then((items) => {
+            if (cancelled) return;
+            setFailed(false);
+            setResults(items.filter((i) => i.id !== entity.id));
+          })
+          .catch(() => {
+            if (!cancelled) setFailed(true);
+          });
       },
       q ? 250 : 0,
     );
@@ -502,7 +547,7 @@ function PickerContent({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [q, mode, entity.id, entity.type, onSearch]);
+  }, [q, entity.id, entity.type, onSearch]);
 
   const title = mode === "merge" ? `Merge ${entity.name} into…` : `Set parent of ${entity.name}…`;
   return (
@@ -520,13 +565,13 @@ function PickerContent({
         onChange={(e) => setQ(e.target.value)}
         className="mt-4"
       />
-      {error ? (
+      {error || failed ? (
         <p role="alert" className="mt-2 text-sm text-danger-fg">
-          {error}
+          {error ?? "Couldn't search entities. Try again."}
         </p>
       ) : null}
       <ul className="mt-3 max-h-64 space-y-1 overflow-y-auto">
-        {results === null ? <li className="text-sm text-fg-muted">Loading…</li> : null}
+        {results === null && !failed ? <li className="text-sm text-fg-muted">Loading…</li> : null}
         {results?.length === 0 ? (
           <li className="text-sm text-fg-muted">No matching entities.</li>
         ) : null}
