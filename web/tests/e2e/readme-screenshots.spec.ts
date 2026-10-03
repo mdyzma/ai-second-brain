@@ -125,9 +125,19 @@ test("entity page", async ({ page }) => {
       await expect(card).toBeHidden();
     }
   }
+  // Accept the "Proxmox runs on NAS" link too (as graph.spec.ts does), so the page shows the
+  // related entities; an earlier run may have accepted it already.
+  await page.getByRole("tab", { name: /Links/ }).click();
+  const link = page.getByRole("button", { name: "Accept: Proxmox runs on NAS" });
+  await link.waitFor({ timeout: 15_000 }).catch(() => undefined);
+  if (await link.isVisible().catch(() => false)) {
+    await link.click();
+    await expect(link).toBeHidden();
+  }
   await page.goto("/entities?type=device");
   await page.getByRole("link", { name: /^NAS/ }).click();
   await expect(page.getByRole("heading", { name: "NAS", level: 1 })).toBeVisible();
   await expect(page.getByText("Projects/NAS.md")).toBeVisible();
+  await expect(page.getByText(/Runs:\s*Proxmox/)).toBeVisible();
   await page.screenshot({ path: "../docs/images/readme/entity.jpg", type: "jpeg", quality: 85 });
 });
