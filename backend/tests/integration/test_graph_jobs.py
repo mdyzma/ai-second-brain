@@ -244,3 +244,39 @@ def test_unreachable_endpoint_is_retried_before_failing(db_url: str, tmp_path: P
         assert {j["status"] for j in await _extract_jobs(h)} == {"todo"}  # rescheduled
 
     scenario(db_url, tmp_path, body, extract_url="http://127.0.0.1:1")
+
+
+def test_final_attempt_deadlock_records_db_conflict(
+    db_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from psycopg.errors import DeadlockDetected
+
+    from ai_second_brain.graph import extract
+
+    async def deadlock(ctx: Any, revision_id: UUID) -> str:
+        raise DeadlockDetected
+
+    monkeypatch.setattr(extract, "extract_revision", deadlock)
+    monkeypatch.setattr(jobs, "EXTRACT_RETRY_SECONDS", ())
+
+    async def body(h: Harness) -> None:
+        assert await _queue(h, "new") == 3
+        await h.drain()
+        rows = await h.rows("SELECT status, error FROM extractions")
+        assert [(r["status"], r["error"]) for r in rows] == [("failed", "extract_db_conflict")] * 3
+
+    scenario(db_url, tmp_path, body, extract_url="http://127.0.0.1:1")
+
+
+def test_mark_failed_never_overwrites_ok(db_url: str, tmp_path: Path) -> None:
+    from ai_second_brain.graph.extract import mark_failed
+
+    async def body(h: Harness) -> None:
+        assert h.graph is not None
+        a = await _revision(h, "a.md")
+        await _mark(h, a, "ok")
+        assert await mark_failed(h.graph, a, "extract_unreachable") == "skipped"
+        [row] = await h.rows("SELECT status, error FROM extractions")
+        assert (row["status"], row["error"]) == ("ok", None)
+
+    scenario(db_url, tmp_path, body, extract_url="http://127.0.0.1:1")

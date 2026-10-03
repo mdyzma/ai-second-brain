@@ -34,13 +34,25 @@ def test_extract_prints_queued_count(
     assert scopes == ["new", "failed"]
 
 
+def test_extract_singular(
+    monkeypatch: pytest.MonkeyPatch, make_settings: Callable[..., Settings]
+) -> None:
+    async def fake(settings: Settings, scope: Literal["new", "failed"]) -> int:
+        return 1
+
+    monkeypatch.setattr(main, "get_settings", lambda: with_model(make_settings))
+    monkeypatch.setattr(main, "_graph_extract", fake)
+    assert "Queued 1 note for extraction." in runner.invoke(app, ["graph", "extract"]).output
+
+
 def test_extract_without_model_exits_1(
     monkeypatch: pytest.MonkeyPatch, make_settings: Callable[..., Settings]
 ) -> None:
     monkeypatch.setattr(main, "get_settings", lambda: make_settings())
     result = runner.invoke(app, ["graph", "extract"])
     assert result.exit_code == 1
-    assert "No local chat model is configured for extraction (SB_EXTRACT_MODEL)." in result.output
+    message = "No local chat model is configured for extraction (SB_EXTRACT_MODEL)."
+    assert message in result.stderr and message not in result.stdout
 
 
 def test_status_prints_aligned_lines(

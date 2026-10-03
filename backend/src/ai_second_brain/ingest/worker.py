@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 
 import httpx2
 import psycopg
+from procrastinate import App
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from ai_second_brain.chat.providers.base import ChatTimeouts
@@ -178,6 +179,31 @@ def build_graph_context(ctx: IngestContext, http_client: httpx2.AsyncClient) -> 
     return GraphContext(ctx.pool, settings, client, QueryEmbedder(ctx.embedder), ctx.queue)
 
 
+def start_job_loops(
+    app: App, ctx: IngestContext, graph_ctx: GraphContext, stop: asyncio.Event
+) -> list[asyncio.Task[None]]:
+    """Two supervised job loops. Extraction (minutes-long model calls) gets its own loop with
+    one slot, so a backlog of it can never take the slots that keep edits searchable in seconds."""
+    context = {"ingest": ctx, "graph": graph_ctx}
+
+    def loop(queues: list[str], concurrency: int) -> Callable[[], Awaitable[None]]:
+        def run_jobs() -> Awaitable[None]:
+            return app.run_worker_async(
+                queues=queues,
+                concurrency=concurrency,
+                install_signal_handlers=False,
+                shutdown_graceful_timeout=30,
+                additional_context=context,
+            )
+
+        return run_jobs
+
+    return [
+        asyncio.create_task(_supervise(loop([INGEST_QUEUE, EMBED_QUEUE], 2), stop)),
+        asyncio.create_task(_supervise(loop([EXTRACT_QUEUE], 1), stop)),
+    ]
+
+
 async def run_worker(settings: Settings, *, stop_event: asyncio.Event | None = None) -> int:
     """Returns 1 only when SB_EMBED_MODEL doesn't match the default space; 0 on stop."""
     stop = stop_event or asyncio.Event()
@@ -213,18 +239,10 @@ async def run_worker(settings: Settings, *, stop_event: asyncio.Event | None = N
 
             graph_ctx = build_graph_context(ctx, client)
 
-            def run_jobs() -> Awaitable[None]:
-                return app.run_worker_async(
-                    queues=[INGEST_QUEUE, EMBED_QUEUE, EXTRACT_QUEUE],
-                    concurrency=2,
-                    install_signal_handlers=False,
-                    shutdown_graceful_timeout=30,
-                    additional_context={"ingest": ctx, "graph": graph_ctx},
-                )
-
             # The watcher and the reconcile timer guard their own errors and keep running
-            # while the job worker is restarted.
-            tasks = [asyncio.create_task(_supervise(run_jobs, stop))]
+            # while the job workers are restarted.
+            job_tasks = start_job_loops(app, ctx, graph_ctx, stop)
+            tasks = list(job_tasks)
             if vault is None:
                 await _guarded_reconcile(ctx, "startup", reconcile)  # records 'disabled'
             else:
@@ -236,9 +254,9 @@ async def run_worker(settings: Settings, *, stop_event: asyncio.Event | None = N
                     )
                 )
             await stop.wait()
-            for task in tasks[1:]:
+            for task in tasks[len(job_tasks) :]:
                 task.cancel()
-            for task in tasks:  # the supervisor shuts the job worker down gracefully
+            for task in tasks:  # the supervisors shut the job workers down gracefully
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await task
         return 0

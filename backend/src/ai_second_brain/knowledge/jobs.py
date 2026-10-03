@@ -130,6 +130,8 @@ async def graph_extract_revision_task(context: JobContext, revision_id: str) -> 
         unreachable = isinstance(error, ExtractUnreachable)
         code = "extract_unreachable" if unreachable else "extract_db_conflict"
         await mark_failed(ctx, UUID(revision_id), code)
+    # Any other exception propagates and fails the job without an extractions row: the revision
+    # stays pending, so the next `graph extract` queues it again.
 
 
 @blueprint.task(

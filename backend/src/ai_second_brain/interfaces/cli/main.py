@@ -589,7 +589,7 @@ def graph_extract(
     """Queue knowledge-graph extraction (the worker runs the jobs)."""
     settings = _load_settings()
     if settings.extract_model_name is None:
-        typer.echo("No local chat model is configured for extraction (SB_EXTRACT_MODEL).")
+        typer.echo("No local chat model is configured for extraction (SB_EXTRACT_MODEL).", err=True)
         raise typer.Exit(code=1)
     logging.config.dictConfig(build_log_config())
     try:
@@ -597,9 +597,9 @@ def graph_extract(
             _graph_extract(settings, "failed" if failed else "new"), loop_factory=new_event_loop
         )
     except Exception as error:
-        typer.echo(f"Queueing failed: {type(error).__name__}")
+        typer.echo(f"Queueing failed: {type(error).__name__}", err=True)
         raise typer.Exit(code=1) from error
-    typer.echo(f"Queued {queued} notes for extraction.")
+    typer.echo(f"Queued {queued} {'note' if queued == 1 else 'notes'} for extraction.")
 
 
 async def _graph_status(settings: Settings) -> list[tuple[str, Any]]:
@@ -623,7 +623,7 @@ def graph_status_command() -> None:
     try:
         rows = asyncio.run(_graph_status(settings), loop_factory=new_event_loop)
     except Exception as error:
-        typer.echo(f"Status unavailable: {type(error).__name__}")
+        typer.echo(f"Status unavailable: {type(error).__name__}", err=True)
         raise typer.Exit(code=1) from error
     width = max(len(key) for key, _ in rows)
     for key, value in rows:
