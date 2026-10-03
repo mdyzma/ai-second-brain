@@ -66,3 +66,11 @@ def test_merge_unions_and_keeps_best() -> None:
     assert e.confidence == 0.9 and set(e.aliases) == {"nas01", "box"}
     [r] = m.relations
     assert r.confidence == 0.8 and r.chunk == "c1"
+
+
+def test_long_heading_never_exceeds_window_and_body_is_exact() -> None:
+    body = "ab " * 300
+    cid = uuid4()
+    ws = split_windows([(cid, "H" * 50, body)], max_chars=200)
+    assert len(ws) > 1 and all(len(w.text) <= 200 for w in ws)
+    assert "".join(w.text.split("\n", 1)[1] for w in ws) == body

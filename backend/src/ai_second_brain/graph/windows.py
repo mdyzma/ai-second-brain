@@ -23,7 +23,8 @@ class Window:
     labels: dict[str, UUID] = field(default_factory=dict)  # "c1" -> chunk id
 
 
-def _head(label: str, heading: str) -> str:
+def _head(label: str, heading: str, max_chars: int) -> str:
+    heading = heading[: max(max_chars // 4, 0)]  # keep most of the window for the body
     return f"[{label}] {heading}\n" if heading else f"[{label}]\n"
 
 
@@ -40,16 +41,16 @@ def split_windows(chunks: Sequence[tuple[UUID, str, str]], *, max_chars: int) ->
     def flush() -> None:
         nonlocal text, labels
         if text:
-            windows.append(Window(text.rstrip(), labels))
+            windows.append(Window(text[: -len(_TAIL)], labels))
         text, labels = "", {}
 
     for chunk_id, heading, content in chunks:
         rest = content
         while True:
-            head = _head(f"c{len(labels) + 1}", heading)
+            head = _head(f"c{len(labels) + 1}", heading, max_chars)
             if text and len(text) + len(head) + len(rest) + len(_TAIL) > max_chars:
                 flush()
-                head = _head("c1", heading)
+                head = _head("c1", heading, max_chars)
             room = max(max_chars - len(text) - len(head) - len(_TAIL), 1)
             piece, rest = rest[:room], rest[room:]
             labels[f"c{len(labels) + 1}"] = chunk_id

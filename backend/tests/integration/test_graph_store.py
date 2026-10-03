@@ -159,3 +159,25 @@ def test_revision_chunks_and_info(db_url: str, tmp_path: Path) -> None:
         assert info is not None and not info.is_current
 
     run(db_url, tmp_path, body)
+
+
+def test_create_entity_is_race_safe_and_skips_other_entity_names(
+    db_url: str, tmp_path: Path
+) -> None:
+    async def body(h: Harness, conn: AsyncConnection) -> None:
+        async with h.pool.connection() as other:
+            await other.set_autocommit(True)
+            a = await store.create_entity(conn, "tool", "Postgres", ["pg"])
+            b = await store.create_entity(other, "tool", " postgres ", ["other"])
+        assert a.id == b.id
+        aliases = await h.rows("SELECT alias FROM entity_aliases")
+        assert [x["alias"] for x in aliases] == ["pg"]  # existing row: no new aliases
+        await store.create_entity(conn, "tool", "Redis", ["postgres", "cache"])
+        redis = await store.find_by_name(conn, "tool", "redis")
+        assert redis is not None
+        hit = await store.find_by_name(conn, "tool", "postgres")
+        assert hit is not None and hit[1] == "exact" and hit[0].id == a.id
+        aliases = await h.rows("SELECT alias FROM entity_aliases WHERE entity_id = %s", redis[0].id)
+        assert [x["alias"] for x in aliases] == ["cache"]
+
+    run(db_url, tmp_path, body)

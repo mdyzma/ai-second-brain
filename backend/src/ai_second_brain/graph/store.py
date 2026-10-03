@@ -92,15 +92,20 @@ async def create_entity(
 ) -> EntityRow:
     norm_name = norm(name)
     async with conn.cursor(row_factory=dict_row) as cur:
+        # Race-safe: a concurrent creator of the same (type, norm_name) gets the existing row.
         await cur.execute(
             "INSERT INTO entities (type, name, norm_name) VALUES (%s::entity_type, %s, %s)"
-            " RETURNING id, type::text AS type, name, status::text AS status",
+            " ON CONFLICT (type, norm_name) DO UPDATE SET name = entities.name"
+            " RETURNING id, type::text AS type, name, status::text AS status,"
+            " (xmax = 0) AS inserted",
             (type, name, norm_name),
         )
         row = await cur.fetchone()
         if row is None:
             raise RuntimeError("entity insert returned no row")
         entity = _entity(row)
+        if not row["inserted"]:
+            return entity
         seen = {norm_name}
         for alias in aliases:
             norm_alias = norm(alias)
@@ -109,8 +114,10 @@ async def create_entity(
             seen.add(norm_alias)
             await cur.execute(
                 "INSERT INTO entity_aliases (entity_id, type, alias, norm_alias)"
-                " VALUES (%s, %s::entity_type, %s, %s) ON CONFLICT (type, norm_alias) DO NOTHING",
-                (entity.id, type, alias, norm_alias),
+                " SELECT %s, %s::entity_type, %s, %s WHERE NOT EXISTS"
+                " (SELECT 1 FROM entities WHERE type = %s::entity_type AND norm_name = %s)"
+                " ON CONFLICT (type, norm_alias) DO NOTHING",
+                (entity.id, type, alias, norm_alias, type, norm_alias),
             )
     return entity
 
