@@ -1,4 +1,10 @@
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import {
+  infiniteQueryOptions,
+  type QueryClient,
+  queryOptions,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { api } from "@/api/client";
 import { detailOf, HttpError } from "@/features/sources/api";
 import type {
@@ -16,9 +22,47 @@ export const graphKeys = {
   links: ["graph", "review-links"] as const,
 };
 
+export const GRAPH_POLL_FAST_MS = 5_000;
+export const GRAPH_POLL_SLOW_MS = 60_000;
+
+type CountsInput = { revisions: { pending: number; extracted: number; failed: number } };
+
+/** Fast while notes wait for extraction, slow when idle. */
+export function graphPollInterval(data: CountsInput | undefined): number {
+  return (data?.revisions.pending ?? 0) > 0 ? GRAPH_POLL_FAST_MS : GRAPH_POLL_SLOW_MS;
+}
+
+export function countsKey(data: CountsInput): string {
+  const r = data.revisions;
+  return `${r.pending}:${r.extracted}:${r.failed}`;
+}
+
+/** Refetch the review lists whenever extraction progress changes (not on first load). */
+export function refreshOnProgress(
+  queryClient: QueryClient,
+  previous: string | null,
+  data: CountsInput | undefined,
+): string | null {
+  if (!data) return previous;
+  const key = countsKey(data);
+  if (previous !== null && previous !== key) {
+    void queryClient.invalidateQueries({ queryKey: graphKeys.entities });
+    void queryClient.invalidateQueries({ queryKey: graphKeys.links });
+  }
+  return key;
+}
+
+export function useReviewAutoRefresh(data: CountsInput | undefined): void {
+  const queryClient = useQueryClient();
+  const last = useRef<string | null>(null);
+  useEffect(() => {
+    last.current = refreshOnProgress(queryClient, last.current, data);
+  }, [queryClient, data]);
+}
+
 export const graphStatusQuery = queryOptions({
   queryKey: graphKeys.status,
-  refetchInterval: 30_000,
+  refetchInterval: (query) => graphPollInterval(query.state.data),
   queryFn: async () => {
     const { data, response } = await api.GET("/api/graph/status");
     if (!data) throw new HttpError(response.status);

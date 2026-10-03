@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("extract, review and browse the graph", async ({ page }) => {
+  // Extraction runs in the worker and can take a while; the default 30s is too short.
   test.setTimeout(150_000);
   await page.goto("/review");
   await page.getByLabel("Password").fill("e2e-test-password");
@@ -11,12 +12,9 @@ test("extract, review and browse the graph", async ({ page }) => {
   // Extraction runs in the worker; the cards appear once it has finished.
   const nas = page.getByRole("article", { name: "NAS" });
   const proxmox = page.getByRole("article", { name: "Proxmox" });
-  // The queue does not live-refresh, so reload until the worker's results show up.
-  await expect(async () => {
-    await page.reload();
-    await expect(nas).toBeVisible({ timeout: 3_000 });
-    await expect(proxmox).toBeVisible({ timeout: 3_000 });
-  }).toPass({ timeout: 90_000, intervals: [2_000] });
+  // The worker extracts in the background; the Review queue refreshes by itself.
+  await expect(nas).toBeVisible({ timeout: 90_000 });
+  await expect(proxmox).toBeVisible({ timeout: 90_000 });
   await nas.getByRole("button", { name: "Accept" }).click();
   await expect(nas).toBeHidden();
   await proxmox.getByRole("button", { name: "Accept" }).click();

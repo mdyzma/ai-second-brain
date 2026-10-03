@@ -9,6 +9,7 @@ import {
   reviewLinksQuery,
   runExtraction,
   searchEntities,
+  useReviewAutoRefresh,
 } from "@/features/graph/api";
 import { loadErrorCopy } from "@/features/graph/labels";
 import { ReviewScreen } from "@/features/graph/ReviewScreen";
@@ -19,6 +20,7 @@ export const Route = createFileRoute("/_app/review")({ component: ReviewRoute })
 function ReviewRoute() {
   const queryClient = useQueryClient();
   const status = useQuery(graphStatusQuery);
+  useReviewAutoRefresh(status.data);
   const entities = useInfiniteQuery(reviewEntitiesQuery);
   const links = useInfiniteQuery(reviewLinksQuery);
   const refresh = () => queryClient.invalidateQueries({ queryKey: graphKeys.all });
