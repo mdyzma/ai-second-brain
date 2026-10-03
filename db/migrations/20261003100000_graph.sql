@@ -19,7 +19,7 @@ CREATE TABLE entities (
 
 CREATE TABLE entity_aliases (
   entity_id  uuid NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-  type       entity_type NOT NULL,           -- copied from the entity, kept in sync on retype
+  type       entity_type NOT NULL,           -- the type it is matched under; retype keeps the old-type rows
   alias      text NOT NULL,
   norm_alias text NOT NULL,
   PRIMARY KEY (type, norm_alias)

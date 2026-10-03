@@ -199,8 +199,11 @@ async def rename_entity(conn: AsyncConnection, entity_id: UUID, name: str) -> No
 
 
 async def retype_entity(conn: AsyncConnection, entity_id: UUID, type: str) -> None:  # noqa: A002
-    """Change the type and the alias rows' type.
+    """Change the type; the name and aliases are matched under the new type too.
 
+    The alias rows under the old type stay, and the old name is added under the old type,
+    so a later extraction that still gives the old type resolves to this entity (an
+    alias row's type is the type it is matched under, not always the entity's type).
     A clash of the name or any alias with another entity of the new type is name_taken.
     A parent must share its child's type, so the parent link is cleared unless the
     parent already has the new type. Children keep their link: the tree is the
@@ -237,9 +240,29 @@ async def retype_entity(conn: AsyncConnection, entity_id: UUID, type: str) -> No
                     " parent_id = NULL, parent_status = NULL WHERE id = %s",
                     (type, entity_id),
                 )
+            # Under the new type: every alias of the entity, except one equal to its name.
             await conn.execute(
-                "UPDATE entity_aliases SET type = %s::entity_type WHERE entity_id = %s",
-                (type, entity_id),
+                "INSERT INTO entity_aliases (entity_id, type, alias, norm_alias)"
+                " SELECT DISTINCT ON (a.norm_alias) a.entity_id, %(type)s::entity_type,"
+                " a.alias, a.norm_alias FROM entity_aliases a"
+                " WHERE a.entity_id = %(id)s AND a.type <> %(type)s::entity_type"
+                " AND a.norm_alias <> %(name)s AND NOT EXISTS (SELECT 1 FROM entity_aliases b"
+                "  WHERE b.type = %(type)s::entity_type AND b.norm_alias = a.norm_alias"
+                "  AND b.entity_id = %(id)s)"
+                " ORDER BY a.norm_alias",
+                {"type": type, "id": entity_id, "name": row["norm_name"]},
+            )
+            await conn.execute(
+                "DELETE FROM entity_aliases"
+                " WHERE entity_id = %s AND type = %s::entity_type AND norm_alias = %s",
+                (entity_id, type, row["norm_name"]),
+            )
+            # Under the old type: the old name redirects here (its aliases already do).
+            await conn.execute(
+                "INSERT INTO entity_aliases (entity_id, type, alias, norm_alias)"
+                " VALUES (%s, %s::entity_type, %s, %s)"
+                " ON CONFLICT (type, norm_alias) DO NOTHING",
+                (entity_id, row["type"], row["name"], row["norm_name"]),
             )
     except UniqueViolation:
         # A concurrent create_entity took the name or an alias after the _taken check.

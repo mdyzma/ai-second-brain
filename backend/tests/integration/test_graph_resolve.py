@@ -849,3 +849,33 @@ def test_reextraction_keeps_accepted_only_while_the_entity_is_accepted(
 
     scenario(db_url, vault(tmp_path), fake, body)
 
+
+def test_retype_survives_reextraction_with_the_old_type(
+    db_url: str, tmp_path: Path, make_fake_ollama: Callable[[], FakeOllama]
+) -> None:
+    fake = make_fake_ollama()
+    first = reply([ent("NAS", "tool", 0.9, aliases=["nas01"])], [])
+    again = reply([ent("NAS", "tool", 0.9)], [])
+    old_alias = reply([ent("nas01", "tool", 0.9)], [])
+    fake.behaviour.chat_json_by_title = {TITLE: [first, again, old_alias]}
+
+    async def body(h: Harness, ctx: GraphContext, rev: UUID) -> None:
+        assert await extract_revision(ctx, rev) == "ok"
+        nas = (await entities(h))["NAS"]["id"]
+        async with h.pool.connection() as conn:
+            await decide.retype_entity(conn, nas, "device")
+            await decide.accept_entity(conn, nas)
+        for suffix in ("\nedited", "\nedited again"):
+            rev_n = await edit(h, tmp_path, TEXT + suffix)
+            assert await extract_revision(ctx, rev_n) == "ok"
+            ents = await entities(h)
+            assert set(ents) == {"NAS"} and ents["NAS"]["type"] == "device"  # no duplicate
+            [edge] = await edges(h)
+            assert edge["dst_entity_id"] == nas and edge["status"] == "accepted"
+            assert await entity_page_notes(h, nas) == [PATH]
+        async with h.pool.connection() as conn:
+            page = await get_entity(conn, nas, vault_name="vault")
+        assert page is not None and page["aliases"] == ["nas01"]  # the name is not shown
+
+    scenario(db_url, vault(tmp_path), fake, body)
+

@@ -240,9 +240,12 @@ def test_retype_updates_alias_types_and_collision(db_url: str, tmp_path: Path) -
         e = await ent_row(h, nas)
         assert e is not None and e["type"] == "device"
         assert e["parent_id"] is None and e["parent_status"] is None  # parent was a tool
-        assert await aliases(h, nas) == {("device", "nas01")}
-        hit = await store.find_by_name(conn, "device", "nas01")
-        assert hit is not None and hit[0].id == nas
+        # The old-type rows stay (and the old name joins them), so old-type lookups still hit.
+        moved = {("device", "nas01"), ("tool", "nas01"), ("tool", "nas")}
+        assert await aliases(h, nas) == moved
+        for type_, key in (("device", "nas01"), ("tool", "nas01"), ("tool", "nas")):
+            hit = await store.find_by_name(conn, type_, key)
+            assert hit is not None and hit[0].id == nas
 
         # Same-type parent survives a retype.
         await conn.execute(
@@ -265,7 +268,9 @@ def test_retype_updates_alias_types_and_collision(db_url: str, tmp_path: Path) -
         await expect("invalid_action", decide.retype_entity(conn, nas, "planet"), conn)
         e = await ent_row(h, nas)
         assert e is not None and e["type"] == "device"
-        assert await aliases(h, nas) == {("device", "nas01")}
+        assert await aliases(h, nas) == moved
+        # Retyping back drops the alias equal to the name; "project" now redirects here.
+        assert await aliases(h, dev_parent) == {("project", "rack")}
 
     run(db_url, tmp_path, body)
 

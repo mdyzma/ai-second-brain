@@ -190,8 +190,9 @@ async def review_entities(
     async with conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
             "SELECT e.id, e.type::text AS type, e.name, e.created_at,"
-            " ARRAY(SELECT a.alias FROM entity_aliases a WHERE a.entity_id = e.id"
-            "  ORDER BY a.norm_alias) AS aliases,"
+            " ARRAY(SELECT DISTINCT ON (a.norm_alias) a.alias FROM entity_aliases a"
+            "  WHERE a.entity_id = e.id AND a.norm_alias <> e.norm_name"
+            "  ORDER BY a.norm_alias, a.alias) AS aliases,"
             " (SELECT count(DISTINCT g.src_id) FROM edges g JOIN sources s ON s.id = g.src_id"
             "  WHERE g.src_type = 'source' AND g.dst_entity_id = e.id AND g.status <> 'rejected'"
             "  AND s.deleted_at IS NULL) AS mention_count,"
@@ -410,8 +411,9 @@ async def get_entity(
     async with conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
             "SELECT e.id, e.name, e.type::text AS type, e.status::text AS status,"
-            " ARRAY(SELECT a.alias FROM entity_aliases a WHERE a.entity_id = e.id"
-            "  ORDER BY a.norm_alias) AS aliases,"
+            " ARRAY(SELECT DISTINCT ON (a.norm_alias) a.alias FROM entity_aliases a"
+            "  WHERE a.entity_id = e.id AND a.norm_alias <> e.norm_name"
+            "  ORDER BY a.norm_alias, a.alias) AS aliases,"
             " p.id AS p_id, p.name AS p_name, p.type::text AS p_type"
             " FROM entities e LEFT JOIN entities p ON p.id = e.parent_id"
             "  AND e.status = 'accepted' AND e.parent_status = 'accepted'"
