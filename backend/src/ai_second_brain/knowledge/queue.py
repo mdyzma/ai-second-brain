@@ -22,6 +22,7 @@ class JobQueue(Protocol):
         ...
 
     async def reset_stalled(self, seconds_since_heartbeat: int) -> int: ...
+    async def embed_entity(self, entity_id: UUID) -> None: ...
 
 
 class ProcrastinateQueue:
@@ -54,6 +55,14 @@ class ProcrastinateQueue:
     async def reconcile(self, run_id: int) -> bool:
         return await self._defer(
             "ingest:reconcile_vault", "reconcile", INGEST_PRIORITY, run_id=run_id
+        )
+
+    async def embed_entity(self, entity_id: UUID) -> None:
+        await self._defer(
+            "ingest:graph_embed_entity",
+            f"entity-embed:{entity_id}",
+            EMBED_PRIORITY,
+            entity_id=str(entity_id),
         )
 
     async def reset_stalled(self, seconds_since_heartbeat: int) -> int:

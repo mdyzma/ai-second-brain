@@ -205,3 +205,86 @@ async def revision_info(conn: AsyncConnection, revision_id: UUID) -> RevisionInf
         bool(row["is_current"]),
         bool(row["live"]),
     )
+
+
+async def replace_machine_edges(conn: AsyncConnection, source_id: UUID) -> None:
+    """Spec §6.4: drop this note's earlier machine edges; user decisions are kept."""
+    await conn.execute(
+        "DELETE FROM edges WHERE decided_by = 'auto' AND origin LIKE 'llm:%%' AND ("
+        " (src_type = 'source' AND src_id = %(source_id)s)"
+        " OR (src_type = 'entity' AND revision_id IN"
+        " (SELECT id FROM source_revisions WHERE source_id = %(source_id)s)))",
+        {"source_id": source_id},
+    )
+
+
+async def upsert_edge(
+    conn: AsyncConnection,
+    *,
+    src_type: Literal["source", "entity"],
+    src_id: UUID,
+    relation: str,
+    dst_entity_id: UUID,
+    confidence: float,
+    origin: str,
+    status: Literal["accepted", "proposed"],
+    evidence_chunk_id: UUID | None,
+    revision_id: UUID | None,
+) -> None:
+    """Insert as decided_by='auto'; on conflict a user decision keeps its status and decided_by."""
+    await conn.execute(
+        "INSERT INTO edges (src_type, src_id, relation, dst_entity_id, confidence, origin,"
+        " status, decided_by, evidence_chunk_id, revision_id)"
+        " VALUES (%s, %s, %s, %s, %s, %s, %s::graph_status, 'auto', %s, %s)"
+        " ON CONFLICT (src_type, src_id, relation, dst_entity_id) DO UPDATE SET"
+        " confidence = EXCLUDED.confidence,"
+        " evidence_chunk_id = EXCLUDED.evidence_chunk_id,"
+        " revision_id = EXCLUDED.revision_id,"
+        " updated_at = now(),"
+        " status = CASE WHEN edges.decided_by = 'user' THEN edges.status ELSE EXCLUDED.status END",
+        (
+            src_type,
+            src_id,
+            relation,
+            dst_entity_id,
+            confidence,
+            origin,
+            status,
+            evidence_chunk_id,
+            revision_id,
+        ),
+    )
+
+
+async def set_proposed_parent(conn: AsyncConnection, child_id: UUID, parent_id: UUID) -> None:
+    """Propose a parent only when the child has none (and never a direct two-entity cycle)."""
+    await conn.execute(
+        "UPDATE entities SET parent_id = %(parent)s, parent_status = 'proposed'"
+        " WHERE id = %(child)s AND parent_id IS NULL AND id <> %(parent)s"
+        " AND NOT EXISTS (SELECT 1 FROM entities p WHERE p.id = %(parent)s"
+        " AND p.parent_id = %(child)s)",
+        {"child": child_id, "parent": parent_id},
+    )
+
+
+MAX_SUGGESTED_ALIASES = 10
+
+
+async def add_suggested_alias(conn: AsyncConnection, entity_id: UUID, alias: str) -> None:
+    """Append to attributes.suggested_aliases, deduped by norm and capped."""
+    cur = await conn.execute(
+        "SELECT attributes -> 'suggested_aliases' FROM entities WHERE id = %s FOR UPDATE",
+        (entity_id,),
+    )
+    row = await cur.fetchone()
+    if row is None:
+        return
+    current = [a for a in row[0] if isinstance(a, str)] if isinstance(row[0], list) else []
+    key = norm(alias)
+    if not key or len(current) >= MAX_SUGGESTED_ALIASES or key in {norm(a) for a in current}:
+        return
+    await conn.execute(
+        "UPDATE entities SET attributes = jsonb_set(attributes, '{suggested_aliases}', %s)"
+        " WHERE id = %s",
+        (Jsonb([*current, alias]), entity_id),
+    )

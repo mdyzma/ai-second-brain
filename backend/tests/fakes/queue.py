@@ -18,3 +18,12 @@ class RecordingQueue:
     async def reset_stalled(self, seconds_since_heartbeat: int) -> int:
         self.calls.append(("reset_stalled", seconds_since_heartbeat))
         return 0
+
+    async def embed_entity(self, entity_id: UUID) -> None:
+        self.calls.append(("embed_entity", entity_id))
+
+    async def extract_revision(self, revision_id: UUID) -> None:
+        self.calls.append(("extract", revision_id))
+
+
+FakeQueue = RecordingQueue

@@ -13,6 +13,7 @@ from ai_second_brain.graph import store
 from ai_second_brain.graph.context import GraphContext
 from ai_second_brain.graph.names import norm
 from ai_second_brain.graph.prompt import EXTRACTOR_VERSION, SYSTEM_PROMPT, build_user_message
+from ai_second_brain.graph.resolve import NameVectors, ResolveCounts, embed_names, resolve
 from ai_second_brain.graph.schema import (
     ExtractionOutput,
     InvalidOutput,
@@ -78,13 +79,18 @@ async def _still_current(conn: AsyncConnection, revision_id: UUID) -> bool:
 
 
 async def _finish(
-    conn: AsyncConnection,  # noqa: ARG001
+    conn: AsyncConnection,
+    ctx: GraphContext,
     *,
-    revision_id: UUID,  # noqa: ARG001
-    merged: ExtractionOutput,  # noqa: ARG001
-    evidence: dict[str, str],  # noqa: ARG001
-) -> None:
-    """Seam for Task 4: resolution runs here, inside the transaction recording the extraction."""
+    source_id: UUID,
+    revision_id: UUID,
+    output: dict[str, Any],
+    vectors: NameVectors,
+) -> ResolveCounts:
+    """Resolution runs here, inside the transaction recording the extraction."""
+    return await resolve(
+        conn, ctx, source_id=source_id, revision_id=revision_id, output=output, vectors=vectors
+    )
 
 
 async def extract_revision(ctx: GraphContext, revision_id: UUID) -> Outcome:
@@ -131,6 +137,7 @@ async def extract_revision(ctx: GraphContext, revision_id: UUID) -> Outcome:
         outputs.append(out)
     merged = merge_outputs(outputs)
     output: dict[str, Any] = merged.model_dump() | {"evidence": evidence}
+    vectors = await embed_names(ctx, merged)  # network first: never under the source lock
     async with ctx.pool.connection() as conn:
         if not await _still_current(conn, revision_id):
             logger.info("extract revision=%s outcome=skipped code=stale", revision_id)
@@ -144,13 +151,28 @@ async def extract_revision(ctx: GraphContext, revision_id: UUID) -> Outcome:
             summary=merged.summary,
             output=output,
         )
-        await _finish(conn, revision_id=revision_id, merged=merged, evidence=evidence)
+        counts = await _finish(
+            conn,
+            ctx,
+            source_id=info.source_id,
+            revision_id=revision_id,
+            output=output,
+            vectors=vectors,
+        )
+    for entity_id in counts.created_ids:  # after the commit (the 2a defer-after-commit rule)
+        await ctx.queue.embed_entity(entity_id)
     logger.info(
-        "extract revision=%s windows=%d entities=%d relations=%d outcome=ok ms=%d",
+        "extract revision=%s windows=%d entities=%d relations=%d created=%d linked=%d"
+        " accepted=%d proposed=%d dropped=%d outcome=ok ms=%d",
         revision_id,
         len(windows),
         len(merged.entities),
         len(merged.relations),
+        counts.created,
+        counts.linked,
+        counts.accepted,
+        counts.proposed,
+        counts.dropped,
         int((time.monotonic() - started) * 1000),
     )
     return "ok"
