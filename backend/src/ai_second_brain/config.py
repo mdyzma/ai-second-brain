@@ -133,6 +133,10 @@ class Settings(BaseSettings):
     obsidian_vault: str = ""
     chat_num_ctx: int = Field(default=8192, ge=2048, le=131072)
     retrieval_min_similarity: float = Field(default=0.45, ge=0.0, le=1.0)
+    extract_model: str = Field(default="", validation_alias="SB_EXTRACT_MODEL")
+    extract_auto_accept: float = Field(default=0.8, ge=0.0, le=1.0)
+    entity_match_similarity: float = Field(default=0.90, ge=0.0, le=1.0)
+    extract_window_chars: int = Field(default=6000, ge=2000, le=32000)
     eval_queries: Path = Path("~/.second-brain/eval/queries.yaml")
     eval_dir: Path = Path("~/.second-brain/eval/reports")
     eval_database_url_override: str = Field(default="", validation_alias="SB_EVAL_DATABASE_URL")
@@ -166,6 +170,11 @@ class Settings(BaseSettings):
     @classmethod
     def _embed_url(cls, value: str) -> str:
         return http_url(value) if value.strip() else ""
+
+    @field_validator("extract_model")
+    @classmethod
+    def _local_extract_model(cls, value: str) -> str:
+        return local_model_name(value) if value.strip() else ""
 
     @field_validator("embed_model")
     @classmethod
@@ -253,6 +262,12 @@ class Settings(BaseSettings):
         if self.embed_url_override:
             return self.embed_url_override
         return self.ollama_endpoints[0].url if self.ollama_endpoints else None
+
+    @property
+    def extract_model_name(self) -> str | None:
+        if self.extract_model:
+            return self.extract_model
+        return self.ollama_endpoints[0].model if self.ollama_endpoints else None
 
     @property
     def allowed_origin_set(self) -> frozenset[str]:
