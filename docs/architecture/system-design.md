@@ -178,6 +178,8 @@ Design principles:
 
 ### 3.1 Core tables (abridged DDL, target shape)
 
+> **Note (Phase 4a):** the shipped `entities` and `edges` tables (migration `20261003100000_graph.sql`, with `entity_aliases`, `entity_embeddings` and `extractions`) supersede the sketch of those tables below; see [ADR-0013](adr/0013-knowledge-graph-review.md).
+
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;          -- extension name is "vector", not "pgvector"
 
@@ -596,7 +598,8 @@ Aligns with the assessment's decomposition; each phase ends with a usable system
 | 2b | Search + chat retrieval + capture | Hybrid FTS + vector search API and page; the real Retriever in private chat; the capture box — **delivered** ([spec](../superpowers/specs/2026-10-01-phase-2b-search-retrieval-capture-design.md)) | 2a |
 | 3 | Embedding evaluation (bake-off vs bge-m3 on the owner's PL/EN questions) | The harness compares bge-m3 with three challengers by recall@10, MRR@10 and query latency; **delivered** — result 2026-10-03: bge-m3 stays ([spec](../superpowers/specs/2026-10-02-phase-3-embedding-evaluation-design.md)) | 2b |
 | 3b | Switch embedding space (only if a challenger wins) | Not needed: bge-m3 won the 2026-10-03 bake-off | 3 |
-| 4 | Knowledge graph + sleep cycle | Entities/edges from nightly job; digest; review queue; idempotent reruns | 2a, 2b |
+| 4a | Knowledge graph and review | Local extraction of entities and relations per note; the owner decides in Review; entity pages; decisions survive re-extraction — **delivered** ([spec](../superpowers/specs/2026-10-03-phase-4a-knowledge-graph-design.md), [ADR-0013](adr/0013-knowledge-graph-review.md)) | 2a, 2b |
+| 4b | Sleep cycle and digest | Nightly schedule over the graph; morning digest; idempotent reruns | 4a |
 | 5 | Hardware observe/wake | Truthful state fixtures; WoL measured per node; sleep cycle uses workstation | 1 |
 | 6 | Document intelligence | PDF invoice/contract, email, git adapters with fixtures and provenance | 2, 4 |
 | 7 | Salience + dormancy | Report-only for 30 days, then enabled; restore works | 4 |

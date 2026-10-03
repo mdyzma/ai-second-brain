@@ -25,9 +25,9 @@ questions and it answers with sources. That is the goal; today the platform and 
 Private content is processed only by the Ollama endpoints you configure (on your own machines or LAN), and a
 cloud model is used only when you explicitly choose it. It never reads your notes.
 
-> **Status: Phase 2b "search, retrieval and capture" (see the latest release badge above).** The platform is in place: a secure single-user
+> **Status: Phase 4a "knowledge graph" (see the latest release badge above).** The platform is in place: a secure single-user
 > login, the web app shell, the API, the database, CI and automated releases, plus the Ask screen
-> for chatting with a local model. Your Obsidian vault is indexed in the background, you can search it, private chat answers cite it, and you can capture a thought into it. The remaining knowledge
+> for chatting with a local model. Your Obsidian vault is indexed in the background, you can search it, private chat answers cite it, you can capture a thought into it, and a local model extracts the people, projects, tools and devices your notes talk about for you to review. The remaining knowledge
 > features arrive phase by phase; see the [roadmap](#roadmap). The screens show what each one
 > will do.
 
@@ -35,6 +35,7 @@ cloud model is used only when you explicitly choose it. It never reads your note
 
 - [What it does today](#what-it-does-today)
 - [Screenshots](#screenshots)
+- [Knowledge graph](#knowledge-graph)
 - [Roadmap](#roadmap)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
@@ -54,6 +55,7 @@ cloud model is used only when you explicitly choose it. It never reads your note
 | 💬 **Ask (private by default)** | Chat with a local Ollama model on your LAN; sources are shown before the answer; nothing is sent to the cloud. Cloud sessions (Anthropic) are an explicit, per-conversation opt-in and never read your notes. Private answers cite your notes: the matching notes are shown first, and each source opens in Obsidian. |
 | 🔎 **Search** | Hybrid search over your vault: exact identifiers and words (full text) plus meaning (bge-m3 vectors), fused by reciprocal rank. Folder and tag filters, highlighted snippets, and results that open in Obsidian. Press `/` to focus the search box. |
 | ✍️ **Capture** | The `c` key or the Capture button opens a box; `Ctrl+Enter` saves it as `Inbox/{date time} {title}.md` in your vault, and the worker indexes it like any other note. |
+| 🕸️ **Knowledge graph** | A local model reads each note and proposes the entities in it (projects, people, organizations, tools, devices, topics). You accept, reject, rename, merge or re-parent them on the Review screen, and entity pages list the notes that mention each one. Nothing leaves your machines. |
 | 📚 **Vault ingestion** | The worker keeps an index of your Obsidian vault in Postgres (full-text immediately, bge-m3 vectors in the background), survives crashes and offline edits, and shows its state on the Sources screen. |
 | 🔐 **Single-owner login** | argon2id password hash, server-side sessions (only a SHA-256 of the token is stored), HttpOnly `SameSite=Strict` cookie, same-origin check on every write, lockout after 5 failed attempts, and protection against open redirects. |
 | 🧭 **Web app shell** | React + TypeScript app with a sidebar on desktop and a bottom bar on phones. It has the eight screens of the product (Ask, Search, Projects, Digest, Review, Nodes, Sources, Settings) and a skip link, and it can be used from the keyboard alone. |
@@ -73,6 +75,10 @@ cloud model is used only when you explicitly choose it. It never reads your note
 ![A private answer with the notes it cites shown first](docs/images/readme/ask-sources.jpg)
 
 ![Sources screen showing five indexed notes, all searchable, with embedding at 100%](docs/images/readme/sources.jpg)
+
+![Review screen with two proposed entities, NAS and Proxmox, and the notes that mention them](docs/images/readme/review.jpg)
+
+![The NAS entity page listing the notes that mention it](docs/images/readme/entity.jpg)
 
 <table>
   <tr>
@@ -104,6 +110,33 @@ cloud model is used only when you explicitly choose it. It never reads your note
   </tr>
 </table>
 
+## Knowledge graph
+
+A local model reads each indexed note and extracts a one-line summary, the entities in it (project, person, organization, tool, device, topic) and the relations between them (`mentions`, `about`, `uses`, `runs_on`, `works_with`, `part_of`). Extraction uses local Ollama models only: private text never reaches a cloud model, and a hosted `:cloud` tag is refused. Names and summaries are not written to logs.
+
+**You decide what the graph believes.** New entities and relations between entities are always proposed and wait on the **Review** screen. Only a confident exact or alias link from a note to an entity you already accepted is accepted automatically. Your decisions survive re-extraction and note edits, a rejected name is remembered, and a merge keeps the losing name as an alias. The design is in [ADR-0013](docs/architecture/adr/0013-knowledge-graph-review.md) and the [Phase 4a spec](docs/superpowers/specs/2026-10-03-phase-4a-knowledge-graph-design.md).
+
+- **Run it.** `just graph-extract` queues extraction for notes not yet extracted (`just graph-extract --failed` retries the failures); the worker runs the jobs. The **Run extraction** button on Review does the same. `just graph-status` prints the counts.
+- **Review.** Entities and Links tabs. Move between cards with `j` and `k`; `a` accepts, `r` rejects and `m` opens the merge picker. Renaming, changing the type and setting a parent are on each card. The queue refreshes by itself while extraction runs.
+- **Entities.** Accepted entities are listed on **Entities** and **Projects**; each entity page shows its notes (with the evidence heading and an Obsidian link) and the related entities.
+- **Cost.** About one model call per note on the extract model, run by the worker's own `extract` loop (one job at a time) behind indexing and embedding, so search stays current while it works. The first run over a large vault takes a while; later runs only handle new and changed notes. Bumping the extractor version in code re-extracts everything.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SB_EXTRACT_MODEL` | the model of the first `SB_OLLAMA_ENDPOINTS` entry | The local Ollama model that extracts. Hosted `:cloud` and `-cloud` tags are refused. With no local endpoint, extraction is off |
+| `SB_EXTRACT_AUTO_ACCEPT` | `0.8` | Minimum confidence for automatically accepting a link to an entity you already accepted (0 to 1) |
+| `SB_ENTITY_MATCH_SIMILARITY` | `0.90` | Minimum name-embedding similarity for linking a new name to an existing entity of the same type (0 to 1) |
+| `SB_EXTRACT_WINDOW_CHARS` | `6000` | Maximum characters of note text per model call (2000 to 32000); longer notes are read in windows |
+
+| Key (Review) | Action |
+| --- | --- |
+| `j` / `k` | Next / previous card |
+| `a` | Accept the focused entity |
+| `r` | Reject it |
+| `m` | Merge it into another entity |
+
+Known limitations: a proposed relation shared by two notes is dropped when one of them is re-extracted and returns when its own note is; relations named through an alias are dropped; and the parent check only catches two-entity cycles.
+
 ## Roadmap
 
 Each phase gets its own spec and plan before any code is written, in
@@ -116,7 +149,8 @@ Each phase gets its own spec and plan before any code is written, in
 | 2a | **Sources**: durable Obsidian ingestion (watcher, reconcile, bge-m3 embeddings), with its state on the Sources screen | ✅ Done |
 | 2b | **Search**, chat retrieval and quick capture: hybrid full-text and vector search, your notes in private chat, a capture box | ✅ Done |
 | 3 | Embedding evaluation: bge-m3 against three challengers on your own Polish/English questions; a new space only if one wins | ✅ Done: bge-m3 stays (2026-10-03) |
-| 4 | **Digest** and **Review**: nightly consolidation links notes to projects, people and machines; a morning digest; a review queue | Planned |
+| 4a | **Knowledge graph** and **Review**: a local model extracts entities and links from your notes; you decide what the graph believes; entity pages | ✅ Done |
+| 4b | **Digest**: a nightly run and a morning digest on top of the graph | Next |
 | 5 | **Nodes**: see and wake your machines (RTX workstation, MacBook, Proxmox) with truthful online, offline and unknown states | Planned |
 | 6 | Paperwork and history: invoices and contracts from PDF, email archives, git history | Planned |
 | 7 | Salience: old ideas are surfaced again when they relate to what you're working on, and nothing fades away without your consent | Planned |
@@ -162,6 +196,8 @@ command from the repository root.
 | `just worker` | The ingestion worker alone (watches the vault, indexes and embeds) |
 | `just vault-scan` | One reconcile pass now; add `--allow-mass-delete` to override the mass-deletion guard |
 | `just vault-status` | Print the ingestion summary (notes, embedding progress, last scan) as text |
+| `just graph-extract` | Queue knowledge-graph extraction for notes not yet extracted; add `--failed` to retry failures |
+| `just graph-status` | Print extraction and entity counts |
 | `just check` | Lint, format check, type checks, token contrast, hard-coded colours, API-client and schema freshness: the same as CI |
 | `just test` | Backend (unit and integration), web and helper-script tests |
 | `just test-unit` | Only the tests that need no database |
@@ -194,10 +230,11 @@ ai-second-brain/
 │   │   ├── search/             Hybrid query (full text + vectors, fused by RRF), query terms, the chat retriever
 │   │   ├── eval/               The embedding bake-off: query file, snapshot of the index, per-model embedding, metrics, verdict, report
 │   │   ├── knowledge/          Sources, revisions, chunks and embeddings in Postgres; the index and embed jobs and the status summary
+│   │   ├── graph/              Knowledge graph: extraction prompt and schema, entity resolution, owner decisions, review queries and jobs
 │   │   ├── ingest/             The worker process (procrastinate queues, watcher, scheduled reconcile)
 │   │   └── interfaces/
 │   │       ├── api/            FastAPI app, routes (health, auth), cross-site check, API schemas
-│   │       └── cli/            `ai-second-brain serve | openapi | hash-password | chat-smoke | worker | vault reconcile|status | eval prepare|suggest|check|run`
+│   │       └── cli/            `ai-second-brain serve | openapi | hash-password | chat-smoke | worker | vault reconcile|status | graph extract|status | eval prepare|suggest|check|run`
 │   ├── scripts/                search_bench.py, the one-off search benchmark (see Search performance)
 │   └── tests/                  unit/ (no database) and integration/ (real Postgres)
 ├── web/                        React + TypeScript single-page app (pnpm, Vite)
@@ -506,6 +543,7 @@ version files, commits `chore(release): vX.Y.Z [skip ci]`, tags `vX.Y.Z` and pub
 - [Architecture decision records](docs/architecture/adr/)
 - [Design system](docs/architecture/design-system-audit.md): tokens, components and the accessibility bar
 - [Phase 3 spec (embedding evaluation)](docs/superpowers/specs/2026-10-02-phase-3-embedding-evaluation-design.md)
+- [Phase 4a spec (knowledge graph)](docs/superpowers/specs/2026-10-03-phase-4a-knowledge-graph-design.md)
 - [Phase 2b spec (search, retrieval, capture)](docs/superpowers/specs/2026-10-01-phase-2b-search-retrieval-capture-design.md)
 - [Phase 2a spec (vault ingestion)](docs/superpowers/specs/2026-09-30-phase-2a-vault-ingestion-design.md)
 - [Phase 1a spec](docs/superpowers/specs/2026-09-29-phase-1a-foundation-design.md) and
