@@ -865,6 +865,9 @@ def test_retype_survives_reextraction_with_the_old_type(
         async with h.pool.connection() as conn:
             await decide.retype_entity(conn, nas, "device")
             await decide.accept_entity(conn, nas)
+            # A rename and back must not drop the old-type (tool) redirect rows.
+            await decide.rename_entity(conn, nas, "Synology NAS")
+            await decide.rename_entity(conn, nas, "NAS")
         for suffix in ("\nedited", "\nedited again"):
             rev_n = await edit(h, tmp_path, TEXT + suffix)
             assert await extract_revision(ctx, rev_n) == "ok"
@@ -875,7 +878,8 @@ def test_retype_survives_reextraction_with_the_old_type(
             assert await entity_page_notes(h, nas) == [PATH]
         async with h.pool.connection() as conn:
             page = await get_entity(conn, nas, vault_name="vault")
-        assert page is not None and page["aliases"] == ["nas01"]  # the name is not shown
+        assert page is not None
+        assert sorted(page["aliases"]) == ["Synology NAS", "nas01"]  # the name is not shown
 
     scenario(db_url, vault(tmp_path), fake, body)
 

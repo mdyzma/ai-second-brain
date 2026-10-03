@@ -175,10 +175,12 @@ async def rename_entity(conn: AsyncConnection, entity_id: UUID, name: str) -> No
         raise DecisionError("name_taken")
     try:
         async with conn.transaction():  # a savepoint: a lost race leaves the caller's tx usable
-            # Renaming to one of its own aliases: that alias row is now redundant.
+            # Renaming to one of its own aliases: that alias row is now redundant. Only the
+            # current type's row: old-type rows left by a retype still redirect extraction.
             await conn.execute(
-                "DELETE FROM entity_aliases WHERE entity_id = %s AND norm_alias = %s",
-                (entity_id, key),
+                "DELETE FROM entity_aliases"
+                " WHERE entity_id = %s AND norm_alias = %s AND type = %s::entity_type",
+                (entity_id, key, row["type"]),
             )
             await conn.execute(
                 "UPDATE entities SET name = %s, norm_name = %s WHERE id = %s",
