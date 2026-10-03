@@ -1,9 +1,37 @@
-/** Scripted Ollama for e2e: fast answers, a slow answer for questions containing "slow". */
+/** Scripted Ollama for e2e: fast answers, a slow answer for questions containing "slow",
+ * and scripted knowledge-graph extractions for non-streaming structured chat calls. */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 
 const port = Number(process.env.FAKE_OLLAMA_PORT ?? "11501");
 let down = false;
+
+const EMPTY_EXTRACTION = { summary: "", entities: [], relations: [] };
+
+/** Extraction prompts carry the note path inside <note>; the reply is chosen from it. */
+function scriptedExtraction(prompt: string): unknown {
+  if (prompt.includes("Note path: Projects/NAS.md"))
+    return {
+      summary: "NAS disks and nightly backups.",
+      entities: [
+        { name: "NAS", type: "device", aliases: [], confidence: 0.9 },
+        { name: "Proxmox", type: "tool", aliases: [], confidence: 0.8 },
+      ],
+      relations: [
+        { subject: "NOTE", relation: "about", object: "NAS", chunk: "c1", confidence: 0.9 },
+        { subject: "Proxmox", relation: "runs_on", object: "NAS", chunk: null, confidence: 0.7 },
+      ],
+    };
+  if (prompt.includes("Note path: Projects/Proxmox.md"))
+    return {
+      summary: "Single-node Proxmox cluster.",
+      entities: [{ name: "Proxmox", type: "tool", aliases: [], confidence: 0.9 }],
+      relations: [
+        { subject: "NOTE", relation: "about", object: "Proxmox", chunk: "c1", confidence: 0.9 },
+      ],
+    };
+  return EMPTY_EXTRACTION;
+}
 
 async function readBody(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
@@ -35,7 +63,18 @@ const server = createServer(async (req, res) => {
     const body = JSON.parse(await readBody(req)) as {
       model: string;
       messages: { content: string }[];
+      stream?: boolean;
+      format?: unknown;
     };
+    if (body.stream === false && body.format) {
+      const prompt = body.messages.map((m) => m.content).join(" ");
+      json(res, 200, {
+        model: body.model,
+        message: { role: "assistant", content: JSON.stringify(scriptedExtraction(prompt)) },
+        done: true,
+      });
+      return;
+    }
     const question = body.messages.at(-1)?.content ?? "";
     const slow = question.includes("slow");
     const words = slow

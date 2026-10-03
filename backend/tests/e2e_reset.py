@@ -37,7 +37,7 @@ def main() -> None:
     import psycopg
 
     with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
-        conn.execute("TRUNCATE sources, ingest_runs, procrastinate_jobs CASCADE")
+        conn.execute("TRUNCATE sources, entities, edges, ingest_runs, procrastinate_jobs CASCADE")
 
     vault = os.environ.get("SB_VAULT_PATH")
     if vault:
