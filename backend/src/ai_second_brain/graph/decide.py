@@ -16,6 +16,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from psycopg import AsyncConnection
+from psycopg.errors import UniqueViolation
 from psycopg.rows import dict_row
 
 from ai_second_brain.graph.names import norm
@@ -58,7 +59,7 @@ async def _lock(conn: AsyncConnection, entity_id: UUID, mode: LockMode) -> dict[
     async with conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
             "SELECT id, type::text AS type, name, norm_name, status::text AS status,"  # noqa: S608
-            f" parent_id FROM entities WHERE id = %s {mode}",
+            f" parent_id, parent_status::text AS parent_status FROM entities WHERE id = %s {mode}",
             (entity_id,),
         )
         row = await cur.fetchone()
@@ -103,7 +104,8 @@ async def accept_entity(conn: AsyncConnection, entity_id: UUID) -> None:
 
     Automatic edges that an earlier entity reject turned ``rejected`` go back to
     ``proposed`` (unless the confident rule accepts them), so reject-then-accept
-    undoes the reject. User-decided edges are never touched.
+    undoes the reject, but only when the entity on the edge's other side is not
+    itself rejected. User-decided edges are never touched.
     """
     # NO KEY UPDATE: nothing key-like changes, and it doesn't block the FK checks of
     # extraction inserting new edges to this entity (fewer chances to deadlock).
@@ -119,7 +121,14 @@ async def accept_entity(conn: AsyncConnection, entity_id: UUID) -> None:
         " ELSE 'proposed'::graph_status END"
         " WHERE decided_by = 'auto'"
         " AND (dst_entity_id = %(id)s OR (src_type = 'entity' AND src_id = %(id)s))"
-        " AND (status = 'rejected' OR (status = 'proposed' AND dst_entity_id = %(id)s"
+        " AND ((status = 'rejected' AND NOT EXISTS ("
+        # The other endpoint: the src entity for an incoming edge (a note is always
+        # fine), else the dst. An edge to a still-rejected neighbour stays rejected.
+        "  SELECT 1 FROM entities o WHERE o.status = 'rejected' AND o.id ="
+        "   CASE WHEN edges.dst_entity_id = %(id)s"
+        "    THEN CASE WHEN edges.src_type = 'entity' THEN edges.src_id END"
+        "    ELSE edges.dst_entity_id END))"
+        "  OR (status = 'proposed' AND dst_entity_id = %(id)s"
         "  AND relation IN ('mentions', 'about') AND confidence >= %(min)s))",
         {"id": entity_id, "min": ACCEPT_MIN_CONFIDENCE},
     )
@@ -158,21 +167,28 @@ async def rename_entity(conn: AsyncConnection, entity_id: UUID, name: str) -> No
     if await _taken(conn, row["type"], [key], entity_id):
         logger.info("decide action=rename entity=%s code=name_taken", entity_id)
         raise DecisionError("name_taken")
-    # Renaming to one of its own aliases: that alias row is now redundant.
-    await conn.execute(
-        "DELETE FROM entity_aliases WHERE entity_id = %s AND norm_alias = %s",
-        (entity_id, key),
-    )
-    await conn.execute(
-        "UPDATE entities SET name = %s, norm_name = %s WHERE id = %s",
-        (display, key, entity_id),
-    )
-    if row["norm_name"] != key:
-        await conn.execute(
-            "INSERT INTO entity_aliases (entity_id, type, alias, norm_alias)"
-            " VALUES (%s, %s::entity_type, %s, %s) ON CONFLICT (type, norm_alias) DO NOTHING",
-            (entity_id, row["type"], row["name"], row["norm_name"]),
-        )
+    try:
+        async with conn.transaction():  # a savepoint: a lost race leaves the caller's tx usable
+            # Renaming to one of its own aliases: that alias row is now redundant.
+            await conn.execute(
+                "DELETE FROM entity_aliases WHERE entity_id = %s AND norm_alias = %s",
+                (entity_id, key),
+            )
+            await conn.execute(
+                "UPDATE entities SET name = %s, norm_name = %s WHERE id = %s",
+                (display, key, entity_id),
+            )
+            if row["norm_name"] != key:
+                await conn.execute(
+                    "INSERT INTO entity_aliases (entity_id, type, alias, norm_alias)"
+                    " VALUES (%s, %s::entity_type, %s, %s)"
+                    " ON CONFLICT (type, norm_alias) DO NOTHING",
+                    (entity_id, row["type"], row["name"], row["norm_name"]),
+                )
+    except UniqueViolation:
+        # A concurrent create_entity took the name after the _taken check.
+        logger.info("decide action=rename entity=%s code=name_taken", entity_id)
+        raise DecisionError("name_taken") from None
     logger.info("decide action=rename entity=%s", entity_id)
 
 
@@ -203,20 +219,26 @@ async def retype_entity(conn: AsyncConnection, entity_id: UUID, type: str) -> No
         )
         parent = await cur.fetchone()
         keep_parent = parent is not None and parent[0] == type
-    if keep_parent:
-        await conn.execute(
-            "UPDATE entities SET type = %s::entity_type WHERE id = %s", (type, entity_id)
-        )
-    else:
-        await conn.execute(
-            "UPDATE entities SET type = %s::entity_type, parent_id = NULL, parent_status = NULL"
-            " WHERE id = %s",
-            (type, entity_id),
-        )
-    await conn.execute(
-        "UPDATE entity_aliases SET type = %s::entity_type WHERE entity_id = %s",
-        (type, entity_id),
-    )
+    try:
+        async with conn.transaction():  # a savepoint: a lost race leaves the caller's tx usable
+            if keep_parent:
+                await conn.execute(
+                    "UPDATE entities SET type = %s::entity_type WHERE id = %s", (type, entity_id)
+                )
+            else:
+                await conn.execute(
+                    "UPDATE entities SET type = %s::entity_type,"
+                    " parent_id = NULL, parent_status = NULL WHERE id = %s",
+                    (type, entity_id),
+                )
+            await conn.execute(
+                "UPDATE entity_aliases SET type = %s::entity_type WHERE entity_id = %s",
+                (type, entity_id),
+            )
+    except UniqueViolation:
+        # A concurrent create_entity took the name or an alias after the _taken check.
+        logger.info("decide action=retype entity=%s code=name_taken", entity_id)
+        raise DecisionError("name_taken") from None
     logger.info("decide action=retype entity=%s", entity_id)
 
 
@@ -301,10 +323,36 @@ def _rank(edge: Mapping[str, Any]) -> tuple[bool, float]:
     return edge["decided_by"] == "user", float(edge["confidence"])
 
 
+async def _carry_parent(
+    conn: AsyncConnection, loser: Mapping[str, Any], into: Mapping[str, Any]
+) -> None:
+    """Give a parentless ``into`` the loser's parent, under set_parent's type and loop rules."""
+    parent_id: UUID = loser["parent_id"]
+    cur = await conn.execute(
+        "SELECT type::text FROM entities WHERE id = %s FOR KEY SHARE", (parent_id,)
+    )
+    parent = await cur.fetchone()
+    if parent is None or parent[0] != into["type"]:
+        return
+    chain = await _chain(conn, parent_id)
+    if loser["id"] in chain or would_cycle(chain, into["id"], parent_id):
+        return
+    await conn.execute(
+        "UPDATE entities SET parent_id = %s, parent_status = %s::graph_status WHERE id = %s",
+        (parent_id, loser["parent_status"], into["id"]),
+    )
+
+
 async def merge_entities(conn: AsyncConnection, loser_id: UUID, into_id: UUID) -> UUID:
     """Fold ``loser`` into ``into`` (same type only) and delete it; returns ``into_id``.
 
+    A parentless ``into`` (or one that hung under the loser) takes over the loser's
+    parent, with its status, if that parent has the same type and closes no loop.
     The caller queues ``embed_entity(into)`` after the commit if it has no embedding.
+
+    Merge touches many edge rows, so despite the ordered locks it can still lose a
+    deadlock (40P01) or serialization failure against a concurrent extraction. The
+    API (Task 7) retries such a failure once, then answers ``409 busy``.
     """
     if loser_id == into_id:
         raise DecisionError("invalid_action")
@@ -351,6 +399,8 @@ async def merge_entities(conn: AsyncConnection, loser_id: UUID, into_id: UUID) -
         "UPDATE entities SET parent_id = %s WHERE parent_id = %s AND id <> %s",
         (into_id, loser_id, into_id),
     )
+    if into["parent_id"] in (None, loser_id) and loser["parent_id"] is not None:
+        await _carry_parent(conn, loser, into)
 
     await conn.execute("DELETE FROM entities WHERE id = %s", (loser_id,))
     logger.info(

@@ -404,3 +404,110 @@ def test_decide_links_batch(db_url: str, tmp_path: Path) -> None:
         assert await decide.decide_links(conn, [(uuid4(), "reject")]) == 0
 
     run(db_url, tmp_path, body)
+
+
+def test_accept_keeps_edges_to_rejected_neighbours_rejected(db_url: str, tmp_path: Path) -> None:
+    async def body(h: Harness, conn: AsyncConnection) -> None:
+        src, _rev = await source(h)
+        x = await entity(conn, "tool", "X")
+        y = await entity(conn, "tool", "Y")
+        z = await entity(conn, "tool", "Z")
+        y_to_x = await edge(conn, "entity", y, "uses", x, 0.9)
+        x_to_y = await edge(conn, "entity", x, "uses", y, 0.9)
+        z_to_x = await edge(conn, "entity", z, "uses", x, 0.9)
+        note = await edge(conn, "source", src, "mentions", x, 0.9)
+        async with conn.transaction():
+            await decide.reject_entity(conn, y)
+            await decide.reject_entity(conn, x)
+        got = await edge_rows(h)
+        assert {got[i]["status"] for i in (y_to_x, x_to_y, z_to_x, note)} == {"rejected"}
+        async with conn.transaction():
+            await decide.accept_entity(conn, x)
+        got = await edge_rows(h)
+        assert got[y_to_x]["status"] == "rejected"  # Y is still rejected
+        assert got[x_to_y]["status"] == "rejected"
+        assert got[z_to_x]["status"] == "proposed"  # Z isn't: restored
+        assert got[note]["status"] == "accepted"  # the note side is always fine
+
+    run(db_url, tmp_path, body)
+
+
+def test_rename_and_retype_unique_race_is_name_taken(
+    db_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def never_taken(*_args: Any) -> bool:
+        return False  # as if a concurrent create_entity committed after the check
+
+    monkeypatch.setattr(decide, "_taken", never_taken)
+
+    async def body(h: Harness, conn: AsyncConnection) -> None:
+        pg = await entity(conn, "tool", "Postgres", aliases=["pg"])
+        await entity(conn, "tool", "MySQL")
+        await entity(conn, "topic", "Postgres")
+        async with conn.transaction():
+            with pytest.raises(DecisionError) as info:
+                await decide.rename_entity(conn, pg, "MySQL")
+            assert info.value.code == "name_taken"
+            with pytest.raises(DecisionError) as info:
+                await decide.retype_entity(conn, pg, "topic")
+            assert info.value.code == "name_taken"
+            cur = await conn.execute("SELECT name FROM entities WHERE id = %s", (pg,))
+            assert await cur.fetchone() == ("Postgres",)  # the outer transaction still works
+        e = await ent_row(h, pg)
+        assert e is not None and e["type"] == "tool" and e["name"] == "Postgres"
+        assert await aliases(h, pg) == {("tool", "pg")}
+
+    run(db_url, tmp_path, body)
+
+
+def test_merge_carries_loser_parent_to_parentless_into(db_url: str, tmp_path: Path) -> None:
+    async def body(h: Harness, conn: AsyncConnection) -> None:
+        async def parent(kid: UUID, p: UUID, status: str = "accepted") -> None:
+            await conn.execute(
+                "UPDATE entities SET parent_id = %s, parent_status = %s::graph_status"
+                " WHERE id = %s",
+                (p, status, kid),
+            )
+
+        async def merge(loser: UUID, into: UUID) -> dict[str, Any]:
+            async with conn.transaction():
+                await decide.merge_entities(conn, loser, into)
+            row = await ent_row(h, into)
+            assert row is not None
+            return row
+
+        # Same type, no loop: carried with its status.
+        top = await entity(conn, "project", "Top")
+        into = await entity(conn, "project", "Into")
+        loser = await entity(conn, "project", "Loser")
+        await parent(loser, top, "proposed")
+        got = await merge(loser, into)
+        assert got["parent_id"] == top and got["parent_status"] == "proposed"
+
+        # into already has a parent: it keeps it.
+        other = await entity(conn, "project", "Other")
+        loser = await entity(conn, "project", "Loser 2")
+        await parent(loser, other)
+        got = await merge(loser, into)
+        assert got["parent_id"] == top
+
+        # A parent of another type isn't carried.
+        lone = await entity(conn, "project", "Lone")
+        org = await entity(conn, "organization", "Org")
+        loser = await entity(conn, "project", "Loser 3")
+        await parent(loser, org)
+        got = await merge(loser, lone)
+        assert got["parent_id"] is None and got["parent_status"] is None
+
+        # A parent under into would close a loop: not carried.
+        root = await entity(conn, "project", "Root")
+        kid = await entity(conn, "project", "Kid")
+        loser = await entity(conn, "project", "Loser 4")
+        await parent(kid, root)
+        await parent(loser, kid)
+        got = await merge(loser, root)
+        assert got["parent_id"] is None
+        k = await ent_row(h, kid)
+        assert k is not None and k["parent_id"] == root
+
+    run(db_url, tmp_path, body)
