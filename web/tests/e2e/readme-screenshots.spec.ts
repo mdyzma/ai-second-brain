@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 // Runs through the e2e servers (the `just e2e` harness), so answers come from the fake Ollama.
 test.skip(!process.env.README_SHOTS, "Set README_SHOTS=1 to refresh README screenshots");
@@ -68,4 +68,66 @@ test("ask screen with sources", async ({ page }) => {
     type: "jpeg",
     quality: 85,
   });
+});
+
+async function signIn(page: Page, path: string) {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(path);
+  await page.getByLabel("Password").fill("e2e-test-password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+}
+
+// Extraction only sees notes the ingest has recorded, so wait for the fixture vault first.
+async function extractFixtureVault(page: Page) {
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get("/api/graph/status");
+        return res.ok()
+          ? ((await res.json()) as { revisions: { total: number } }).revisions.total
+          : 0;
+      },
+      { timeout: 60_000 },
+    )
+    .toBeGreaterThanOrEqual(5);
+  await page.getByRole("button", { name: "Run extraction" }).click();
+  await page.getByRole("menuitem", { name: "New notes" }).click();
+}
+
+test("review screen", async ({ page }) => {
+  test.setTimeout(150_000);
+  await signIn(page, "/review");
+  await expect(page.getByRole("button", { name: "Run extraction" })).toBeVisible();
+  const nas = page.getByRole("article", { name: "NAS", exact: true });
+  const proxmox = page.getByRole("article", { name: "Proxmox", exact: true });
+  // The cards are already there when an earlier run extracted the vault; otherwise extract now.
+  if (!(await nas.isVisible())) await extractFixtureVault(page);
+  await expect(nas).toBeVisible({ timeout: 90_000 });
+  await expect(proxmox).toBeVisible({ timeout: 90_000 });
+  await page.screenshot({ path: "../docs/images/readme/review.jpg", type: "jpeg", quality: 85 });
+});
+
+test("entity page", async ({ page }) => {
+  test.setTimeout(150_000);
+  await signIn(page, "/review");
+  await expect(page.getByRole("button", { name: "Run extraction" })).toBeVisible();
+  const nas = page.getByRole("article", { name: "NAS", exact: true });
+  const proxmox = page.getByRole("article", { name: "Proxmox", exact: true });
+  if (!(await nas.isVisible())) {
+    await extractFixtureVault(page);
+    await nas.waitFor({ timeout: 90_000 }).catch(() => undefined);
+    await proxmox.waitFor({ timeout: 30_000 }).catch(() => undefined);
+  }
+  // Accept both through the UI when they are still waiting; an earlier run may have accepted them.
+  for (const card of [nas, proxmox]) {
+    if (await card.isVisible().catch(() => false)) {
+      await card.getByRole("button", { name: "Accept" }).click();
+      await expect(card).toBeHidden();
+    }
+  }
+  await page.goto("/entities?type=device");
+  await page.getByRole("link", { name: /^NAS/ }).click();
+  await expect(page.getByRole("heading", { name: "NAS", level: 1 })).toBeVisible();
+  await expect(page.getByText("Projects/NAS.md")).toBeVisible();
+  await page.screenshot({ path: "../docs/images/readme/entity.jpg", type: "jpeg", quality: 85 });
 });
