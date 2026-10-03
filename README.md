@@ -115,7 +115,7 @@ Each phase gets its own spec and plan before any code is written, in
 | 1b | **Ask** privately: chat answered by a local model (Ollama), with sources shown first; settings | ✅ Done |
 | 2a | **Sources**: durable Obsidian ingestion (watcher, reconcile, bge-m3 embeddings), with its state on the Sources screen | ✅ Done |
 | 2b | **Search**, chat retrieval and quick capture: hybrid full-text and vector search, your notes in private chat, a capture box | ✅ Done |
-| 3 | Embedding evaluation: bge-m3 against three challengers on your own Polish/English questions; a new space only if one wins | 🟡 Harness built; result pending your first run |
+| 3 | Embedding evaluation: bge-m3 against three challengers on your own Polish/English questions; a new space only if one wins | ✅ Done: bge-m3 stays (2026-10-03) |
 | 4 | **Digest** and **Review**: nightly consolidation links notes to projects, people and machines; a morning digest; a review queue | Planned |
 | 5 | **Nodes**: see and wake your machines (RTX workstation, MacBook, Proxmox) with truthful online, offline and unknown states | Planned |
 | 6 | Paperwork and history: invoices and contracts from PDF, email archives, git history | Planned |
@@ -364,7 +364,7 @@ less uniform, so treat these numbers as an upper bound for a vault of this size.
 
 Search ranks with `bge-m3` vectors. The bake-off decides whether any other embedding model finds your notes
 better, measured on **your own** questions in Polish and English. A second embedding space is built (Phase 3b)
-only if a challenger wins. The harness is built; the result is **pending your first run**. Details are in the
+only if a challenger wins. The first run (2026-10-03) kept **bge-m3**; no challenger met the win rule. Details are in the
 [Phase 3 spec](docs/superpowers/specs/2026-10-02-phase-3-embedding-evaluation-design.md).
 
 1. **Draft the queries.** `just eval-suggest --out ~/.second-brain/eval/queries.yaml` samples about 60 notes
