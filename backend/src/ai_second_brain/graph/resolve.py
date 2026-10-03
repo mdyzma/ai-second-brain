@@ -9,7 +9,7 @@ New entities are returned so the caller can queue their embeddings after the com
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from psycopg import AsyncConnection
@@ -190,11 +190,12 @@ async def resolve(
             return True, by_alias[name]
         return False, None
 
-    await store.replace_machine_edges(conn, source_id)
+    prior_accepted = await store.replace_machine_edges(conn, source_id)
     # Edges are written in (src_type, src_id, relation, dst_entity_id) order: entity edges
     # first, then this note's mention edges, then parent proposals.
 
     links: dict[tuple[UUID, str, UUID], tuple[float, UUID | None]] = {}
+    endpoints: dict[UUID, store.EntityRow] = {}
     for rel in merged.relations:
         subject, obj = norm(rel.subject), norm(rel.object)
         (s_known, src), (o_known, dst) = lookup(subject), lookup(obj)
@@ -204,14 +205,25 @@ async def resolve(
         if rel.subject == NOTE or src is None or dst is None or src.id == dst.id:
             continue  # NOTE relations became the mention edges; self-loops are dropped
         link = (src.id, rel.relation, dst.id)
+        endpoints[src.id], endpoints[dst.id] = src, dst
         chunk = _chunk(evidence, [subject, rel.relation, obj])
         previous = links.get(link)
         if previous is None:
             links[link] = (rel.confidence, chunk)
         else:
             links[link] = (max(previous[0], rel.confidence), previous[1] or chunk)
+    accepted = proposed = 0
+    status: Literal["accepted", "proposed"]
     parents: list[tuple[UUID, UUID]] = []
     for (src_id, relation, dst_id), (confidence, chunk) in sorted(links.items()):
+        # An accepted edge this note re-creates stays accepted while both ends are accepted.
+        status = (
+            "accepted"
+            if ("entity", src_id, relation, dst_id) in prior_accepted
+            and endpoints[src_id].status == "accepted"
+            and endpoints[dst_id].status == "accepted"
+            else "proposed"
+        )
         await store.upsert_edge(
             conn,
             src_type="entity",
@@ -220,14 +232,16 @@ async def resolve(
             dst_entity_id=dst_id,
             confidence=confidence,
             origin=origin,
-            status="proposed",
+            status=status,
             evidence_chunk_id=chunk,
             revision_id=revision_id,
         )
+        if status == "accepted":
+            accepted += 1
+        else:
+            proposed += 1
         if relation == "part_of":
             parents.append((src_id, dst_id))
-    accepted = 0
-    proposed = len(links)
     for mention in sorted(mentions.values(), key=lambda m: (m.relation, m.entity.id)):
         status = initial_edge_status(
             match=mention.match,
@@ -235,6 +249,9 @@ async def resolve(
             confidence=mention.confidence,
             threshold=threshold,
         )
+        key = ("source", source_id, mention.relation, mention.entity.id)
+        if key in prior_accepted and mention.entity.status == "accepted":
+            status = "accepted"  # accepted before (e.g. by an entity accept): keep it
         await store.upsert_edge(
             conn,
             src_type="source",

@@ -210,15 +210,25 @@ async def revision_info(conn: AsyncConnection, revision_id: UUID) -> RevisionInf
     )
 
 
-async def replace_machine_edges(conn: AsyncConnection, source_id: UUID) -> None:
-    """Spec §6.4: drop this note's earlier machine edges; user decisions are kept."""
-    await conn.execute(
+EdgeKey = tuple[str, UUID, str, UUID]  # (src_type, src_id, relation, dst_entity_id)
+
+
+async def replace_machine_edges(conn: AsyncConnection, source_id: UUID) -> set[EdgeKey]:
+    """Spec §6.4: drop this note's earlier machine edges; user decisions are kept.
+
+    Returns the keys of the dropped rows that were ``accepted`` (for example by an entity
+    accept), so the caller can keep that status for an edge this revision re-creates.
+    An edge the new revision does not re-create stays dropped.
+    """
+    cur = await conn.execute(
         "DELETE FROM edges WHERE decided_by = 'auto' AND origin LIKE 'llm:%%' AND ("
         " (src_type = 'source' AND src_id = %(source_id)s)"
         " OR (src_type = 'entity' AND revision_id IN"
-        " (SELECT id FROM source_revisions WHERE source_id = %(source_id)s)))",
+        " (SELECT id FROM source_revisions WHERE source_id = %(source_id)s)))"
+        " RETURNING src_type, src_id, relation, dst_entity_id, status::text",
         {"source_id": source_id},
     )
+    return {(r[0], r[1], r[2], r[3]) for r in await cur.fetchall() if r[4] == "accepted"}
 
 
 async def upsert_edge(

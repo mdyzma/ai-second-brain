@@ -9,12 +9,13 @@ from psycopg_pool import AsyncConnectionPool
 
 from ai_second_brain.chat.providers.ollama import create_http_client
 from ai_second_brain.config import OllamaEndpointConfig
+from ai_second_brain.graph import decide, store
 from ai_second_brain.graph import extract as extract_module
-from ai_second_brain.graph import store
 from ai_second_brain.graph.context import GraphContext
 from ai_second_brain.graph.extract import extract_revision
 from ai_second_brain.graph.llm import ExtractClient
 from ai_second_brain.graph.names import norm
+from ai_second_brain.graph.queries import get_entity
 from ai_second_brain.graph.resolve import resolve
 from ai_second_brain.knowledge.embedder import Embedder
 from ai_second_brain.search.embedding import QueryEmbedder
@@ -765,3 +766,86 @@ def test_self_loop_relation_is_dropped(
         assert (await entities(h))["Proxmox"]["parent_id"] is None
 
     scenario(db_url, vault(tmp_path), fake, body)
+
+
+async def entity_page_notes(h: Harness, entity_id: UUID) -> list[str]:
+    async with h.pool.connection() as conn:
+        page = await get_entity(conn, entity_id, vault_name="vault")
+    assert page is not None
+    return [n["path"] for n in page["notes"]]
+
+
+def test_entity_accept_survives_reextraction(
+    db_url: str, tmp_path: Path, make_fake_ollama: Callable[[], FakeOllama]
+) -> None:
+    fake = make_fake_ollama()
+    fake.behaviour.embed_topics = {"proxmox": "pve"}
+    mentions = reply(
+        [ent("ZFS", "tool", 0.6), ent("NAS", "device", 0.9), ent("Proxmox VE", "tool")],
+        [rel("ZFS", "runs_on", "NAS")],
+    )
+    gone = reply([ent("NAS", "device", 0.9)], [])
+    fake.behaviour.chat_json_by_title = {TITLE: [mentions, mentions, gone]}
+
+    async def body(h: Harness, ctx: GraphContext, rev: UUID) -> None:
+        pve = await seed(h, "tool", "PVE", "proposed", vector_text="topic:pve")
+        assert await extract_revision(ctx, rev) == "ok"
+        ents = await entities(h)
+        assert set(ents) == {"PVE", "ZFS", "NAS"}  # "Proxmox VE" is a similar match
+        zfs, nas = ents["ZFS"]["id"], ents["NAS"]["id"]
+        async with h.pool.connection() as conn:
+            for entity_id in (zfs, nas, pve):
+                await decide.accept_entity(conn, entity_id)
+        # An accepted automatic relation edge (only a kept re-creation produces one).
+        await h.rows("UPDATE edges SET status = 'accepted' WHERE relation = 'runs_on'")
+        got = by_key(await edges(h))
+        assert got[("source", "mentions", "ZFS")]["status"] == "accepted"  # at 0.6
+        assert got[("source", "mentions", "PVE")]["status"] == "accepted"  # similar match
+        assert await entity_page_notes(h, zfs) == [PATH]
+
+        rev2 = await edit(h, tmp_path, TEXT + "\nTypo fixed.")
+        assert await extract_revision(ctx, rev2) == "ok"
+        got = by_key(await edges(h))
+        for key in (
+            ("source", "mentions", "ZFS"),
+            ("source", "mentions", "PVE"),
+            ("ZFS", "runs_on", "NAS"),
+        ):
+            row = got[key]
+            assert (row["status"], row["decided_by"]) == ("accepted", "auto"), key
+            assert row["revision_id"] == rev2
+        assert await entity_page_notes(h, zfs) == [PATH]
+        assert await entity_page_notes(h, pve) == [PATH]
+
+        # A version that no longer mentions them drops the edges.
+        rev3 = await edit(h, tmp_path, "# Homelab\nOnly the NAS now.")
+        assert await extract_revision(ctx, rev3) == "ok"
+        assert set(by_key(await edges(h))) == {("source", "mentions", "NAS")}
+        assert await entity_page_notes(h, zfs) == []
+
+    scenario(db_url, vault(tmp_path), fake, body, embed_url=fake.url)
+
+
+def test_reextraction_keeps_accepted_only_while_the_entity_is_accepted(
+    db_url: str, tmp_path: Path, make_fake_ollama: Callable[[], FakeOllama]
+) -> None:
+    fake = make_fake_ollama()
+    out = reply([ent("Proxmox", "tool", 0.6), ent("NAS", "device", 0.6)], [])
+    fake.behaviour.chat_json_by_title = {TITLE: [out, out]}
+
+    async def body(h: Harness, ctx: GraphContext, rev: UUID) -> None:
+        assert await extract_revision(ctx, rev) == "ok"
+        ents = await entities(h)
+        proxmox = ents["Proxmox"]["id"]
+        async with h.pool.connection() as conn:
+            await decide.accept_entity(conn, proxmox)
+        # The edge was accepted, then the entity went back to proposed.
+        await h.rows("UPDATE entities SET status = 'proposed' WHERE id = %s", proxmox)
+        rev2 = await edit(h, tmp_path, TEXT + "\nedited")
+        assert await extract_revision(ctx, rev2) == "ok"
+        got = by_key(await edges(h))
+        assert got[("source", "mentions", "Proxmox")]["status"] == "proposed"
+        assert got[("source", "mentions", "NAS")]["status"] == "proposed"
+
+    scenario(db_url, vault(tmp_path), fake, body)
+
