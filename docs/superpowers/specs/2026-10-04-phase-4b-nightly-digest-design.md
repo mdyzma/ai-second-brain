@@ -110,9 +110,9 @@ Each tick does the following:
 
 ### 5.2 Starting a run
 
-`start_run(conn, queue, settings, trigger) -> RunStart` runs in one transaction:
+`start_run(conn, queue, settings, trigger) -> RunStart` runs as short steps. Jobs are deferred through procrastinate's own connections, and 4a's `queue_extraction` never holds a transaction open while deferring, so the steps are not one transaction:
 
-1. Insert the run row with `run_date` set to today's local date and `window_start` set to the previous good run's `started_at`.
+1. Insert and commit the run row with `run_date` set to today's local date and `window_start` set to the previous good run's `started_at`.
    - A scheduled insert conflicting on `nightly_runs_scheduled_day` means another worker won. Return `already_started`.
    - A conflict on `nightly_runs_one_open` means a run is in progress. Return `busy`. The API turns this into 409.
 2. If extraction is unavailable (`extract_model_name` is None), set `unavailable = true`, `status = 'complete'` and `finished_at = now()`, then return.
@@ -122,7 +122,7 @@ Each tick does the following:
    - It returns `(queued_new, queued_failed)`.
 4. Store the counts. If both are zero, mark the run `complete` at once.
 
-**Failure while starting:** if any step raises, the transaction rolls back. A second short transaction then records the run as `failed`, with `error` set to a code such as `db_error` or `queue_error`. The digest shows the failed run. Because it is `failed`, the next tick may start a new scheduled run the same day.
+**Failure while starting:** if any step after the insert raises, a short transaction records the run as `failed`. Jobs already deferred stay queued; their per-revision locks stop duplicates, and the next run counts only new ones. The row is recorded, with `error` set to a code such as `db_error` or `queue_error`. The digest shows the failed run. Because it is `failed`, the next tick may start a new scheduled run the same day.
 
 ### 5.3 Closing a run
 
@@ -175,7 +175,7 @@ Each tick does the following:
 
 Operation ids, under the existing graph access dependency:
 
-- `getDigest` (`GET /api/digest`): the latest run's digest. Returns 200 with `run: null` when no run exists.
+- `getDigest` (`GET /api/digest`): the latest run's digest. Returns 200 with `run: null` when no run exists. Every digest response also carries `nightly_at` and `nightly_enabled` from settings, for the no-runs copy.
 - `getDigestByDate` (`GET /api/digest/{date}`): the digest of the latest run on that `run_date`. Returns 404 if there is none and 422 for a bad date.
 - `listNightlyRuns` (`GET /api/nightly/runs?limit=30`): newest first, giving id, date, trigger, status and remaining.
 - `startNightlyRun` (`POST /api/nightly/run`): starts a manual run. Returns 202 with the run, or 409 `nightly_busy` while a run is open.
