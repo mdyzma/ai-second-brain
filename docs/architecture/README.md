@@ -33,6 +33,7 @@ This is the target architecture for building Second Brain as a **greenfield** sy
 | [0011](adr/0011-backend-language-python-vs-typescript.md) | Python vs TypeScript backend evaluated: Python for now, with explicit conditions that would flip it to TypeScript |
 | [0012](adr/0012-salience-without-popularity-bias.md) | Salience is a bounded ranking prior; staleness needs evidence; distinctiveness protects one-off ideas; dormant items revive by association |
 | [0013](adr/0013-knowledge-graph-review.md) | The knowledge graph is extracted locally, proposed, then decided by the owner; auto-accept only for known entities; decisions survive re-extraction |
+| [0014](adr/0014-nightly-run-and-digest.md) | The nightly run starts from a 15-minute tick that decides in local time; the digest is computed live and empties as the owner reviews |
 
 ## Principles
 
