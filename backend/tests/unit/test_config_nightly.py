@@ -62,6 +62,12 @@ def test_invalid_values(make: Callable[..., Settings], env: dict[str, str]) -> N
         make(**env)
 
 
+@pytest.mark.parametrize("at", ["23:46", "23:50", "23:59"])
+def test_nightly_at_after_last_tick_is_rejected(make: Callable[..., Settings], at: str) -> None:
+    with pytest.raises(ValidationError, match="must be 23:45 or earlier; the schedule is checked"):
+        make(SB_NIGHTLY_AT=at)
+
+
 def test_boundary_values(make: Callable[..., Settings]) -> None:
     s = make(SB_NIGHTLY_MAX_NOTES="100000", SB_NIGHTLY_MAX_HOURS="48")
     assert s.nightly_max_notes == 100_000 and s.nightly_max_hours == 48

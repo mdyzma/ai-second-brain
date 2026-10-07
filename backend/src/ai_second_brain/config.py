@@ -140,7 +140,9 @@ class Settings(BaseSettings):
     @field_validator("nightly_at")
     @classmethod
     def _valid_nightly_at(cls, value: str) -> str:
-        parse_hhmm(value)
+        # The last quarter-hour tick of a day is 23:45; a later time would never be due.
+        if parse_hhmm(value) > time(23, 45):
+            raise ValueError("must be 23:45 or earlier; the schedule is checked every 15 minutes")
         return value
 
     @field_validator("timezone")
