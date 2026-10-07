@@ -2,8 +2,9 @@ from datetime import UTC, date, datetime, time
 from zoneinfo import ZoneInfo
 
 import pytest
+import tzlocal
 
-from ai_second_brain.nightly.schedule import parse_hhmm, run_date_for, should_start
+from ai_second_brain.nightly.schedule import parse_hhmm, resolve_zone, run_date_for, should_start
 
 WAW = ZoneInfo("Europe/Warsaw")
 
@@ -23,7 +24,9 @@ def test_parse_hhmm(text: str, expected: time) -> None:
     assert parse_hhmm(text) == expected
 
 
-@pytest.mark.parametrize("text", ["2:00", "24:00", "12:60", "", "0200", "02:00:00", "ab:cd"])
+@pytest.mark.parametrize(
+    "text", ["2:00", "24:00", "12:60", "", "0200", "02:00:00", "ab:cd", "02:00\n"]
+)
 def test_parse_hhmm_rejects(text: str) -> None:
     with pytest.raises(ValueError):
         parse_hhmm(text)
@@ -51,6 +54,8 @@ def test_fall_back_repeats_the_hour_once() -> None:
     # 2026-10-25: 03:00 CEST -> 02:00 CET. 02:30 happens twice; one run per date.
     assert start(utc(2026, 10, 25, 0, 30), "02:30")  # first 02:30 (CEST)
     assert not start(utc(2026, 10, 25, 1, 30), "02:30", done=True)  # second 02:30 (CET)
+    # Only the existing run blocks it: the wall clock alone would fire a second time.
+    assert start(utc(2026, 10, 25, 1, 30), "02:30", done=False)
 
 
 def test_midnight_and_late_times() -> None:
@@ -62,3 +67,13 @@ def test_midnight_and_late_times() -> None:
 def test_run_date_is_the_local_date() -> None:
     assert run_date_for(utc(2026, 10, 3, 22, 30), WAW) == date(2026, 10, 4)
     assert run_date_for(utc(2026, 10, 3, 21, 30), WAW) == date(2026, 10, 3)
+
+
+def test_empty_zone_follows_host_dst(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tzlocal, "get_localzone", lambda: ZoneInfo("Europe/Warsaw"))
+    tz = resolve_zone("")
+    at = parse_hhmm("02:30")
+    kwargs = {"enabled": True, "has_scheduled_run_today": False}
+    assert not should_start(utc(2026, 3, 29, 0, 45), tz, at, **kwargs)  # 01:45 CET
+    assert should_start(utc(2026, 3, 29, 1, 0), tz, at, **kwargs)  # 03:00 CEST
+    assert run_date_for(utc(2026, 10, 3, 22, 30), tz) == date(2026, 10, 4)  # CEST, not CET

@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from datetime import time
+from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import ValidationError
@@ -45,6 +46,12 @@ def test_valid_values(make: Callable[..., Settings]) -> None:
     "env",
     [
         {"SB_NIGHTLY_AT": "25:00"},
+        {"SB_NIGHTLY_AT": "2:00"},
+        {"SB_NIGHTLY_AT": "02:00\n"},
+        {"SB_TIMEZONE": "Europe"},
+        {"SB_TIMEZONE": "Europe/Warsaw\n"},
+        {"SB_NIGHTLY_MAX_NOTES": "100001"},
+        {"SB_NIGHTLY_MAX_HOURS": "0"},
         {"SB_TIMEZONE": "Mars/Base"},
         {"SB_NIGHTLY_MAX_NOTES": "0"},
         {"SB_NIGHTLY_MAX_HOURS": "49"},
@@ -53,3 +60,16 @@ def test_valid_values(make: Callable[..., Settings]) -> None:
 def test_invalid_values(make: Callable[..., Settings], env: dict[str, str]) -> None:
     with pytest.raises(ValidationError):
         make(**env)
+
+
+def test_boundary_values(make: Callable[..., Settings]) -> None:
+    s = make(SB_NIGHTLY_MAX_NOTES="100000", SB_NIGHTLY_MAX_HOURS="48")
+    assert s.nightly_max_notes == 100_000 and s.nightly_max_hours == 48
+    s = make(SB_NIGHTLY_MAX_NOTES="1", SB_NIGHTLY_MAX_HOURS="1")
+    assert s.nightly_max_notes == 1 and s.nightly_max_hours == 1
+
+
+def test_empty_timezone_resolves_to_host_zone(make: Callable[..., Settings]) -> None:
+    s = make()
+    assert s.timezone == ""
+    assert isinstance(s.nightly_zone, ZoneInfo)

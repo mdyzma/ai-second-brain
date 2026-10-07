@@ -148,7 +148,7 @@ class Settings(BaseSettings):
     def _valid_timezone(cls, value: str) -> str:
         try:
             resolve_zone(value)
-        except (ValueError, KeyError, ZoneInfoNotFoundError) as error:
+        except (ValueError, KeyError, OSError, ZoneInfoNotFoundError) as error:
             raise ValueError("unknown IANA time zone") from error
         return value
 

@@ -5,14 +5,16 @@ periodic task only ticks; the local-time decision lives here (spec §5.1).
 """
 
 import re
-from datetime import UTC, date, datetime, time, tzinfo
+from datetime import date, datetime, time, tzinfo
 from zoneinfo import ZoneInfo
 
-_HHMM = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+import tzlocal
+
+_HHMM = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
 
 
 def parse_hhmm(text: str) -> time:
-    match = _HHMM.match(text)
+    match = _HHMM.fullmatch(text)
     if not match:
         raise ValueError("expected HH:MM between 00:00 and 23:59")
     return time(int(match[1]), int(match[2]))
@@ -21,7 +23,10 @@ def parse_hhmm(text: str) -> time:
 def resolve_zone(name: str) -> tzinfo:
     """An IANA zone, or the host's local zone when empty. Raises on unknown names."""
     if not name:
-        return datetime.now().astimezone().tzinfo or UTC
+        # The host's real IANA zone, not a fixed UTC offset: an offset would not follow DST,
+        # so the default (empty) setting would shift the nightly start by an hour after a
+        # clock change (spec exit criterion 1).
+        return tzlocal.get_localzone()
     return ZoneInfo(name)
 
 
