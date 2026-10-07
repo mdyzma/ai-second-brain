@@ -50,7 +50,7 @@ describe("startRun", () => {
     expect(spy).toHaveBeenCalledWith({ queryKey: digestKeys.all });
   });
 
-  it("rejects with HttpError(409) when a run is busy", async () => {
+  it("refreshes the digest and rejects with HttpError(409) when a run is busy", async () => {
     const qc = new QueryClient();
     const spy = vi.spyOn(qc, "invalidateQueries").mockResolvedValue();
     post.mockResolvedValue({
@@ -61,6 +61,15 @@ describe("startRun", () => {
     const error = await startRun(qc).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(HttpError);
     expect((error as HttpError).status).toBe(409);
+    expect(spy).toHaveBeenCalledWith({ queryKey: digestKeys.all });
+  });
+
+  it("does not refresh on other errors", async () => {
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries").mockResolvedValue();
+    post.mockResolvedValue({ data: undefined, response: { status: 503 } });
+    const error = await startRun(qc).catch((e: unknown) => e);
+    expect((error as HttpError).status).toBe(503);
     expect(spy).not.toHaveBeenCalled();
   });
 });

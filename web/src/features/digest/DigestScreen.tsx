@@ -51,7 +51,9 @@ export function DigestScreen({ runId, onRun }: DigestScreenProps) {
   ];
   const selected = runId ?? run?.id ?? "";
   if (run && selected === run.id && !options.some((r) => r.id === run.id)) options.unshift(run);
-  const busy = start.error instanceof HttpError && start.error.status === 409;
+  const conflict = start.error instanceof HttpError && start.error.status === 409;
+  // The busy line holds until a digest fetched after the click shows no run in progress.
+  const busy = conflict && !(digest.dataUpdatedAt > start.submittedAt && run?.status !== "running");
 
   return (
     <div className="max-w-3xl space-y-5">
@@ -98,7 +100,7 @@ export function DigestScreen({ runId, onRun }: DigestScreenProps) {
       <p role="status" aria-live="polite" className="text-sm text-fg-muted">
         {busy ? BUSY : null}
       </p>
-      {start.isError && !busy ? (
+      {start.isError && !conflict ? (
         <p role="alert" className="text-sm text-danger-fg">
           {START_ERROR}
         </p>

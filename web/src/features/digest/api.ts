@@ -45,10 +45,14 @@ export const nightlyRunsQuery = queryOptions({
   },
 });
 
-/** Start a manual run; rejects with HttpError (409 while a run is open). */
+/** Start a manual run; rejects with HttpError (409 while a run is open). A 409 means the
+ * cached digest is stale (it showed no open run), so it is refreshed before rejecting. */
 export async function startRun(queryClient: QueryClient) {
   const { data, response } = await api.POST("/api/nightly/run");
-  if (!data) throw new HttpError(response.status);
+  if (!data) {
+    if (response.status === 409) await queryClient.invalidateQueries({ queryKey: digestKeys.all });
+    throw new HttpError(response.status);
+  }
   await queryClient.invalidateQueries({ queryKey: digestKeys.all });
   return data;
 }

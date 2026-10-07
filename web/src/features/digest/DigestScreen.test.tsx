@@ -155,6 +155,7 @@ async function setup(initialRun?: string) {
     </QueryClientProvider>,
   );
   await screen.findByRole("heading", { level: 1, name: "Digest" });
+  return qc;
 }
 
 beforeEach(() => {
@@ -347,10 +348,36 @@ describe("DigestScreen", () => {
     expect(post).toHaveBeenCalledWith("/api/nightly/run");
     await waitFor(() => expect(button).toBeEnabled());
     expect(screen.queryByText("A run is already in progress.")).not.toBeInTheDocument();
+    // Another process started a run: the 409 refreshes the digest, which now shows it.
+    mockGet(digest({}, { status: "running", done: 1 }));
     await user.click(button);
     const busy = await screen.findByText("A run is already in progress.");
     expect(busy).toHaveAttribute("role", "status");
     expect(post).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText("Reading notes: 1 of 10.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("clears the busy line once the run ends", async () => {
+    mockGet(digest());
+    post.mockResolvedValue({
+      data: undefined,
+      error: { detail: "nightly_busy" },
+      response: { status: 409 },
+    });
+    const qc = await setup();
+    const button = await screen.findByRole("button", { name: "Run now" });
+    await waitFor(() => expect(button).toBeEnabled());
+    mockGet(digest({}, { status: "running", done: 1 }));
+    await userEvent.setup().click(button);
+    expect(await screen.findByText("A run is already in progress.")).toBeInTheDocument();
+    mockGet(digest());
+    await qc.invalidateQueries();
+    await waitFor(() =>
+      expect(screen.queryByText("A run is already in progress.")).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run now" })).toBeEnabled();
   });
 
   it("switches runs by id, also to an earlier run on the same date", async () => {
