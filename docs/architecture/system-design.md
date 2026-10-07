@@ -339,12 +339,12 @@ The "STM buffer" from the prompt is the set of `pending` revisions plus recently
 Scheduled at 02:00 via the job scheduler; idempotent per revision.
 
 1. **(Phase 5) Wake inference host (optional).** If the GPU workstation is configured as the consolidation host and is asleep, send WoL, wait for `online` with a deadline (e.g. 5 min). If it does not come up, fall back to the Proxmox CPU model or skip and retry next night. This is where hardware orchestration directly serves memory — see [product-brainstorm.md](product-brainstorm.md#idea-3-the-nightly-shift).
-2. **(4a/4b) Select work:** revisions indexed since last run and not yet consolidated (`metadata->>'consolidated_at' IS NULL`).
+2. **(4a/4b) Select work:** current revisions without an `extractions` row at the current extractor version, plus earlier failures, capped per night.
 3. **(4a/4b) Extract** with the local model, per revision, structured JSON: entities mentioned, candidate relations, one-line summary. Validate against a Pydantic schema; invalid output → retry once → mark `consolidation_failed`.
 4. **(4a/4b) Resolve** entities against existing ones (exact name → alias table → embedding similarity of entity names ≥ threshold). New entities are created as `proposed` unless confidence is high.
 5. **(4a/4b) Write edges** with `origin='llm:<model>'`, `confidence`, `status='proposed'|'accepted'` by threshold.
 6. **(Phase 7) Recompute salience** (4.3) and apply tier transitions.
-7. **(4a/4b) Morning digest:** a short report — new entities, low-confidence links awaiting review, "Rediscover" (at most 1 dormant idea strongly matching yesterday's work; a 3–5 item batch on Sundays), newly superseded items, failures. It is shown as the **Digest** screen in the web UI (the landing page each morning) and can optionally be written as a note into the vault.
+7. **(4b) Morning digest:** new entities, links to review and failures, plus a count of everything still awaiting review. It is shown as the **Digest** screen in the web UI (the landing page each morning). "Rediscover", newly superseded items and an optional digest note in the vault are Phase 7.
 8. **(Phase 5) Suspend** the GPU host if the system woke it and nobody else is using it (check GPU util + logged-in sessions).
 
 All LLM calls in the sleep cycle go through the `llm` gateway with `sensitivity` of the revision; private revisions can only reach the local tier.

@@ -1,6 +1,7 @@
 # Phase 4b: the nightly run and the morning digest
 
 Date: 2026-10-04 · Status: **approved, implemented** · Owner: Michal Dyzma
+Amended 2026-10-07 after the final review (owner rulings): the run lifecycle guard and close-on-read (§5.2, §5.3), `open_total` and selection by run id (§6.2, §7, §8), the 23:45 limit (§5.1), the disabled and timed-out copy (§6.3), and "changed" counting notes (§6.2).
 Parent docs: [system design](../../architecture/system-design.md) §4.2 (sleep cycle), §9 · [ADR-0003](../../architecture/adr/0003-postgres-job-queue.md) · [ADR-0013](../../architecture/adr/0013-knowledge-graph-review.md) · builds on [Phase 4a](2026-10-03-phase-4a-knowledge-graph-design.md)
 
 ## 1. Purpose and success
@@ -12,7 +13,7 @@ The digest is a **review inbox**, not a journal. Its job is to get the owner fro
 **Success (exit criteria):**
 1. With the worker running, a run starts by itself once per local day at or after `SB_NIGHTLY_AT`. This holds across DST changes and after the server was off at that time.
 2. A run queues new, changed and failed notes for extraction, up to the nightly cap. It closes when those jobs are done.
-3. `/digest` is the landing page. It shows the latest run's summary, the proposed entities and links still awaiting review, failures and indexing activity. Past runs can be opened by date.
+3. `/digest` is the landing page. It shows the latest run's summary, the proposed entities and links still awaiting review, failures and indexing activity. Past runs can be opened by date and by run.
 4. "Run now" and `just nightly` start a run by hand.
 5. The digest, the run rows and the logs contain counts, ids, names the owner can already see in Review, and note paths. Logs contain no note text, summaries or entity names.
 6. CI is green on Linux and macOS and releases v0.8.0.
@@ -103,7 +104,7 @@ Each tick does the following:
 | Setting | Default | Meaning |
 |---|---|---|
 | `SB_NIGHTLY_ENABLED` | `true` | Turn off the schedule. Manual runs still work. |
-| `SB_NIGHTLY_AT` | `02:00` | Local start time, as `HH:MM`, validated. |
+| `SB_NIGHTLY_AT` | `02:00` | Local start time, as `HH:MM`, validated: `00:00` to `23:45`. A later time is rejected ("must be 23:45 or earlier; the schedule is checked every 15 minutes"), because no quarter-hour tick of that day would reach it. |
 | `SB_TIMEZONE` | system zone | An IANA name, validated with `zoneinfo`. Unset uses the host zone. |
 | `SB_NIGHTLY_MAX_NOTES` | `500` | Cap on notes queued per run, new and failed together (1–100000). |
 | `SB_NIGHTLY_MAX_HOURS` | `8` | Close a run still open after this many hours (1–48). |
@@ -122,13 +123,14 @@ Each tick does the following:
    - It returns `(queued_new, queued_failed)`.
 4. Store the counts. If both are zero, mark the run `complete` at once.
 
-**Failure while starting:** if any step after the insert raises, a short transaction records the run as `failed`. Jobs already deferred stay queued; their per-revision locks stop duplicates, and the next run counts only new ones. The row is recorded, with `error` set to a code such as `db_error` or `queue_error`. The digest shows the failed run. Because it is `failed`, the next tick may start a new scheduled run the same day.
+**Failure while starting:** if any step after the insert raises, a short transaction on a **fresh pool connection** records the run as `failed` (the first connection may be what broke). Counts are only written to a run still `running`. Jobs already deferred stay queued; their per-revision locks stop duplicates, and the next run counts only new ones. The row is recorded, with `error` set to a code such as `db_error` or `queue_error`. The digest shows the failed run. Because it is `failed`, the next tick may start a new scheduled run the same day.
 
 ### 5.3 Closing a run
 
 - A `running` run becomes `complete`, with `finished_at` set, when no `extract` jobs are waiting or running. This is the same "queued" count 4a's status uses.
 - If it has been open longer than `SB_NIGHTLY_MAX_HOURS`, it is closed with `timed_out = true`. Its jobs keep running.
-- Closing is stateless, so a worker restart mid-run is safe.
+- **A run still being queued is never closed.** A `running` run with zero counts is either being queued now (§5.2 step 4 finishes a run that queued nothing in the same commit as its counts) or orphaned by a start that died. It is left open for 5 minutes; after that it is marked `failed` with error `start_interrupted`, so the next tick retries the day.
+- Closing is stateless, so a worker restart mid-run is safe. Each tick closes, and so does every digest read (**close-on-read**, §7), so a drained run reads as complete on the next poll, not at the next tick.
 - **Known limitation:** an extraction started by hand during a nightly run (with `just graph-extract`) keeps the run open until it also drains. Its results count towards the run.
 
 ## 6. The digest
@@ -153,11 +155,12 @@ Each tick does the following:
 2. **To review:**
    - Entities created in the output window that are still `proposed`. These are grouped by type with counts, plus the top 5 by confidence: id, name, type and the note they came from.
    - Edges created in the output window that are still `proposed` and visible under 4a's review rules (no rejected endpoint, live source). These come as a count plus the top 5 by confidence, with subject, relation and object.
-   - `remaining` is the sum of both counts. The nav badge shows the latest run's `remaining`.
+   - `remaining` is the sum of both counts: this run's items still awaiting review.
+   - `open_total` is everything awaiting review, from any run and with no time window: every `proposed` entity plus every proposed link the Links tab shows (the shared review fragments). The nav badge and "All caught up" use `open_total`, so a quiet night or a morning Run now never hides older items.
 3. **Failed:** extractions with `status = 'failed'` and `attempted_at` in the output window, whose revision is still current. This is a count plus the first 10 by path, with the error code.
 4. **Indexed:**
    - sources created in the input window;
-   - revisions in it that replaced an earlier one (changed);
+   - notes changed in it: distinct notes with a revision observed in the input window that already had an earlier revision, excluding notes created in the window (a note saved many times counts once);
    - sources tombstoned in it (deleted).
 
 ### 6.3 Copy rules
@@ -165,18 +168,21 @@ Each tick does the following:
 - **Summary line:** for example, "Last night: 42 notes read, 3 failed, 18 to review."
 - **Running:** "Reading notes: 12 of 42."
 - **Unavailable:** "Extraction is off: no Ollama endpoint is configured (`SB_OLLAMA_ENDPOINTS`)."
-- **Timed out:** "Stopped waiting after 8 hours. Remaining notes will finish in the background."
+- **Timed out:** "Stopped waiting after 8 hours. Remaining notes will finish in the background." The hours are `SB_NIGHTLY_MAX_HOURS` (`nightly_max_hours` in the response), not the time between start and close.
 - **Failed run:** "Last night's run failed to start (db_error). It will try again at the next check."
-- **Empty To review:** "All caught up."
+- **Empty To review:** "All caught up." only when `open_total` is 0. When this run has nothing but earlier items wait: "Nothing new from this run."
+- **Earlier items:** when `open_total > remaining`, "{n} more waiting from earlier runs.", linking to `/review`.
 - **Failures:** "Retried next night, or run `just graph-extract --failed` now."
 - **No runs yet:** "No nightly run yet. The first starts at 02:00, or press Run now."
+- **No runs yet, schedule off** (`nightly_enabled` false): "Nightly runs are off (SB_NIGHTLY_ENABLED). Press Run now to start one."
 
 ## 7. API and CLI
 
 Operation ids, under the existing graph access dependency:
 
-- `getDigest` (`GET /api/digest`): the latest run's digest. Returns 200 with `run: null` when no run exists. Every digest response also carries `nightly_at` and `nightly_enabled` from settings, for the no-runs copy.
+- `getDigest` (`GET /api/digest`): the latest run's digest. Returns 200 with `run: null` when no run exists. Every digest response also carries `nightly_at`, `nightly_enabled` and `nightly_max_hours` from settings, for the no-runs and timed-out copy. Every digest read first closes a drained run (close-on-read, §5.3).
 - `getDigestByDate` (`GET /api/digest/{date}`): the digest of the latest run on that `run_date`. Returns 404 if there is none and 422 for a bad date.
+- `getDigestByRun` (`GET /api/digest/run/{run_id}`): the digest of one run. Returns 404 for an unknown id and 422 for a bad one. This reaches every run, including an earlier one on the same date.
 - `listNightlyRuns` (`GET /api/nightly/runs?limit=30`): newest first, giving id, date, trigger, status and remaining.
 - `startNightlyRun` (`POST /api/nightly/run`): starts a manual run. Returns 202 with the run, or 409 `nightly_busy` while a run is open.
 
@@ -188,14 +194,14 @@ CLI:
 ## 8. Web
 
 - **Route `/digest`:** replaces the placeholder.
-  - Header: the date picker (from `listNightlyRuns`) and a "Run now" button. "Run now" is disabled while running and shows the busy copy on 409.
+  - Header: the run picker (from `listNightlyRuns`, labelled "2026-10-07 02:00 · Scheduled") and a "Run now" button. The picker selects a run by id with `?run=<uuid>`. "Run now" is disabled while running. A 409 refreshes the digest and shows the busy copy until a refreshed digest shows no run in progress.
   - Sections as in §6.2.
   - Each entity in To review links to `/entities/$entityId`. "Review all" opens `/review`, and "Review links" opens `/review` on its Links tab.
   - Uses the shared screen components and tokens.
   - Headings and lists are accessible. Progress and status changes are announced politely through `aria-live`.
 - **Polling:** the digest refetches every 5 s while the run is `running`, otherwise every 60 s. A decision on `/review` invalidates the digest query.
-- **Nav badge:** the Digest nav item shows `remaining` from the latest run when it is more than 0, labelled for screen readers ("18 to review").
-- **Landing:** `/` redirects to `/digest`.
+- **Nav badge:** the Digest nav item shows `open_total` when it is more than 0, labelled for screen readers ("18 to review").
+- **Landing:** `/` redirects to `/digest`, and so does a login with no usable destination.
 
 ## 9. Privacy and logging
 
@@ -209,7 +215,7 @@ CLI:
 - `should_start` across:
   - before and after `nightly_at`;
   - DST spring-forward and fall-back days, in Europe/Warsaw;
-  - `00:00` and `23:45`;
+  - `00:00` and `23:45` (and `23:46` or later rejected by settings);
   - disabled;
   - today's run already present;
   - catch-up at 09:00 after a missed 02:00.

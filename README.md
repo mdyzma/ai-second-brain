@@ -142,18 +142,19 @@ Known limitations: a proposed relation shared by two notes is dropped when one o
 
 ## Digest
 
-**What runs at night.** Once a night, at the local time you set, the worker starts a run: it queues extraction for new, changed and previously failed notes, and for notes whose extractor version is out of date, up to a cap. It uses the same local model and the same `extract` queue as the manual run. Every morning the **Digest** screen shows what the night produced and what still waits for you: new entities and the links to review. It is a review inbox, so items drop out as you decide on them. The **To review** list follows the same rule as the Links tab on Review. `/` now opens the Digest, and its sidebar item shows a badge with the to-review count. The design is in [ADR-0014](docs/architecture/adr/0014-nightly-run-and-digest.md) and the [Phase 4b spec](docs/superpowers/specs/2026-10-04-phase-4b-nightly-digest-design.md).
+**What runs at night.** Once a night, at the local time you set, the worker starts a run: it queues extraction for new, changed and previously failed notes, and for notes whose extractor version is out of date, up to a cap. It uses the same local model and the same `extract` queue as the manual run. Every morning the **Digest** screen shows what the night produced and what still waits for you: new entities and the links to review. It is a review inbox, so items drop out as you decide on them. The **To review** list shows the run's own items and follows the same rule as the Links tab on Review. When items from earlier runs still wait, a line under it says how many and links to Review. `/` now opens the Digest, and its sidebar item shows a badge with everything awaiting review, from any run. "All caught up" appears only when nothing waits at all. The design is in [ADR-0014](docs/architecture/adr/0014-nightly-run-and-digest.md) and the [Phase 4b spec](docs/superpowers/specs/2026-10-04-phase-4b-nightly-digest-design.md).
 
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `SB_NIGHTLY_ENABLED` | `true` | Turns the schedule on or off. Run now still works when it is off. |
-| `SB_NIGHTLY_AT` | `02:00` | Local start time, `HH:MM`. |
+| `SB_NIGHTLY_AT` | `02:00` | Local start time, `HH:MM`, from `00:00` to `23:45`. The schedule is checked every 15 minutes, so a later time is rejected at startup. |
 | `SB_TIMEZONE` | empty | IANA zone for the start time, for example `Europe/Warsaw`. Empty uses this host's zone, with daylight saving. An unknown value stops the app at startup. |
 | `SB_NIGHTLY_MAX_NOTES` | `500` | The most notes one run queues. |
 | `SB_NIGHTLY_MAX_HOURS` | `8` | Hours after which a run stops waiting for its jobs. |
 
 - **Run now.** The **Run now** button on the Digest starts a run at once. `just nightly` does the same, and `just nightly-status` prints the latest run's summary.
-- **A run closes late.** A run closes when the 15-minute check finds extraction finished, so after Run now the progress line can say "Reading notes x of y" for up to 15 minutes after the work is done.
+- **Past runs.** The **Run** picker lists runs by date, start time and trigger, so a morning Run now does not hide the night's run on the same date. A run's digest has its own link, `/digest?run=<id>`; the API also serves `GET /api/digest/run/{run_id}` and, for the latest run on a date, `GET /api/digest/{date}`.
+- **A run closes when its work is done.** Opening the Digest closes a run whose extraction has finished, so the progress line turns into the summary within a few seconds. The 15-minute check closes it too when nobody is looking.
 - **Known limitations.** A `graph-extract` you start by hand during a run keeps that run open and counts toward it. Past runs' counts can drop when a later run retries the same note.
 
 ## Roadmap
