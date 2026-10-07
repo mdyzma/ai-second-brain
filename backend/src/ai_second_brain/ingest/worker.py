@@ -25,6 +25,7 @@ from ai_second_brain.knowledge.jobs import (
     EMBED_QUEUE,
     EXTRACT_QUEUE,
     INGEST_QUEUE,
+    NIGHTLY_QUEUE,
     create_job_app,
 )
 from ai_second_brain.knowledge.queue import ProcrastinateQueue
@@ -191,7 +192,8 @@ def start_job_loops(
     app: App, ctx: IngestContext, graph_ctx: GraphContext, stop: asyncio.Event
 ) -> list[asyncio.Task[None]]:
     """Two supervised job loops. Extraction (minutes-long model calls) gets its own loop with
-    one slot, so a backlog of it can never take the slots that keep edits searchable in seconds."""
+    one slot, so a backlog of it can never take the slots that keep edits searchable in seconds.
+    The short 15-minute nightly tick shares the ingest/embed loop."""
     context = {"ingest": ctx, "graph": graph_ctx}
 
     def loop(queues: list[str], concurrency: int) -> Callable[[], Awaitable[None]]:
@@ -207,7 +209,7 @@ def start_job_loops(
         return run_jobs
 
     return [
-        asyncio.create_task(_supervise(loop([INGEST_QUEUE, EMBED_QUEUE], 2), stop)),
+        asyncio.create_task(_supervise(loop([INGEST_QUEUE, EMBED_QUEUE, NIGHTLY_QUEUE], 2), stop)),
         asyncio.create_task(_supervise(loop([EXTRACT_QUEUE], 1), stop)),
     ]
 

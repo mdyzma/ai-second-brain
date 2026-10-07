@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 INGEST_QUEUE = "ingest"
 EMBED_QUEUE = "embed"
 EXTRACT_QUEUE = "extract"
+NIGHTLY_QUEUE = "nightly"
 
 blueprint = Blueprint()
 
@@ -151,6 +152,20 @@ async def reconcile_vault_task(context: JobContext, run_id: int) -> None:
     from ai_second_brain.vault.reconcile import reconcile
 
     await reconcile(_ctx(context), trigger="manual", run_id=run_id)
+
+
+# procrastinate evaluates cron in UTC and drops ticks over 10 minutes late, so the tick only
+# ticks; `nightly.run.tick` decides in local time (4b spec §5.1). The periodic deferrer passes
+# the scheduled time as the `timestamp` keyword; the lock keeps at most one tick waiting.
+@blueprint.periodic(cron="*/15 * * * *")
+@blueprint.task(
+    name="nightly_tick", queue=NIGHTLY_QUEUE, queueing_lock="nightly-tick", pass_context=True
+)
+async def nightly_tick_task(context: JobContext, timestamp: int) -> None:
+    from ai_second_brain.nightly.run import tick
+
+    ctx = _ctx(context)
+    await tick(ctx.pool, ctx.queue, ctx.settings)
 
 
 class _QuickOpenPool(AsyncConnectionPool):

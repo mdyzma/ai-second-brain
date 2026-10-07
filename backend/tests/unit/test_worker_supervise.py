@@ -109,16 +109,16 @@ def test_extraction_runs_in_its_own_loop_and_both_stop_on_shutdown() -> None:
         app = _FakeApp(stop)
         tasks = worker.start_job_loops(app, "ingest-ctx", "graph-ctx", stop)  # pyright: ignore[reportArgumentType]
         await asyncio.sleep(0.1)
-        assert app.running == {("ingest", "embed"), ("extract",)}
+        assert app.running == {("ingest", "embed", "nightly"), ("extract",)}
         by_queue = {tuple(r["queues"]): r for r in app.runs}
-        assert by_queue[("ingest", "embed")]["concurrency"] == 2
+        assert by_queue[("ingest", "embed", "nightly")]["concurrency"] == 2
         assert by_queue[("extract",)]["concurrency"] == 1
         for run_args in app.runs:
             assert run_args["additional_context"] == {"ingest": "ingest-ctx", "graph": "graph-ctx"}
         stop.set()
         await asyncio.wait_for(asyncio.gather(*tasks), 5)
         assert app.running == set()
-        assert set(app.cancelled) == {("ingest", "embed"), ("extract",)}
+        assert set(app.cancelled) == {("ingest", "embed", "nightly"), ("extract",)}
 
     run(scenario())
 
@@ -129,12 +129,23 @@ def test_crashed_extract_loop_restarts_while_ingest_keeps_running() -> None:
         app = _FakeApp(stop, extract_crashes=1)
         tasks = worker.start_job_loops(app, "i", "g", stop)  # pyright: ignore[reportArgumentType]
         await asyncio.sleep(0.1)
-        assert app.running == {("ingest", "embed")}  # extract is backing off (1 s)
+        assert app.running == {("ingest", "embed", "nightly")}  # extract is backing off (1 s)
         await asyncio.sleep(1.3)
-        assert app.running == {("ingest", "embed"), ("extract",)}
-        ingest_runs = [r for r in app.runs if tuple(r["queues"]) == ("ingest", "embed")]
+        assert app.running == {("ingest", "embed", "nightly"), ("extract",)}
+        ingest_runs = [r for r in app.runs if tuple(r["queues"]) == ("ingest", "embed", "nightly")]
         assert len(ingest_runs) == 1  # never restarted
         stop.set()
         await asyncio.wait_for(asyncio.gather(*tasks), 5)
 
     run(scenario())
+
+
+def test_nightly_tick_is_periodic_on_the_nightly_queue() -> None:
+    from ai_second_brain.knowledge.jobs import NIGHTLY_QUEUE, create_job_app
+
+    app = create_job_app("postgresql://u@127.0.0.1:1/x")
+    [periodic] = app.periodic_registry.periodic_tasks.values()
+    assert periodic.task.name == "ingest:nightly_tick"
+    assert periodic.cron == "*/15 * * * *"
+    assert periodic.task.queue == NIGHTLY_QUEUE == "nightly"
+    assert periodic.task.queueing_lock == "nightly-tick"

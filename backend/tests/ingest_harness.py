@@ -92,6 +92,10 @@ async def ingest_harness(
             async with pool.connection() as conn:
                 await conn.execute(TRUNCATE_ALL)
         app = create_job_app(db_url)
+        # Every run_worker_async (drain() too) starts procrastinate's periodic deferrer, which
+        # would defer a `nightly_tick` job right away if a quarter hour passed in the last 10
+        # minutes. Tests drive `tick()` directly, so the harness never schedules it.
+        app.periodic_registry.periodic_tasks.clear()
         async with app.open_async(), create_http_client() as client:
             embedder = Embedder(embed_url, "bge-m3", 1024, client, FAST) if embed_url else None
             vault = Vault(vault_root, settings.vault_excludes) if vault_root else None

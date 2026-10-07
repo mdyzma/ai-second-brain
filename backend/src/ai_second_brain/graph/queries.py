@@ -46,6 +46,17 @@ _LIVE = (
 )
 
 
+async def extract_queue_depth(conn: AsyncConnection) -> int:
+    """Extract jobs waiting or running: `graphStatus.queued` and the nightly close check."""
+    cur = await conn.execute(
+        "SELECT count(*) FROM procrastinate_jobs"
+        " WHERE queue_name = %s AND status IN ('todo', 'doing')",
+        (EXTRACT_QUEUE,),
+    )
+    row = await cur.fetchone()
+    return int(row[0]) if row else 0
+
+
 async def graph_status(conn: AsyncConnection, version: str) -> dict[str, Any]:
     """Spec section 8 `graphStatus`, minus the model and availability.
 
@@ -67,12 +78,7 @@ async def graph_status(conn: AsyncConnection, version: str) -> dict[str, Any]:
     )
     for etype, status, count in await cur.fetchall():
         entities.setdefault(etype, dict.fromkeys(STATUSES, 0))[status] = int(count)
-    cur = await conn.execute(
-        "SELECT count(*) FROM procrastinate_jobs"
-        " WHERE queue_name = %s AND status IN ('todo', 'doing')",
-        (EXTRACT_QUEUE,),
-    )
-    queued = await cur.fetchone()
+    queued = await extract_queue_depth(conn)
     return {
         "extractor_version": version,
         "revisions": {
@@ -82,7 +88,7 @@ async def graph_status(conn: AsyncConnection, version: str) -> dict[str, Any]:
             "pending": total - extracted - failed,
         },
         "entities": entities,
-        "queued": int(queued[0]) if queued else 0,
+        "queued": queued,
     }
 
 
