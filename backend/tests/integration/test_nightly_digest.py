@@ -119,15 +119,21 @@ async def _edge(
     *,
     src_type: str = "entity",
     revision: UUID | None = None,
+    owner: bool = False,
 ) -> UUID:
+    """A proposed automatic edge, or with `owner` an accepted one the owner made."""
     [row] = await h.rows(
         "INSERT INTO edges (src_type, src_id, relation, dst_entity_id, confidence, origin,"
-        " revision_id, created_at) VALUES (%s, %s, %s, %s, %s, 'llm:fake', %s, %s) RETURNING id",
+        " status, decided_by, revision_id, created_at)"
+        " VALUES (%s, %s, %s, %s, %s, %s, %s::graph_status, %s, %s, %s) RETURNING id",
         src_type,
         src,
         relation,
         dst,
         confidence,
+        "user" if owner else "llm:fake",
+        "accepted" if owner else "proposed",
+        "user" if owner else "auto",
         revision,
         created,
     )
@@ -226,6 +232,7 @@ def test_links_follow_review_visibility(db_url: str, tmp_path: Path) -> None:
         rel = await _edge(h, a, "uses", b, 0.8, T + 5 * M, revision=notes.revisions[0])
         mention = await _edge(h, notes.sources[1], "mentions", a, 0.3, T + 6 * M, src_type="source")
         early = await _edge(h, b, "part_of", a, 0.6, T - H)  # before the output window
+        await _edge(h, b, "works_with", a, 1.0, T + 7 * M, owner=True)  # owner-made: never
 
         count, ids, _ = await _link_ids(h, run)
         assert (count, ids) == (2, {rel, mention})
@@ -270,6 +277,8 @@ def test_failed_counts_only_current_live_revisions(db_url: str, tmp_path: Path) 
         await _extraction(h, old["id"], "failed", T + 10 * M)  # superseded revision
         await _extraction(h, notes.revisions[2], "failed", T + 10 * M)
         await h.rows("UPDATE sources SET deleted_at = now() WHERE id = %s", notes.sources[2])
+        # failed at an older extractor version, then succeeded later in the window
+        await _extraction(h, notes.revisions[1], "failed", T + 5 * M, version="v0")
         await _extraction(h, notes.revisions[1], "ok", T + 10 * M)
 
         d = await _digest(h, run)
@@ -381,5 +390,76 @@ def test_running_run_uses_now_as_window_end(db_url: str, tmp_path: Path) -> None
         assert d["review"]["entities"]["count"] == 1
         assert d["run"]["status"] == "running" and d["run"]["finished_at"] is None
         assert d["run"]["done"] == 1  # two attempted, capped at the one queued
+
+    scenario(db_url, tmp_path, body)
+
+
+def test_done_counts_only_attempts_in_the_output_window(db_url: str, tmp_path: Path) -> None:
+    async def body(h: Harness, notes: Notes) -> None:
+        run = await _run(h, started=T, finished=T + H, window=T - timedelta(days=1), queued_new=3)
+        await _extraction(h, notes.revisions[0], "ok", T + 10 * M)
+        await _extraction(h, notes.revisions[1], "ok", T + H)  # at finished_at: after
+        await _extraction(h, notes.revisions[2], "failed", T + 2 * H)  # a later run's
+        assert (await _digest(h, run))["run"]["done"] == 1
+
+    scenario(db_url, tmp_path, body)
+
+
+MS = timedelta(milliseconds=1)
+
+
+@pytest.mark.parametrize(
+    ("at", "inside"),
+    [(T - MS, False), (T, True), (T + H - MS, True), (T + H, False)],
+    ids=["before-start", "at-start", "before-end", "at-end"],
+)
+def test_output_window_edges(db_url: str, tmp_path: Path, at: datetime, inside: bool) -> None:
+    """[started_at, finished_at): entities, links and failures."""
+
+    async def body(h: Harness, notes: Notes) -> None:
+        run = await _run(h, started=T, finished=T + H, window=T - timedelta(days=1))
+        await _entity(h, "Edge", at)
+        a = await _entity(h, "Alpha", T - 2 * H, status="accepted")
+        b = await _entity(h, "Bravo", T - 2 * H, status="accepted")
+        await _edge(h, a, "uses", b, 0.8, at)
+        await _extraction(h, notes.revisions[0], "failed", at)
+        d = await _digest(h, run)
+        n = 1 if inside else 0
+        assert d["review"]["entities"]["count"] == n
+        assert d["review"]["links"]["count"] == n
+        assert d["failed"]["count"] == n
+
+    scenario(db_url, tmp_path, body)
+
+
+@pytest.mark.parametrize(
+    ("at", "inside"),
+    [
+        (T - timedelta(days=1) - MS, False),
+        (T - timedelta(days=1), True),
+        (T - MS, True),
+        (T, False),
+    ],
+    ids=["before-start", "at-start", "before-end", "at-end"],
+)
+def test_input_window_edges(db_url: str, tmp_path: Path, at: datetime, inside: bool) -> None:
+    """[window_start, started_at): created, changed and deleted."""
+
+    async def body(h: Harness, notes: Notes) -> None:
+        long_ago = T - timedelta(days=10)
+        await h.rows("UPDATE sources SET created_at = %s", long_ago)
+        await h.rows("UPDATE source_revisions SET observed_at = %s", long_ago)
+        await h.rows("UPDATE sources SET created_at = %s WHERE id = %s", at, notes.sources[0])
+        await h.rows("UPDATE sources SET deleted_at = %s WHERE id = %s", at, notes.sources[2])
+        await h.rows(
+            "INSERT INTO source_revisions (source_id, content_hash, raw_text, observed_at)"
+            " VALUES (%s, '\\x01', 'new', %s)",
+            notes.sources[1],
+            at,
+        )
+        run = await _run(h, started=T, finished=T + H, window=T - timedelta(days=1))
+        n = 1 if inside else 0
+        d = await _digest(h, run)
+        assert d["indexed"] == {"created": n, "changed": n, "deleted": n, "since_beginning": False}
 
     scenario(db_url, tmp_path, body)

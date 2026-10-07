@@ -40,9 +40,10 @@ _REVIEW_LINKS: LiteralString = (
     + REVIEW_LINK_VISIBLE
     + " AND g.created_at >= r.started_at AND g.created_at < r.out_end"
 )
-# An entity's confidence: its best note mention/about edge (entities carry none).
+# An entity's confidence: its best mention/about edge from a live note (entities carry none).
 _ENTITY_CONFIDENCE: LiteralString = (
-    "(SELECT max(m.confidence) FROM edges m WHERE m.src_type = 'source'"
+    "(SELECT max(m.confidence) FROM edges m JOIN sources ms ON ms.id = m.src_id"
+    " AND ms.deleted_at IS NULL WHERE m.src_type = 'source'"
     " AND m.relation IN ('mentions', 'about') AND m.dst_entity_id = e.id)"
 )
 
@@ -93,7 +94,9 @@ async def digest(conn: AsyncConnection, run_id: UUID) -> dict[str, Any] | None:
             " n.started_at, n.finished_at, n.queued_new, n.queued_failed, n.timed_out,"
             " n.unavailable, n.error,"
             " least((SELECT count(DISTINCT x.revision_id) FROM extractions x"
-            "  WHERE x.attempted_at >= n.started_at), n.queued_new + n.queued_failed) AS done,"
+            "  WHERE x.attempted_at >= n.started_at"
+            "  AND x.attempted_at < coalesce(n.finished_at, now())),"
+            "  n.queued_new + n.queued_failed) AS done,"
             " n.window_start = '-infinity' AS since_beginning"
             " FROM nightly_runs n WHERE n.id = %(id)s",
             p,
@@ -163,6 +166,9 @@ async def digest(conn: AsyncConnection, run_id: UUID) -> dict[str, Any] | None:
             " FROM extractions x JOIN sources s ON s.current_revision_id = x.revision_id"
             "  AND s.deleted_at IS NULL, r"
             " WHERE x.status = 'failed'"
+            # not when a later attempt (another extractor version) succeeded
+            " AND NOT EXISTS (SELECT 1 FROM extractions k WHERE k.revision_id = x.revision_id"
+            "  AND k.status = 'ok' AND k.attempted_at > x.attempted_at)"
             " AND x.attempted_at >= r.started_at AND x.attempted_at < r.out_end"
             " ORDER BY s.id, x.attempted_at DESC) f"
             " ORDER BY f.path LIMIT %(limit)s",
