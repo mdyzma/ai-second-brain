@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { resetGraph } from "./fixtures/reset-graph";
 
 // Runs through the e2e servers (the `just e2e` harness), so answers come from the fake Ollama.
 test.skip(!process.env.README_SHOTS, "Set README_SHOTS=1 to refresh README screenshots");
@@ -140,4 +141,46 @@ test("entity page", async ({ page }) => {
   await expect(page.getByText("Projects/NAS.md")).toBeVisible();
   await expect(page.getByText(/Runs:\s*Proxmox/)).toBeVisible();
   await page.screenshot({ path: "../docs/images/readme/entity.jpg", type: "jpeg", quality: 85 });
+});
+
+test("digest screen", async ({ page }) => {
+  test.setTimeout(150_000);
+  // Same guarded reset as digest.spec.ts: it refuses any database that is not the test one.
+  resetGraph();
+  await signIn(page, "/digest");
+  await expect(page.getByRole("button", { name: "Run now" })).toBeVisible();
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get("/api/graph/status");
+        return res.ok()
+          ? ((await res.json()) as { revisions: { total: number } }).revisions.total
+          : 0;
+      },
+      { timeout: 60_000 },
+    )
+    .toBeGreaterThanOrEqual(5);
+  await page.getByRole("button", { name: "Run now" }).click();
+  const review = page.getByRole("region", { name: /To review/ });
+  await expect(review.getByRole("link", { name: /^NAS Device / })).toBeVisible({
+    timeout: 90_000,
+  });
+  await expect(review.getByRole("link", { name: /^Proxmox Tool / })).toBeVisible({
+    timeout: 90_000,
+  });
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get("/api/digest");
+        if (!res.ok()) return false;
+        const { run } = (await res.json()) as {
+          run: { done: number; queued_new: number; queued_failed: number };
+        };
+        return run.done >= run.queued_new + run.queued_failed;
+      },
+      { timeout: 90_000 },
+    )
+    .toBe(true);
+  await expect(review.getByTestId("remaining")).toHaveText(/^\d+$/);
+  await page.screenshot({ path: "../docs/images/readme/digest.jpg", type: "jpeg", quality: 85 });
 });
