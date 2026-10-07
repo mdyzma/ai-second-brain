@@ -35,6 +35,7 @@ from ai_second_brain.interfaces.api.routes import (
     chat,
     graph,
     health,
+    nightly,
     search,
     sources,
 )
@@ -239,6 +240,7 @@ def create_app(
     app.include_router(search.router, prefix="/api")
     app.include_router(capture.router, prefix="/api")
     app.include_router(graph.router, prefix="/api")
+    app.include_router(nightly.router, prefix="/api")
     return app
 
 

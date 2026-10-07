@@ -1,6 +1,6 @@
 """Pydantic models that form the public API contract (and the generated TS client)."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -360,3 +360,101 @@ class EntityDetail(BaseModel):
 
 class EntityDecided(BaseModel):
     entity: EntityDetail
+
+
+NightlyTrigger = Literal["schedule", "manual"]
+NightlyStatus = Literal["running", "complete", "failed"]
+
+
+class NightlyRun(BaseModel):
+    id: UUID
+    run_date: date
+    trigger: NightlyTrigger
+    status: NightlyStatus
+    window_start: datetime | None  # None for the first run
+    started_at: datetime
+    finished_at: datetime | None
+    queued_new: int
+    queued_failed: int
+    done: int  # revisions attempted since the start, capped at the queued
+    timed_out: bool
+    unavailable: bool
+    error: str | None
+
+
+class DigestReviewEntity(BaseModel):
+    id: UUID
+    name: str
+    type: EntityType
+    confidence: float | None
+    source_title: str | None
+    source_path: str | None
+
+
+class DigestReviewLink(BaseModel):
+    id: UUID
+    kind: Literal["relation", "mention"]
+    subject: str | None
+    relation: str
+    object: str | None
+    confidence: float
+
+
+class DigestEntities(BaseModel):
+    count: int
+    by_type: dict[str, int]
+    top: list[DigestReviewEntity]
+
+
+class DigestLinks(BaseModel):
+    count: int
+    top: list[DigestReviewLink]
+
+
+class DigestReview(BaseModel):
+    entities: DigestEntities
+    links: DigestLinks
+    remaining: int
+
+
+class DigestFailedItem(BaseModel):
+    path: str
+    error: str | None
+
+
+class DigestFailed(BaseModel):
+    count: int
+    items: list[DigestFailedItem]
+
+
+class DigestIndexed(BaseModel):
+    created: int
+    changed: int
+    deleted: int
+    since_beginning: bool
+
+
+class Digest(BaseModel):
+    nightly_at: str
+    nightly_enabled: bool
+    run: NightlyRun | None
+    review: DigestReview | None
+    failed: DigestFailed | None
+    indexed: DigestIndexed | None
+
+
+class NightlyRunSummary(BaseModel):
+    id: UUID
+    run_date: date
+    trigger: NightlyTrigger
+    status: NightlyStatus
+    started_at: datetime
+    remaining: int
+
+
+class NightlyRunList(BaseModel):
+    runs: list[NightlyRunSummary]
+
+
+class NightlyStarted(BaseModel):
+    run: NightlyRun

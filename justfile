@@ -107,6 +107,14 @@ graph-extract *args:
 graph-status:
     uv run --project backend ai-second-brain graph status
 
+# Start a nightly run now (extraction for new, changed and failed notes)
+nightly:
+    uv run --project backend ai-second-brain nightly run
+
+# Print the latest nightly run's summary
+nightly-status:
+    uv run --project backend ai-second-brain nightly status
+
 # Create/migrate the scratch evaluation database (SB_EVAL_DATABASE_URL)
 eval-prepare:
     uv run --project backend ai-second-brain eval prepare

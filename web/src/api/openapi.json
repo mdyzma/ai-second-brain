@@ -161,6 +161,338 @@
         "title": "CreateSessionRequest",
         "type": "object"
       },
+      "Digest": {
+        "properties": {
+          "failed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DigestFailed"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "indexed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DigestIndexed"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nightly_at": {
+            "title": "Nightly At",
+            "type": "string"
+          },
+          "nightly_enabled": {
+            "title": "Nightly Enabled",
+            "type": "boolean"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DigestReview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NightlyRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "nightly_at",
+          "nightly_enabled",
+          "run",
+          "review",
+          "failed",
+          "indexed"
+        ],
+        "title": "Digest",
+        "type": "object"
+      },
+      "DigestEntities": {
+        "properties": {
+          "by_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Type",
+            "type": "object"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "top": {
+            "items": {
+              "$ref": "#/components/schemas/DigestReviewEntity"
+            },
+            "title": "Top",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "by_type",
+          "top"
+        ],
+        "title": "DigestEntities",
+        "type": "object"
+      },
+      "DigestFailed": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DigestFailedItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "DigestFailed",
+        "type": "object"
+      },
+      "DigestFailedItem": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "error"
+        ],
+        "title": "DigestFailedItem",
+        "type": "object"
+      },
+      "DigestIndexed": {
+        "properties": {
+          "changed": {
+            "title": "Changed",
+            "type": "integer"
+          },
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "deleted": {
+            "title": "Deleted",
+            "type": "integer"
+          },
+          "since_beginning": {
+            "title": "Since Beginning",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "created",
+          "changed",
+          "deleted",
+          "since_beginning"
+        ],
+        "title": "DigestIndexed",
+        "type": "object"
+      },
+      "DigestLinks": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "top": {
+            "items": {
+              "$ref": "#/components/schemas/DigestReviewLink"
+            },
+            "title": "Top",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "top"
+        ],
+        "title": "DigestLinks",
+        "type": "object"
+      },
+      "DigestReview": {
+        "properties": {
+          "entities": {
+            "$ref": "#/components/schemas/DigestEntities"
+          },
+          "links": {
+            "$ref": "#/components/schemas/DigestLinks"
+          },
+          "remaining": {
+            "title": "Remaining",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entities",
+          "links",
+          "remaining"
+        ],
+        "title": "DigestReview",
+        "type": "object"
+      },
+      "DigestReviewEntity": {
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Path"
+          },
+          "source_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Title"
+          },
+          "type": {
+            "enum": [
+              "project",
+              "person",
+              "organization",
+              "tool",
+              "device",
+              "topic"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "confidence",
+          "source_title",
+          "source_path"
+        ],
+        "title": "DigestReviewEntity",
+        "type": "object"
+      },
+      "DigestReviewLink": {
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "relation",
+              "mention"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "object": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object"
+          },
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "subject",
+          "relation",
+          "object",
+          "confidence"
+        ],
+        "title": "DigestReviewLink",
+        "type": "object"
+      },
       "DoneEvent": {
         "properties": {
           "event": {
@@ -1029,6 +1361,192 @@
           "expires_at"
         ],
         "title": "MeResponse",
+        "type": "object"
+      },
+      "NightlyRun": {
+        "properties": {
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "queued_failed": {
+            "title": "Queued Failed",
+            "type": "integer"
+          },
+          "queued_new": {
+            "title": "Queued New",
+            "type": "integer"
+          },
+          "run_date": {
+            "format": "date",
+            "title": "Run Date",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "complete",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "timed_out": {
+            "title": "Timed Out",
+            "type": "boolean"
+          },
+          "trigger": {
+            "enum": [
+              "schedule",
+              "manual"
+            ],
+            "title": "Trigger",
+            "type": "string"
+          },
+          "unavailable": {
+            "title": "Unavailable",
+            "type": "boolean"
+          },
+          "window_start": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Start"
+          }
+        },
+        "required": [
+          "id",
+          "run_date",
+          "trigger",
+          "status",
+          "window_start",
+          "started_at",
+          "finished_at",
+          "queued_new",
+          "queued_failed",
+          "done",
+          "timed_out",
+          "unavailable",
+          "error"
+        ],
+        "title": "NightlyRun",
+        "type": "object"
+      },
+      "NightlyRunList": {
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/NightlyRunSummary"
+            },
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs"
+        ],
+        "title": "NightlyRunList",
+        "type": "object"
+      },
+      "NightlyRunSummary": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "remaining": {
+            "title": "Remaining",
+            "type": "integer"
+          },
+          "run_date": {
+            "format": "date",
+            "title": "Run Date",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "complete",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "trigger": {
+            "enum": [
+              "schedule",
+              "manual"
+            ],
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_date",
+          "trigger",
+          "status",
+          "started_at",
+          "remaining"
+        ],
+        "title": "NightlyRunSummary",
+        "type": "object"
+      },
+      "NightlyStarted": {
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/NightlyRun"
+          }
+        },
+        "required": [
+          "run"
+        ],
+        "title": "NightlyStarted",
         "type": "object"
       },
       "NoteSample": {
@@ -2460,6 +2978,150 @@
         ]
       }
     },
+    "/api/digest": {
+      "get": {
+        "operationId": "getDigest",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Digest"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Get Digest",
+        "tags": [
+          "nightly"
+        ]
+      }
+    },
+    "/api/digest/{run_date}": {
+      "get": {
+        "operationId": "getDigestByDate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_date",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Run Date",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Digest"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Get Digest By Date",
+        "tags": [
+          "nightly"
+        ]
+      }
+    },
     "/api/entities": {
       "get": {
         "operationId": "listEntities",
@@ -2958,6 +3620,152 @@
         "summary": "Ready",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/nightly/run": {
+      "post": {
+        "operationId": "startNightlyRun",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NightlyStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Start Nightly Run",
+        "tags": [
+          "nightly"
+        ]
+      }
+    },
+    "/api/nightly/runs": {
+      "get": {
+        "operationId": "listNightlyRuns",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 365,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NightlyRunList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "List Nightly Runs",
+        "tags": [
+          "nightly"
         ]
       }
     },

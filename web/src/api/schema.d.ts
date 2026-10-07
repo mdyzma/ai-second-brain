@@ -89,6 +89,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/digest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Digest */
+        get: operations["getDigest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/digest/{run_date}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Digest By Date */
+        get: operations["getDigestByDate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/entities": {
         parameters: {
             query?: never;
@@ -200,6 +234,40 @@ export interface paths {
         };
         /** Ready */
         get: operations["ready"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/nightly/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Nightly Run */
+        post: operations["startNightlyRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/nightly/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Nightly Runs */
+        get: operations["listNightlyRuns"];
         put?: never;
         post?: never;
         delete?: never;
@@ -463,6 +531,109 @@ export interface components {
         CreateSessionRequest: {
             /** @default private */
             mode: components["schemas"]["ChatMode"];
+        };
+        /** Digest */
+        Digest: {
+            failed: components["schemas"]["DigestFailed"] | null;
+            indexed: components["schemas"]["DigestIndexed"] | null;
+            /** Nightly At */
+            nightly_at: string;
+            /** Nightly Enabled */
+            nightly_enabled: boolean;
+            review: components["schemas"]["DigestReview"] | null;
+            run: components["schemas"]["NightlyRun"] | null;
+        };
+        /** DigestEntities */
+        DigestEntities: {
+            /** By Type */
+            by_type: {
+                [key: string]: number;
+            };
+            /** Count */
+            count: number;
+            /** Top */
+            top: components["schemas"]["DigestReviewEntity"][];
+        };
+        /** DigestFailed */
+        DigestFailed: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["DigestFailedItem"][];
+        };
+        /** DigestFailedItem */
+        DigestFailedItem: {
+            /** Error */
+            error: string | null;
+            /** Path */
+            path: string;
+        };
+        /** DigestIndexed */
+        DigestIndexed: {
+            /** Changed */
+            changed: number;
+            /** Created */
+            created: number;
+            /** Deleted */
+            deleted: number;
+            /** Since Beginning */
+            since_beginning: boolean;
+        };
+        /** DigestLinks */
+        DigestLinks: {
+            /** Count */
+            count: number;
+            /** Top */
+            top: components["schemas"]["DigestReviewLink"][];
+        };
+        /** DigestReview */
+        DigestReview: {
+            entities: components["schemas"]["DigestEntities"];
+            links: components["schemas"]["DigestLinks"];
+            /** Remaining */
+            remaining: number;
+        };
+        /** DigestReviewEntity */
+        DigestReviewEntity: {
+            /** Confidence */
+            confidence: number | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Source Path */
+            source_path: string | null;
+            /** Source Title */
+            source_title: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "project" | "person" | "organization" | "tool" | "device" | "topic";
+        };
+        /** DigestReviewLink */
+        DigestReviewLink: {
+            /** Confidence */
+            confidence: number;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "relation" | "mention";
+            /** Object */
+            object: string | null;
+            /** Relation */
+            relation: string;
+            /** Subject */
+            subject: string | null;
         };
         /** DoneEvent */
         DoneEvent: {
@@ -780,6 +951,89 @@ export interface components {
              * Format: date-time
              */
             expires_at: string;
+        };
+        /** NightlyRun */
+        NightlyRun: {
+            /** Done */
+            done: number;
+            /** Error */
+            error: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Queued Failed */
+            queued_failed: number;
+            /** Queued New */
+            queued_new: number;
+            /**
+             * Run Date
+             * Format: date
+             */
+            run_date: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "complete" | "failed";
+            /** Timed Out */
+            timed_out: boolean;
+            /**
+             * Trigger
+             * @enum {string}
+             */
+            trigger: "schedule" | "manual";
+            /** Unavailable */
+            unavailable: boolean;
+            /** Window Start */
+            window_start: string | null;
+        };
+        /** NightlyRunList */
+        NightlyRunList: {
+            /** Runs */
+            runs: components["schemas"]["NightlyRunSummary"][];
+        };
+        /** NightlyRunSummary */
+        NightlyRunSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Remaining */
+            remaining: number;
+            /**
+             * Run Date
+             * Format: date
+             */
+            run_date: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "complete" | "failed";
+            /**
+             * Trigger
+             * @enum {string}
+             */
+            trigger: "schedule" | "manual";
+        };
+        /** NightlyStarted */
+        NightlyStarted: {
+            run: components["schemas"]["NightlyRun"];
         };
         /** NoteSample */
         NoteSample: {
@@ -1476,6 +1730,129 @@ export interface operations {
             };
         };
     };
+    getDigest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Digest"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getDigestByDate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_date: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Digest"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     listEntities: {
         parameters: {
             query?: {
@@ -1853,6 +2230,129 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReadyResponse"];
+                };
+            };
+        };
+    };
+    startNightlyRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NightlyStarted"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listNightlyRuns: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NightlyRunList"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

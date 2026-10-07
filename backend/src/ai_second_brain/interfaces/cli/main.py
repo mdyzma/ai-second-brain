@@ -628,3 +628,103 @@ def graph_status_command() -> None:
     width = max(len(key) for key, _ in rows)
     for key, value in rows:
         typer.echo(f"{key + ':':<{width + 1}} {value}")
+
+
+nightly_app = typer.Typer(no_args_is_help=True, help="Nightly run commands.")
+app.add_typer(nightly_app, name="nightly")
+
+
+async def _nightly_run(settings: Settings) -> tuple[str, dict[str, Any] | None]:
+    """Start a manual run: the outcome and the run's row (None when none was started)."""
+    from ai_second_brain.nightly import digest as digests
+    from ai_second_brain.nightly.run import start_run
+
+    pool = create_pool(settings.database_url)
+    await pool.open(wait=True, timeout=30)
+    try:
+        job_app = create_job_app(settings.database_url)
+        async with job_app.open_async():
+            result = await start_run(pool, ProcrastinateQueue(job_app), settings, "manual")
+        if result.run_id is None:
+            return result.outcome, None
+        async with pool.connection() as conn:
+            body = await digests.digest(conn, result.run_id)
+        return result.outcome, body["run"] if body else None
+    finally:
+        await pool.close()
+
+
+@nightly_app.command("run")
+def nightly_run() -> None:
+    """Start a nightly run now (extraction for new, changed and failed notes)."""
+    settings = _load_settings()
+    logging.config.dictConfig(build_log_config())
+    try:
+        outcome, run = asyncio.run(_nightly_run(settings), loop_factory=new_event_loop)
+    except Exception as error:
+        typer.echo(f"Nightly run failed: {type(error).__name__}", err=True)
+        raise typer.Exit(code=1) from error
+    if outcome == "busy":
+        typer.echo("A run is already in progress.", err=True)
+        raise typer.Exit(code=1)
+    if outcome == "failed" or run is None:
+        code = run["error"] if run and run["error"] else "unknown"
+        typer.echo(f"Nightly run failed: {code}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(
+        f"Started a nightly run: queued {run['queued_new']} new"
+        f" and {run['queued_failed']} failed notes."
+    )
+
+
+async def _nightly_status(settings: Settings) -> dict[str, Any] | None:
+    from ai_second_brain.nightly import digest as digests
+
+    pool = create_pool(settings.database_url)
+    await pool.open(wait=True, timeout=30)
+    try:
+        async with pool.connection() as conn:
+            run_id = await digests.latest_run_id(conn)
+            return None if run_id is None else await digests.digest(conn, run_id)
+    finally:
+        await pool.close()
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+def _summary_line(body: dict[str, Any], settings: Settings) -> str:
+    """The digest's summary line (spec §6.3). Counts only: never names or paths."""
+    run = body["run"]
+    if run["status"] == "failed":
+        return (
+            f"Last night's run failed to start ({run['error']}). "
+            "It will try again at the next check."
+        )
+    if run["unavailable"]:
+        return "Extraction is off: no Ollama endpoint is configured (`SB_OLLAMA_ENDPOINTS`)."
+    if run["status"] == "running":
+        return f"Reading notes: {run['done']} of {run['queued_new'] + run['queued_failed']}."
+    line = (
+        f"Last night: {_plural(run['done'], 'note')} read, {body['failed']['count']} failed,"
+        f" {body['review']['remaining']} to review."
+    )
+    if run["timed_out"]:
+        line += (
+            f" Stopped waiting after {settings.nightly_max_hours} hours."
+            " Remaining notes will finish in the background."
+        )
+    return line
+
+
+@nightly_app.command("status")
+def nightly_status_command() -> None:
+    """Print the latest nightly run's summary (counts only, never note names)."""
+    settings = _load_settings()
+    try:
+        body = asyncio.run(_nightly_status(settings), loop_factory=new_event_loop)
+    except Exception as error:
+        typer.echo(f"Status unavailable: {type(error).__name__}", err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo("No nightly run yet." if body is None else _summary_line(body, settings))
