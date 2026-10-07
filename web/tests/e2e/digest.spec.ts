@@ -44,8 +44,8 @@ test("run now fills the digest and review empties it", async ({ page }) => {
   expect(
     await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload),
   ).toBe(true);
-  // Entities keep arriving while the run's extract jobs drain. The run row itself is closed only
-  // by the 15-minute tick, so wait until every queued note has been attempted, then read the count.
+  // Entities keep arriving while the run's extract jobs drain, so wait until every queued note has
+  // been attempted, then read the count.
   await expect
     .poll(
       async () => {
@@ -60,6 +60,16 @@ test("run now fills the digest and review empties it", async ({ page }) => {
     )
     .toBe(true);
   await expect(review.getByTestId("remaining")).toHaveText(/^\d+$/);
+  // Close-on-read: once the jobs have drained, a digest read closes the run without a tick.
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get("/api/digest");
+        return res.ok() ? ((await res.json()) as { run: { status: string } }).run.status : "";
+      },
+      { timeout: 30_000 },
+    )
+    .toBe("complete");
   const before = Number(await review.getByTestId("remaining").textContent());
 
   await page.goto("/review");
