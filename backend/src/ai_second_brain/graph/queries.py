@@ -118,6 +118,40 @@ async def queue_extraction(
     return queued
 
 
+async def queue_extraction_capped(
+    conn: AsyncConnection, queue: JobQueue, version: str, limit: int
+) -> tuple[int, int]:
+    """Nightly queueing (4b spec §5.2): pending first, then failed, oldest note first, at most
+    `limit` candidates together. Returns (queued_new, queued_failed); lock hits are not counted."""
+    order = " ORDER BY s.created_at, s.id LIMIT %s"
+    cur = await conn.execute(
+        "SELECT s.current_revision_id " + _LIVE + " AND e.revision_id IS NULL" + order,
+        (version, limit),
+    )
+    pending = [r[0] for r in await cur.fetchall()]
+    cur = await conn.execute(
+        "SELECT s.current_revision_id " + _LIVE + " AND e.status = 'failed'" + order,
+        (version, limit - len(pending)),
+    )
+    failed = [r[0] for r in await cur.fetchall()]
+    if conn.info.transaction_status != TransactionStatus.IDLE:
+        await conn.commit()  # never hold a transaction open while deferring
+    counts: list[int] = []
+    for ids in (pending, failed):
+        queued = 0
+        for revision_id in ids:
+            if await queue.extract_revision(revision_id):
+                queued += 1
+        counts.append(queued)
+    logger.info(
+        "graph_extract_queued scope=nightly candidates=%d queued_new=%d queued_failed=%d",
+        len(pending) + len(failed),
+        counts[0],
+        counts[1],
+    )
+    return counts[0], counts[1]
+
+
 # --- cursors ---------------------------------------------------------------------------------
 
 

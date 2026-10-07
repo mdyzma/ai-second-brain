@@ -841,6 +841,27 @@ CREATE SEQUENCE public.ingest_runs_id_seq
 ALTER SEQUENCE public.ingest_runs_id_seq OWNED BY public.ingest_runs.id;
 
 --
+-- Name: nightly_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.nightly_runs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    run_date date NOT NULL,
+    trigger text NOT NULL,
+    status text DEFAULT 'running'::text NOT NULL,
+    window_start timestamp with time zone NOT NULL,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    finished_at timestamp with time zone,
+    queued_new integer DEFAULT 0 NOT NULL,
+    queued_failed integer DEFAULT 0 NOT NULL,
+    timed_out boolean DEFAULT false NOT NULL,
+    unavailable boolean DEFAULT false NOT NULL,
+    error text,
+    CONSTRAINT nightly_runs_status_check CHECK ((status = ANY (ARRAY['running'::text, 'complete'::text, 'failed'::text]))),
+    CONSTRAINT nightly_runs_trigger_check CHECK ((trigger = ANY (ARRAY['schedule'::text, 'manual'::text])))
+);
+
+--
 -- Name: procrastinate_events; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1113,6 +1134,13 @@ ALTER TABLE ONLY public.ingest_runs
     ADD CONSTRAINT ingest_runs_pkey PRIMARY KEY (id);
 
 --
+-- Name: nightly_runs nightly_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.nightly_runs
+    ADD CONSTRAINT nightly_runs_pkey PRIMARY KEY (id);
+
+--
 -- Name: procrastinate_events procrastinate_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1240,6 +1268,24 @@ CREATE INDEX idx_procrastinate_jobs_worker_not_null ON public.procrastinate_jobs
 --
 
 CREATE INDEX idx_procrastinate_workers_last_heartbeat ON public.procrastinate_workers USING btree (last_heartbeat);
+
+--
+-- Name: nightly_runs_one_open; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX nightly_runs_one_open ON public.nightly_runs USING btree ((true)) WHERE (status = 'running'::text);
+
+--
+-- Name: nightly_runs_scheduled_day; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX nightly_runs_scheduled_day ON public.nightly_runs USING btree (run_date) WHERE ((trigger = 'schedule'::text) AND (status <> 'failed'::text));
+
+--
+-- Name: nightly_runs_started; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX nightly_runs_started ON public.nightly_runs USING btree (started_at DESC);
 
 --
 -- Name: procrastinate_events_job_id_fkey_v1; Type: INDEX; Schema: public; Owner: -
