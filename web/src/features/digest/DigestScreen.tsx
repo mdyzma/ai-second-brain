@@ -15,6 +15,7 @@ import {
   indexedLine,
   LOAD_ERROR,
   moreWaitingLine,
+  NIGHTLY_OFF,
   NOTHING_NEW,
   noRunsLine,
   RUN_NOT_FOUND,
@@ -127,7 +128,7 @@ export function DigestScreen({ runId, onRun }: DigestScreenProps) {
 
 function statusLines(d: Digest): string[] {
   const run = d.run;
-  if (!run) return [noRunsLine(d.nightly_at)];
+  if (!run) return [d.nightly_enabled ? noRunsLine(d.nightly_at) : NIGHTLY_OFF];
   if (run.status === "failed") return [failedRunLine(run.error ?? "unknown")];
   if (run.status === "running") return [runningLine(d)];
   const lines = [run.unavailable ? UNAVAILABLE : summaryLine(d)];

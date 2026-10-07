@@ -27,7 +27,8 @@ test("run now fills the digest and review empties it", async ({ page }) => {
     .toBeGreaterThanOrEqual(5);
 
   await page.goto("/digest");
-  await expect(page.getByText(/No nightly run yet/)).toBeVisible();
+  // Playwright runs with SB_NIGHTLY_ENABLED=false, so the no-runs copy says the schedule is off.
+  await expect(page.getByText(/Nightly runs are off/)).toBeVisible();
   // Marks this document so a full page reload would be detected (the digest must fill in live).
   await page.evaluate(() => {
     (window as unknown as { __noReload: boolean }).__noReload = true;

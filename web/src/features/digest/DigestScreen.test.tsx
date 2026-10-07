@@ -182,6 +182,26 @@ describe("DigestScreen", () => {
     expect(screen.queryByRole("region", { name: /To review/ })).not.toBeInTheDocument();
   });
 
+  it("says nightly runs are off when the schedule is disabled", async () => {
+    mockGet({
+      nightly_at: "02:00",
+      nightly_enabled: false,
+      nightly_max_hours: 8,
+      run: null,
+      review: null,
+      failed: null,
+      indexed: null,
+    });
+    await setup();
+    expect(
+      await screen.findByText(
+        "Nightly runs are off (SB_NIGHTLY_ENABLED). Press Run now to start one.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/The first starts at/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run now" })).toBeEnabled();
+  });
+
   it("shows progress while running and disables Run now", async () => {
     mockGet(digest({}, { status: "running", done: 3, queued_new: 8, queued_failed: 2 }));
     await setup();

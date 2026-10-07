@@ -13,6 +13,7 @@ export const FAILURES_HINT = {
 export const BUSY = "A run is already in progress.";
 export const LOAD_ERROR = "Couldn't load the digest. Try again.";
 export const START_ERROR = "Couldn't start a run. Try again.";
+export const NIGHTLY_OFF = "Nightly runs are off (SB_NIGHTLY_ENABLED). Press Run now to start one.";
 export const RUN_NOT_FOUND = "That run no longer exists.";
 
 const pad = (n: number) => String(n).padStart(2, "0");
