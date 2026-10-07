@@ -1,6 +1,6 @@
 # Phase 4b: the nightly run and the morning digest
 
-Date: 2026-10-04 · Status: **under review** · Owner: Michal Dyzma
+Date: 2026-10-04 · Status: **approved, implemented** · Owner: Michal Dyzma
 Parent docs: [system design](../../architecture/system-design.md) §4.2 (sleep cycle), §9 · [ADR-0003](../../architecture/adr/0003-postgres-job-queue.md) · [ADR-0013](../../architecture/adr/0013-knowledge-graph-review.md) · builds on [Phase 4a](2026-10-03-phase-4a-knowledge-graph-design.md)
 
 ## 1. Purpose and success

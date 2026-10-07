@@ -25,9 +25,9 @@ questions and it answers with sources. That is the goal; today the platform and 
 Private content is processed only by the Ollama endpoints you configure (on your own machines or LAN), and a
 cloud model is used only when you explicitly choose it. It never reads your notes.
 
-> **Status: Phase 4a "knowledge graph" (see the latest release badge above).** The platform is in place: a secure single-user
+> **Status: Phase 4b "nightly run and digest" (see the latest release badge above).** The platform is in place: a secure single-user
 > login, the web app shell, the API, the database, CI and automated releases, plus the Ask screen
-> for chatting with a local model. Your Obsidian vault is indexed in the background, you can search it, private chat answers cite it, you can capture a thought into it, and a local model extracts the people, projects, tools and devices your notes talk about for you to review. The remaining knowledge
+> for chatting with a local model. Your Obsidian vault is indexed in the background, you can search it, private chat answers cite it, you can capture a thought into it, and a local model extracts the people, projects, tools and devices your notes talk about for you to review, and a nightly run with a morning Digest keeps that up to date. The remaining knowledge
 > features arrive phase by phase; see the [roadmap](#roadmap). The screens show what each one
 > will do.
 
@@ -36,6 +36,7 @@ cloud model is used only when you explicitly choose it. It never reads your note
 - [What it does today](#what-it-does-today)
 - [Screenshots](#screenshots)
 - [Knowledge graph](#knowledge-graph)
+- [Digest](#digest)
 - [Roadmap](#roadmap)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
@@ -79,6 +80,8 @@ cloud model is used only when you explicitly choose it. It never reads your note
 ![Review screen with two proposed entities, NAS and Proxmox, and the notes that mention them](docs/images/readme/review.jpg)
 
 ![The NAS entity page listing the notes that mention it](docs/images/readme/entity.jpg)
+
+![Digest screen with the last nightly run and the entities and links waiting for review](docs/images/readme/digest.jpg)
 
 <table>
   <tr>
@@ -137,6 +140,22 @@ A local model reads each indexed note and extracts a one-line summary, the entit
 
 Known limitations: a proposed relation shared by two notes is dropped when one of them is re-extracted and returns when its own note is; relations named through an alias are dropped; the parent check during extraction only catches two-entity cycles; and a name that only resembles an entity is stored as a suggested alias for later but is not yet shown in Review.
 
+## Digest
+
+**What runs at night.** Once a night, at the local time you set, the worker starts a run: it queues extraction for new, changed and previously failed notes, and for notes whose extractor version is out of date, up to a cap. It uses the same local model and the same `extract` queue as the manual run. Every morning the **Digest** screen shows what the night produced and what still waits for you: new entities and the links to review. It is a review inbox, so items drop out as you decide on them. The **To review** list follows the same rule as the Links tab on Review. `/` now opens the Digest, and its sidebar item shows a badge with the to-review count. The design is in [ADR-0014](docs/architecture/adr/0014-nightly-run-and-digest.md) and the [Phase 4b spec](docs/superpowers/specs/2026-10-04-phase-4b-nightly-digest-design.md).
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `SB_NIGHTLY_ENABLED` | `true` | Turns the schedule on or off. Run now still works when it is off. |
+| `SB_NIGHTLY_AT` | `02:00` | Local start time, `HH:MM`. |
+| `SB_TIMEZONE` | empty | IANA zone for the start time, for example `Europe/Warsaw`. Empty uses this host's zone, with daylight saving. An unknown value stops the app at startup. |
+| `SB_NIGHTLY_MAX_NOTES` | `500` | The most notes one run queues. |
+| `SB_NIGHTLY_MAX_HOURS` | `8` | Hours after which a run stops waiting for its jobs. |
+
+- **Run now.** The **Run now** button on the Digest starts a run at once. `just nightly` does the same, and `just nightly-status` prints the latest run's summary.
+- **A run closes late.** A run closes when the 15-minute check finds extraction finished, so after Run now the progress line can say "Reading notes x of y" for up to 15 minutes after the work is done.
+- **Known limitations.** A `graph-extract` you start by hand during a run keeps that run open and counts toward it. Past runs' counts can drop when a later run retries the same note.
+
 ## Roadmap
 
 Each phase gets its own spec and plan before any code is written, in
@@ -150,8 +169,8 @@ Each phase gets its own spec and plan before any code is written, in
 | 2b | **Search**, chat retrieval and quick capture: hybrid full-text and vector search, your notes in private chat, a capture box | ✅ Done |
 | 3 | Embedding evaluation: bge-m3 against three challengers on your own Polish/English questions; a new space only if one wins | ✅ Done: bge-m3 stays (2026-10-03) |
 | 4a | **Knowledge graph** and **Review**: a local model extracts entities and links from your notes; you decide what the graph believes; entity pages | ✅ Done |
-| 4b | **Digest**: a nightly run and a morning digest on top of the graph | Next |
-| 5 | **Nodes**: see and wake your machines (RTX workstation, MacBook, Proxmox) with truthful online, offline and unknown states | Planned |
+| 4b | **Digest**: a nightly run and a morning digest on top of the graph | ✅ Done |
+| 5 | **Nodes**: see and wake your machines (RTX workstation, MacBook, Proxmox) with truthful online, offline and unknown states | Next |
 | 6 | Paperwork and history: invoices and contracts from PDF, email archives, git history | Planned |
 | 7 | Salience: old ideas are surfaced again when they relate to what you're working on, and nothing fades away without your consent | Planned |
 | 8 | **Projects** and MCP: pick a project back up with its full context, and let AI tools use what you marked shareable | Planned |
@@ -543,6 +562,7 @@ version files, commits `chore(release): vX.Y.Z [skip ci]`, tags `vX.Y.Z` and pub
 - [Architecture decision records](docs/architecture/adr/)
 - [Design system](docs/architecture/design-system-audit.md): tokens, components and the accessibility bar
 - [Phase 3 spec (embedding evaluation)](docs/superpowers/specs/2026-10-02-phase-3-embedding-evaluation-design.md)
+- [Phase 4b spec (nightly run and digest)](docs/superpowers/specs/2026-10-04-phase-4b-nightly-digest-design.md)
 - [Phase 4a spec (knowledge graph)](docs/superpowers/specs/2026-10-03-phase-4a-knowledge-graph-design.md)
 - [Phase 2b spec (search, retrieval, capture)](docs/superpowers/specs/2026-10-01-phase-2b-search-retrieval-capture-design.md)
 - [Phase 2a spec (vault ingestion)](docs/superpowers/specs/2026-09-30-phase-2a-vault-ingestion-design.md)

@@ -338,14 +338,14 @@ The "STM buffer" from the prompt is the set of `pending` revisions plus recently
 
 Scheduled at 02:00 via the job scheduler; idempotent per revision.
 
-1. **Wake inference host (optional).** If the GPU workstation is configured as the consolidation host and is asleep, send WoL, wait for `online` with a deadline (e.g. 5 min). If it does not come up, fall back to the Proxmox CPU model or skip and retry next night. This is where hardware orchestration directly serves memory — see [product-brainstorm.md](product-brainstorm.md#idea-3-the-nightly-shift).
-2. **Select work:** revisions indexed since last run and not yet consolidated (`metadata->>'consolidated_at' IS NULL`).
-3. **Extract** with the local model, per revision, structured JSON: entities mentioned, candidate relations, one-line summary. Validate against a Pydantic schema; invalid output → retry once → mark `consolidation_failed`.
-4. **Resolve** entities against existing ones (exact name → alias table → embedding similarity of entity names ≥ threshold). New entities are created as `proposed` unless confidence is high.
-5. **Write edges** with `origin='llm:<model>'`, `confidence`, `status='proposed'|'accepted'` by threshold.
-6. **Recompute salience** (4.3) and apply tier transitions.
-7. **Morning digest:** a short report — new entities, low-confidence links awaiting review, "Rediscover" (at most 1 dormant idea strongly matching yesterday's work; a 3–5 item batch on Sundays), newly superseded items, failures. It is shown as the **Digest** screen in the web UI (the landing page each morning) and can optionally be written as a note into the vault.
-8. **Suspend** the GPU host if the system woke it and nobody else is using it (check GPU util + logged-in sessions).
+1. **(Phase 5) Wake inference host (optional).** If the GPU workstation is configured as the consolidation host and is asleep, send WoL, wait for `online` with a deadline (e.g. 5 min). If it does not come up, fall back to the Proxmox CPU model or skip and retry next night. This is where hardware orchestration directly serves memory — see [product-brainstorm.md](product-brainstorm.md#idea-3-the-nightly-shift).
+2. **(4a/4b) Select work:** revisions indexed since last run and not yet consolidated (`metadata->>'consolidated_at' IS NULL`).
+3. **(4a/4b) Extract** with the local model, per revision, structured JSON: entities mentioned, candidate relations, one-line summary. Validate against a Pydantic schema; invalid output → retry once → mark `consolidation_failed`.
+4. **(4a/4b) Resolve** entities against existing ones (exact name → alias table → embedding similarity of entity names ≥ threshold). New entities are created as `proposed` unless confidence is high.
+5. **(4a/4b) Write edges** with `origin='llm:<model>'`, `confidence`, `status='proposed'|'accepted'` by threshold.
+6. **(Phase 7) Recompute salience** (4.3) and apply tier transitions.
+7. **(4a/4b) Morning digest:** a short report — new entities, low-confidence links awaiting review, "Rediscover" (at most 1 dormant idea strongly matching yesterday's work; a 3–5 item batch on Sundays), newly superseded items, failures. It is shown as the **Digest** screen in the web UI (the landing page each morning) and can optionally be written as a note into the vault.
+8. **(Phase 5) Suspend** the GPU host if the system woke it and nobody else is using it (check GPU util + logged-in sessions).
 
 All LLM calls in the sleep cycle go through the `llm` gateway with `sensitivity` of the revision; private revisions can only reach the local tier.
 
@@ -599,7 +599,7 @@ Aligns with the assessment's decomposition; each phase ends with a usable system
 | 3 | Embedding evaluation (bake-off vs bge-m3 on the owner's PL/EN questions) | The harness compares bge-m3 with three challengers by recall@10, MRR@10 and query latency; **delivered** — result 2026-10-03: bge-m3 stays ([spec](../superpowers/specs/2026-10-02-phase-3-embedding-evaluation-design.md)) | 2b |
 | 3b | Switch embedding space (only if a challenger wins) | Not needed: bge-m3 won the 2026-10-03 bake-off | 3 |
 | 4a | Knowledge graph and review | Local extraction of entities and relations per note; the owner decides in Review; entity pages; decisions survive re-extraction — **delivered** ([spec](../superpowers/specs/2026-10-03-phase-4a-knowledge-graph-design.md), [ADR-0013](adr/0013-knowledge-graph-review.md)) | 2a, 2b |
-| 4b | Sleep cycle and digest | Nightly schedule over the graph; morning digest; idempotent reruns | 4a |
+| 4b | Sleep cycle and digest | Nightly schedule over the graph; morning digest; idempotent reruns — **delivered** ([spec](../superpowers/specs/2026-10-04-phase-4b-nightly-digest-design.md), [ADR-0014](adr/0014-nightly-run-and-digest.md)) | 4a |
 | 5 | Hardware observe/wake | Truthful state fixtures; WoL measured per node; sleep cycle uses workstation | 1 |
 | 6 | Document intelligence | PDF invoice/contract, email, git adapters with fixtures and provenance | 2, 4 |
 | 7 | Salience + dormancy | Report-only for 30 days, then enabled; restore works | 4 |

@@ -52,4 +52,4 @@ Extraction also reads every note, so it is bound by the same privacy rule as cha
   - A proposed or auto edge shared by two notes is dropped when one of them is re-extracted, and returns when its own note is re-extracted.
   - A relation whose subject or object is named by an alias is dropped by the output filter.
   - The parent-cycle check covers only 2-cycles.
-- Revisit: when 4b adds the nightly run, decide whether it re-extracts on `EXTRACTOR_VERSION` bumps by itself; when salience arrives (Phase 7), decide how accepted entities feed ranking, without making popular entities win ([ADR-0012](0012-salience-without-popularity-bias.md)).
+- Revisit: answered in 4b ([ADR-0014](0014-nightly-run-and-digest.md)): the nightly run re-extracts notes whose `EXTRACTOR_VERSION` is out of date, capped per night by `SB_NIGHTLY_MAX_NOTES`. Still open: when salience arrives (Phase 7), decide how accepted entities feed ranking, without making popular entities win ([ADR-0012](0012-salience-without-popularity-bias.md)).

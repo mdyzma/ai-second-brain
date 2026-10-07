@@ -47,8 +47,8 @@ Option C is a valid fallback if procrastinate proves problematic; the job functi
 - **Stalled jobs.** Workers (not jobs) heartbeat; reconcile resets `doing` jobs whose worker's heartbeat is more than 10 minutes old, so a crashed worker's jobs are retried.
 - **Reconcile timer.** The scheduled reconcile is an asyncio timer inside the worker process (every `SB_RECONCILE_MINUTES`, plus one at startup and at most one every 10 s when the watcher asks for a rescan), not a procrastinate periodic task or an external scheduler. "Scan now" defers a `reconcile_vault` job instead.
 - **Priorities.** Index and reconcile jobs are deferred with priority 10 and embed jobs with 0, so an edit is indexed ahead of a long embedding backlog.
-- **Queues.** `ingest` (parse, chunk and index a source) and `embed` (embed a revision's chunks for a space), concurrency 2. `nightly` and `hardware` (later `gpu`) follow with their phases.
+- **Queues.** `ingest` (parse, chunk and index a source) and `embed` (embed a revision's chunks for a space), concurrency 2. `nightly` (Phase 4b: the 15-minute `nightly_tick`, served by this same ingest/embed worker loop, see [ADR-0014](0014-nightly-run-and-digest.md)); `hardware` (later `gpu`) follows with its phase.
 
 ## Action Items
 1. [ ] Spike: index + periodic task under procrastinate against the dev Compose DB.
-2. [x] Define queues: `ingest` and `embed` (Phase 2a); `nightly`, `hardware` (later `gpu`) follow with their phases.
+2. [x] Define queues: `ingest` and `embed` (Phase 2a), `nightly` (Phase 4b); `hardware` (later `gpu`) follows with its phase.
