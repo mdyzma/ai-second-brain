@@ -293,7 +293,14 @@ def test_indexed_counts(db_url: str, tmp_path: Path) -> None:
         # n0: created in the input window, its only revision there too (not "changed")
         await h.rows("UPDATE sources SET created_at = %s WHERE id = %s", T - 2 * H, s[0])
         await h.rows("UPDATE source_revisions SET observed_at = %s WHERE id = %s", T - 2 * H, r[0])
-        # n1: created earlier, a new revision in the window replaces the older one
+        # ... then saved again in the window: still only "created"
+        await h.rows(
+            "INSERT INTO source_revisions (source_id, content_hash, raw_text, observed_at)"
+            " VALUES (%s, '\\x02', 'again', %s)",
+            s[0],
+            T - H,
+        )
+        # n1: created earlier, saved three times in the window: one changed note
         await h.rows(
             "UPDATE sources SET created_at = %s WHERE id = %s", T - 2 * timedelta(days=1), s[1]
         )
@@ -302,12 +309,14 @@ def test_indexed_counts(db_url: str, tmp_path: Path) -> None:
             T - 2 * timedelta(days=1),
             r[1],
         )
-        await h.rows(
-            "INSERT INTO source_revisions (source_id, content_hash, raw_text, observed_at)"
-            " VALUES (%s, '\\x01', 'new', %s)",
-            s[1],
-            T - H,
-        )
+        for i, at in enumerate((T - H, T - 40 * M, T - 20 * M)):
+            await h.rows(
+                "INSERT INTO source_revisions (source_id, content_hash, raw_text, observed_at)"
+                " VALUES (%s, %s, 'new', %s)",
+                s[1],
+                bytes([16 + i]),
+                at,
+            )
         # n2: created earlier, tombstoned in the window
         await h.rows(
             "UPDATE sources SET created_at = %s, deleted_at = %s WHERE id = %s",
@@ -327,7 +336,8 @@ def test_indexed_counts(db_url: str, tmp_path: Path) -> None:
         await h.rows("DELETE FROM nightly_runs")
         first = await _run(h, started=T, finished=T + H, window="-infinity")
         d = await _digest(h, first)
-        assert d["indexed"] == {"created": 3, "changed": 1, "deleted": 1, "since_beginning": True}
+        # since the beginning, every note was created in the window: none "changed"
+        assert d["indexed"] == {"created": 3, "changed": 0, "deleted": 1, "since_beginning": True}
         assert d["run"]["window_start"] is None
 
     scenario(db_url, tmp_path, body)

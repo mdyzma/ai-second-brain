@@ -181,8 +181,13 @@ async def digest(conn: AsyncConnection, run_id: UUID) -> dict[str, Any] | None:
             _R + " SELECT"  # noqa: S608
             " (SELECT count(*) FROM sources s WHERE s.created_at >= r.window_start"
             "  AND s.created_at < r.started_at) AS created,"
-            " (SELECT count(*) FROM source_revisions v WHERE v.observed_at >= r.window_start"
-            "  AND v.observed_at < r.started_at AND EXISTS (SELECT 1 FROM source_revisions o"
+            # distinct notes with a new revision here that had an earlier one, except notes
+            # created here: a note saved 37 times reads as one change
+            " (SELECT count(DISTINCT v.source_id) FROM source_revisions v"
+            "  JOIN sources s ON s.id = v.source_id"
+            "  WHERE v.observed_at >= r.window_start AND v.observed_at < r.started_at"
+            "  AND NOT (s.created_at >= r.window_start AND s.created_at < r.started_at)"
+            "  AND EXISTS (SELECT 1 FROM source_revisions o"
             "   WHERE o.source_id = v.source_id AND o.observed_at < v.observed_at)) AS changed,"
             " (SELECT count(*) FROM sources s WHERE s.deleted_at >= r.window_start"
             "  AND s.deleted_at < r.started_at) AS deleted"
