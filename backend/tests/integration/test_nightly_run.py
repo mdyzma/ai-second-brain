@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+import psycopg
 import pytest
 
 from ai_second_brain.config import OllamaEndpointConfig, Settings
 from ai_second_brain.graph.prompt import EXTRACTOR_VERSION
 from ai_second_brain.graph.queries import queue_extraction_capped
+from ai_second_brain.nightly import run as run_module
 from ai_second_brain.nightly import store
 from ai_second_brain.nightly.run import StartResult, close_open_run, start_run, tick
 from ai_second_brain.vault.observe import observe
@@ -359,5 +361,96 @@ def test_tick_starts_once_per_day(db_url: str, tmp_path: Path) -> None:
         [row] = await _runs(h)
         assert row["trigger"] == "schedule" and row["run_date"] == DAY
         assert len(queue.extracted) == 1
+
+    scenario(db_url, tmp_path, 1, body)
+
+
+# --- lifecycle guards (final review I1) ------------------------------------------------------
+
+
+class ClosingQueue(RecordingQueue):
+    """Calls `close_open_run` while the run is still queueing, as a concurrent tick would."""
+
+    def __init__(self, pool: Any, settings: Settings) -> None:
+        super().__init__()
+        self.pool = pool
+        self.settings = settings
+        self.closed: list[UUID | None] = []
+
+    async def extract_revision(self, revision_id: UUID) -> bool:
+        self.closed.append(await close_open_run(self.pool, self.settings))
+        return await super().extract_revision(revision_id)
+
+
+def test_close_while_queueing_leaves_the_run_open(db_url: str, tmp_path: Path) -> None:
+    async def body(h: Harness, revs: list[UUID]) -> None:
+        settings = _settings(h)
+        queue = ClosingQueue(h.pool, settings)
+        result = await start_run(h.pool, queue, settings, "manual")
+        assert result.outcome == "started"
+        assert queue.closed == [None, None]  # the zero-count run was never closed
+        [row] = await _runs(h)
+        assert (row["status"], row["queued_new"], row["finished_at"]) == ("running", 2, None)
+
+    scenario(db_url, tmp_path, 2, body)
+
+
+def test_set_counts_never_lands_on_a_closed_run(db_url: str, tmp_path: Path) -> None:
+    async def body(h: Harness, _revs: list[UUID]) -> None:
+        async with h.pool.connection() as conn:
+            run_id = await store.insert_run(conn, run_date=DAY, trigger="manual")
+            assert run_id is not None
+            await store.finish(conn, run_id)
+            await store.set_counts(conn, run_id, 4, 1)
+            await conn.commit()
+        [row] = await _runs(h)
+        assert (row["status"], row["queued_new"], row["queued_failed"]) == ("complete", 0, 0)
+
+    scenario(db_url, tmp_path, 0, body)
+
+
+def test_orphaned_zero_count_run_becomes_start_interrupted(db_url: str, tmp_path: Path) -> None:
+    async def body(h: Harness, _revs: list[UUID]) -> None:
+        settings = _settings(h)
+        async with h.pool.connection() as conn:
+            orphan = await store.insert_run(conn, run_date=DAY, trigger="schedule")
+            await conn.commit()
+        await h.rows(
+            "UPDATE nightly_runs SET started_at = %s WHERE id = %s",
+            T0 - timedelta(minutes=4),
+            orphan,
+        )
+        # inside the grace period: still treated as queueing
+        assert await close_open_run(h.pool, settings, now=T0) is None
+        await h.rows(
+            "UPDATE nightly_runs SET started_at = %s WHERE id = %s",
+            T0 - timedelta(minutes=6),
+            orphan,
+        )
+        await tick(h.pool, RecordingQueue(), settings, now=T0)
+        failed, retried = await _runs(h)
+        assert failed["id"] == orphan
+        assert (failed["status"], failed["error"]) == ("failed", "start_interrupted")
+        assert retried["trigger"] == "schedule" and retried["run_date"] == DAY
+        assert retried["status"] == "running" and retried["queued_new"] == 1
+
+    scenario(db_url, tmp_path, 1, body)
+
+
+def test_failure_recorded_after_the_connection_breaks(
+    db_url: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def broken(conn: Any, *_args: Any) -> tuple[int, int]:
+        await conn.close()
+        raise psycopg.OperationalError("server closed the connection unexpectedly")
+
+    monkeypatch.setattr(run_module, "queue_extraction_capped", broken)
+
+    async def body(h: Harness, _revs: list[UUID]) -> None:
+        result = await start_run(h.pool, RecordingQueue(), _settings(h), "schedule", now=T0)
+        assert result.outcome == "failed" and result.run_id is not None
+        [row] = await _runs(h)
+        assert (row["status"], row["error"]) == ("failed", "db_error")
+        assert row["finished_at"] is not None
 
     scenario(db_url, tmp_path, 1, body)

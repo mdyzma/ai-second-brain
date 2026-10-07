@@ -54,8 +54,10 @@ async def has_scheduled_run(conn: AsyncConnection, run_date: date) -> bool:
 async def set_counts(
     conn: AsyncConnection, run_id: UUID, queued_new: int, queued_failed: int
 ) -> None:
+    """Counts land only on a run that is still open, never on one already closed."""
     await conn.execute(
-        "UPDATE nightly_runs SET queued_new = %s, queued_failed = %s WHERE id = %s",
+        "UPDATE nightly_runs SET queued_new = %s, queued_failed = %s"
+        " WHERE id = %s AND status = 'running'",
         (queued_new, queued_failed, run_id),
     )
 

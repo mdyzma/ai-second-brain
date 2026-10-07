@@ -1,6 +1,7 @@
 """The nightly run lifecycle (spec §5.2, §5.3). Logs carry ids and counts only."""
 
 import logging
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -19,6 +20,9 @@ from ai_second_brain.nightly.schedule import run_date_for, should_start
 logger = logging.getLogger("ai_second_brain.nightly")
 
 RunStart = Literal["started", "already_started", "busy", "failed"]
+
+# How long a run may stay open with zero counts while `start_run` is still queueing.
+START_GRACE = timedelta(minutes=5)
 
 
 @dataclass(frozen=True)
@@ -45,8 +49,11 @@ async def start_run(
     now: datetime | None = None,
 ) -> StartResult:
     """Insert the run row, then queue extraction in short steps (no transaction is held
-    open while deferring). A failure after the insert records the run as failed."""
+    open while deferring). A failure after the insert records the run as failed, through a
+    fresh connection, because the first one may be the thing that broke."""
     run_date = run_date_for(_now(now), settings.nightly_zone)
+    failure: str | None = None
+    queued_new = queued_failed = 0
     async with pool.connection() as conn:
         run_id = await store.insert_run(conn, run_date=run_date, trigger=trigger)
         await conn.commit()
@@ -74,12 +81,12 @@ async def start_run(
                 await store.finish(conn, run_id)
             await conn.commit()
         except Exception as error:
-            await conn.rollback()
-            code = "db_error" if isinstance(error, psycopg.Error) else "queue_error"
-            await store.fail(conn, run_id, code)
-            await conn.commit()
-            logger.warning("nightly_run_failed id=%s error=%s", run_id, code)
-            return StartResult("failed", run_id)
+            failure = "db_error" if isinstance(error, psycopg.Error) else "queue_error"
+            with suppress(Exception):  # a dead connection cannot roll back; the pool drops it
+                await conn.rollback()
+    if failure is not None:
+        await _record_failure(pool, run_id, failure)
+        return StartResult("failed", run_id)
     logger.info(
         "nightly_run_started id=%s trigger=%s queued_new=%d queued_failed=%d",
         run_id,
@@ -90,11 +97,29 @@ async def start_run(
     return StartResult("started", run_id)
 
 
+async def _record_failure(pool: AsyncConnectionPool, run_id: UUID, code: str) -> None:
+    """Mark the run failed on a fresh connection. If even that fails, the run stays open with
+    zero counts, and `close_open_run` marks it `start_interrupted` after the grace period."""
+    try:
+        async with pool.connection() as conn:
+            await store.fail(conn, run_id, code)
+            await conn.commit()
+    except Exception:
+        logger.warning("nightly_run_fail_unrecorded id=%s error=%s", run_id, code)
+        raise
+    logger.warning("nightly_run_failed id=%s error=%s", run_id, code)
+
+
 async def close_open_run(
     pool: AsyncConnectionPool, settings: Settings, *, now: datetime | None = None
 ) -> UUID | None:
     """Close the open run once no extract job waits or runs, or once it has been open longer
-    than `nightly_max_hours` (then `timed_out`; its jobs keep running). Stateless."""
+    than `nightly_max_hours` (then `timed_out`; its jobs keep running). Stateless.
+
+    A run still `running` with zero counts is being queued right now (`start_run` finishes a
+    run that queued nothing in the same commit as its counts), so it is left alone for
+    `START_GRACE`. Older than that, its start died: it is marked failed `start_interrupted`,
+    and the next tick retries the day."""
     current = _now(now)
     async with pool.connection() as conn:
         run = await store.open_run(conn)
@@ -102,6 +127,14 @@ async def close_open_run(
             await conn.commit()
             return None
         age = current - run["started_at"]  # both timezone-aware (started_at is timestamptz)
+        if run["queued_new"] + run["queued_failed"] == 0:
+            if age < START_GRACE:
+                await conn.commit()
+                return None
+            await store.fail(conn, run["id"], "start_interrupted")
+            await conn.commit()
+            logger.warning("nightly_run_failed id=%s error=start_interrupted", run["id"])
+            return run["id"]
         timed_out = age > timedelta(hours=settings.nightly_max_hours)
         if not timed_out and await extract_queue_depth(conn) > 0:
             await conn.commit()
