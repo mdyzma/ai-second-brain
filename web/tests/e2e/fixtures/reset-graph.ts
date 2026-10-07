@@ -13,8 +13,12 @@ export function resetGraph(): void {
   const testEnv = parseEnv(readFileSync(join(root, ".env.test"), "utf8"));
   const url = testEnv.TEST_DATABASE_URL;
   if (!url || !/_test\b/.test(url)) throw new Error("refusing to reset: not a test database URL");
-  execFileSync("uv", ["run", "--directory", "../backend", "python", "tests/e2e_reset.py", "--graph"], {
-    stdio: "inherit",
-    env: { ...process.env, DATABASE_URL: url },
-  });
+  execFileSync(
+    "uv",
+    ["run", "--directory", "../backend", "python", "tests/e2e_reset.py", "--graph"],
+    {
+      stdio: "inherit",
+      env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, DATABASE_URL: url },
+    },
+  );
 }

@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 FIXTURE_VAULT_TAIL = ("web", "tests", "e2e", "fixtures", "vault")
 CAPTURE_DIR = "Inbox"
@@ -34,11 +35,25 @@ def clear_capture_dir(vault_path: str) -> bool:
     return True
 
 
+def is_test_database(url: str) -> bool:
+    """True when the URL's database name (its path, not host or credentials) ends in _test."""
+    name = urlsplit(url).path.lstrip("/")
+    return name.endswith("_test") and "/" not in name
+
+
+def guarded_url() -> str:
+    """DATABASE_URL, or exit non-zero before any SQL when it is not a *_test database."""
+    url = os.environ.get("DATABASE_URL", "")
+    if not is_test_database(url):
+        sys.exit("e2e reset refused: DATABASE_URL must name a database ending in _test")
+    return url
+
+
 def reset_graph() -> None:
     """Forget extraction results and nightly runs but keep the indexed notes (between specs)."""
     import psycopg
 
-    with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
+    with psycopg.connect(guarded_url(), autocommit=True) as conn:
         conn.execute("TRUNCATE extractions, entities, edges, nightly_runs CASCADE")
     print("e2e graph reset", flush=True)
 
@@ -49,9 +64,10 @@ def main() -> None:
         return
     import psycopg
 
-    with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
+    with psycopg.connect(guarded_url(), autocommit=True) as conn:
         conn.execute(
-            "TRUNCATE sources, entities, edges, ingest_runs, nightly_runs, procrastinate_jobs CASCADE"
+            "TRUNCATE sources, entities, edges, ingest_runs, nightly_runs,"
+            " procrastinate_jobs CASCADE"
         )
 
     vault = os.environ.get("SB_VAULT_PATH")
