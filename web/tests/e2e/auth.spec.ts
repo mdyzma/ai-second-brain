@@ -46,5 +46,5 @@ test("login lands on Digest with navigation; theme toggles; logout returns to lo
 test("open-redirect targets are ignored after login", async ({ page }) => {
   await page.goto("/login?redirect=https://evil.example");
   await signIn(page, PASSWORD);
-  await expect(page).toHaveURL(/\/ask$/);
+  await expect(page).toHaveURL(/\/digest$/);
 });

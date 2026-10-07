@@ -56,20 +56,23 @@ export async function logout(): Promise<void> {
   }
 }
 
+/** Where a login lands when it has no usable destination: the morning digest. */
+export const LANDING = "/digest";
+
 /** Only same-app relative paths are allowed as post-login destinations (no open redirects). */
 export function safeRedirect(target: unknown): string {
-  if (typeof target !== "string") return "/ask";
-  if (!target.startsWith("/") || target.startsWith("//")) return "/ask";
+  if (typeof target !== "string") return LANDING;
+  if (!target.startsWith("/") || target.startsWith("//")) return LANDING;
   // Control chars (URL parsing strips tab/CR/LF, turning "/\t/x" into "//x") and backslashes.
   // biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting control characters is the point
-  if (/[\u0000-\u001f\u007f\\]/.test(target)) return "/ask";
+  if (/[\u0000-\u001f\u007f\\]/.test(target)) return LANDING;
   try {
     const base = "http://ai-second-brain.invalid";
     const url = new URL(target, base);
-    if (url.origin !== base) return "/ask";
-    if (/^\/login(?:[/?#]|$)/i.test(url.pathname + url.search + url.hash)) return "/ask";
+    if (url.origin !== base) return LANDING;
+    if (/^\/login(?:[/?#]|$)/i.test(url.pathname + url.search + url.hash)) return LANDING;
   } catch {
-    return "/ask";
+    return LANDING;
   }
   return target;
 }
