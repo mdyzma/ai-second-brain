@@ -438,6 +438,7 @@ class DigestIndexed(BaseModel):
 class Digest(BaseModel):
     nightly_at: str
     nightly_enabled: bool
+    nightly_max_hours: int  # the timeout, for the timed-out copy
     run: NightlyRun | None
     review: DigestReview | None
     failed: DigestFailed | None

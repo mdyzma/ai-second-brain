@@ -42,6 +42,7 @@ function digest(over: Partial<Digest> = {}, runOver: Partial<NightlyRun> = {}): 
   return {
     nightly_at: "02:00",
     nightly_enabled: true,
+    nightly_max_hours: 8,
     run: run(runOver),
     review: {
       remaining: 3,
@@ -166,6 +167,7 @@ describe("DigestScreen", () => {
     mockGet({
       nightly_at: "03:30",
       nightly_enabled: true,
+      nightly_max_hours: 8,
       run: null,
       review: null,
       failed: null,
@@ -294,21 +296,22 @@ describe("DigestScreen", () => {
     ).toBeInTheDocument();
   });
 
-  it("explains a timed-out run", async () => {
+  it("explains a timed-out run with the configured hours, not the elapsed time", async () => {
     mockGet(
       digest(
-        {},
+        { nightly_max_hours: 6 },
         {
           timed_out: true,
+          // the machine slept: closed 16 hours after the start
           started_at: "2026-10-07T02:00:00Z",
-          finished_at: "2026-10-07T10:10:00Z",
+          finished_at: "2026-10-07T18:05:00Z",
         },
       ),
     );
     await setup();
     expect(
       await screen.findByText(
-        "Stopped waiting after 8 hours. Remaining notes will finish in the background.",
+        "Stopped waiting after 6 hours. Remaining notes will finish in the background.",
       ),
     ).toBeInTheDocument();
   });

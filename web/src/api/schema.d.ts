@@ -560,6 +560,8 @@ export interface components {
             nightly_at: string;
             /** Nightly Enabled */
             nightly_enabled: boolean;
+            /** Nightly Max Hours */
+            nightly_max_hours: number;
             review: components["schemas"]["DigestReview"] | null;
             run: components["schemas"]["NightlyRun"] | null;
         };

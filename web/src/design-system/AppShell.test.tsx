@@ -22,6 +22,7 @@ function latestDigest(openTotal: number | null) {
   return {
     nightly_at: "02:00",
     nightly_enabled: true,
+    nightly_max_hours: 8,
     run: openTotal === null ? null : { id: "r1", status: "complete" },
     review:
       openTotal === null

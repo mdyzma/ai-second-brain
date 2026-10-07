@@ -24,7 +24,6 @@ import {
   summaryLine,
   timedOutLine,
   UNAVAILABLE,
-  waitedHours,
 } from "./copy";
 import type { Digest, NightlyRunSummary } from "./types";
 
@@ -130,7 +129,7 @@ function statusLines(d: Digest): string[] {
   if (run.status === "failed") return [failedRunLine(run.error ?? "unknown")];
   if (run.status === "running") return [runningLine(d)];
   const lines = [run.unavailable ? UNAVAILABLE : summaryLine(d)];
-  if (run.timed_out) lines.push(timedOutLine(waitedHours(run)));
+  if (run.timed_out) lines.push(timedOutLine(d.nightly_max_hours));
   return lines;
 }
 

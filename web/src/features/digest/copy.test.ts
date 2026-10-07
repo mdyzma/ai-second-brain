@@ -21,6 +21,7 @@ function digest(done: number, failed: number, remaining: number): Digest {
   return {
     nightly_at: "02:00",
     nightly_enabled: true,
+    nightly_max_hours: 8,
     run: {
       id: "r1",
       run_date: "2026-10-07",

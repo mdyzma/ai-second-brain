@@ -28,6 +28,7 @@ def _digest_body(request: Request, body: dict[str, Any] | None) -> dict[str, Any
     return {
         "nightly_at": settings.nightly_at,
         "nightly_enabled": settings.nightly_enabled,
+        "nightly_max_hours": settings.nightly_max_hours,
         "run": None,
         "review": None,
         "failed": None,

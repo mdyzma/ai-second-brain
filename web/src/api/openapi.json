@@ -191,6 +191,10 @@
             "title": "Nightly Enabled",
             "type": "boolean"
           },
+          "nightly_max_hours": {
+            "title": "Nightly Max Hours",
+            "type": "integer"
+          },
           "review": {
             "anyOf": [
               {
@@ -215,6 +219,7 @@
         "required": [
           "nightly_at",
           "nightly_enabled",
+          "nightly_max_hours",
           "run",
           "review",
           "failed",

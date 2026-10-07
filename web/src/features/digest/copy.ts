@@ -1,4 +1,4 @@
-import type { Digest, DigestIndexed, NightlyRun, NightlyRunSummary } from "./types";
+import type { Digest, DigestIndexed, NightlyRunSummary } from "./types";
 
 export const UNAVAILABLE =
   "Extraction is off: no Ollama endpoint is configured (SB_OLLAMA_ENDPOINTS).";
@@ -45,12 +45,6 @@ export function runningLine(d: Digest): string {
 
 export function timedOutLine(hours: number): string {
   return `Stopped waiting after ${hours} hours. Remaining notes will finish in the background.`;
-}
-
-/** Whole hours the run waited before it was closed; the API does not echo the configured cap. */
-export function waitedHours(run: Pick<NightlyRun, "started_at" | "finished_at">): number {
-  const end = run.finished_at ? Date.parse(run.finished_at) : Date.now();
-  return Math.max(1, Math.floor((end - Date.parse(run.started_at)) / 3_600_000));
 }
 
 export function failedRunLine(error: string): string {

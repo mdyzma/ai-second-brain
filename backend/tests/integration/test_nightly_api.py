@@ -65,6 +65,7 @@ def test_digest_empty_returns_null_run(make_api: Callable[..., TestClient]) -> N
     assert resp.json() == {
         "nightly_at": "02:00",
         "nightly_enabled": True,
+        "nightly_max_hours": 8,
         "run": None,
         "review": None,
         "failed": None,
