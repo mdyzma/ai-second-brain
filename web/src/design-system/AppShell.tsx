@@ -1,15 +1,19 @@
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { LogOut, PenLine } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { isObsidianUrl } from "@/api/obsidian";
 import type { Captured } from "@/features/capture/api";
 import { CaptureDialog } from "@/features/capture/CaptureDialog";
+import { digestQuery } from "@/features/digest/api";
 import { NAV_ORDER, SCREENS } from "@/features/screens/screens";
 import { cn } from "./cn";
 import { ThemeToggle } from "./theme";
 import { Button } from "./ui/button";
 
 function NavLinks({ layout }: { layout: "sidebar" | "bar" }) {
+  const digest = useQuery(digestQuery());
+  const remaining = digest.data?.review?.remaining ?? 0;
   return (
     <ul
       className={cn(
@@ -26,7 +30,7 @@ function NavLinks({ layout }: { layout: "sidebar" | "bar" }) {
             <Link
               to={screen.path}
               className={cn(
-                "flex items-center rounded-md",
+                "group relative flex items-center rounded-md",
                 layout === "sidebar"
                   ? "gap-3 px-3 py-2 text-sm"
                   : "min-w-12 flex-col gap-1 px-2 py-2 text-xs",
@@ -38,6 +42,24 @@ function NavLinks({ layout }: { layout: "sidebar" | "bar" }) {
             >
               <Icon aria-hidden className="size-4" />
               <span>{screen.label}</span>
+              {id === "digest" && remaining > 0 ? (
+                <>
+                  {" "}
+                  <span
+                    className={cn(
+                      "rounded-full bg-accent px-1.5 text-xs text-accent-fg",
+                      // On the active (accent) item the badge inverts so it stays visible.
+                      "group-aria-[current=page]:bg-accent-fg group-aria-[current=page]:text-accent",
+                      // In the phone bar the badge overlays the icon so the item keeps its size.
+                      layout === "sidebar" ? "ml-auto" : "absolute top-0.5 right-0.5",
+                    )}
+                  >
+                    {remaining}
+                    {/* The accessible-name algorithm trims the span's own leading space. */}{" "}
+                    <span className="sr-only"> to review</span>
+                  </span>
+                </>
+              ) : null}
             </Link>
           </li>
         );

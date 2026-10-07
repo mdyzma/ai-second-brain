@@ -46,9 +46,13 @@ export type ReviewScreenProps = {
   onDecideLinks: (items: LinkDecision[]) => Promise<Result>;
   onRun: (scope: ExtractScope) => Promise<RunResult>;
   onSearch: (type: EntityType | undefined, q: string) => Promise<EntitySummary[]>;
+  /** The open tab when the URL owns it; uncontrolled (starting on Entities) otherwise. */
+  tab?: ReviewTab;
+  onTab?: (tab: ReviewTab) => void;
 };
 
-type Tab = "entities" | "links";
+export type ReviewTab = "entities" | "links";
+type Tab = ReviewTab;
 type CardError = { text: string; nameTaken: boolean };
 type PickerState = { entity: ReviewEntity; mode: "merge" | "parent" };
 
@@ -63,7 +67,12 @@ function sum(status: GraphStatus, key: "proposed" | "accepted" | "rejected"): nu
 
 export function ReviewScreen(props: ReviewScreenProps) {
   const { status } = props;
-  const [tab, setTab] = useState<Tab>("entities");
+  const [localTab, setLocalTab] = useState<Tab>("entities");
+  const tab = props.tab ?? localTab;
+  const setTab = (next: Tab) => {
+    setLocalTab(next);
+    props.onTab?.(next);
+  };
   const baseId = useId();
   const proposed = sum(status, "proposed");
 

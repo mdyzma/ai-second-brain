@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
   createRootRoute,
@@ -6,7 +7,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { captureNote } from "@/features/capture/api";
@@ -14,15 +15,39 @@ import { AppShell } from "./AppShell";
 import { ThemeProvider } from "./theme";
 
 vi.mock("@/features/capture/api", () => ({ captureNote: vi.fn() }));
+const get = vi.hoisted(() => vi.fn());
+vi.mock("@/api/client", () => ({ api: { GET: get, POST: vi.fn() } }));
 
-async function renderShell(onLogout: () => void) {
+function latestDigest(remaining: number | null) {
+  return {
+    nightly_at: "02:00",
+    nightly_enabled: true,
+    run: remaining === null ? null : { id: "r1", status: "complete" },
+    review:
+      remaining === null
+        ? null
+        : {
+            remaining,
+            entities: { count: remaining, by_type: {}, top: [] },
+            links: { count: 0, top: [] },
+          },
+    failed: null,
+    indexed: null,
+  };
+}
+
+async function renderShell(onLogout: () => void, remaining: number | null = null) {
+  get.mockResolvedValue({ data: latestDigest(remaining), response: { status: 200 } });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const rootRoute = createRootRoute({
     component: () => (
-      <ThemeProvider>
-        <AppShell onLogout={onLogout}>
-          <Outlet />
-        </AppShell>
-      </ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider>
+          <AppShell onLogout={onLogout}>
+            <Outlet />
+          </AppShell>
+        </ThemeProvider>
+      </QueryClientProvider>
     ),
   });
   const routes = ["ask", "search"].map((path) =>
@@ -77,6 +102,30 @@ describe("AppShell", () => {
     expect(active.className).not.toContain("text-fg-muted");
     expect(inactive.className).toContain("text-fg-muted");
     expect(inactive.className).not.toContain("bg-accent");
+  });
+
+  describe("digest badge", () => {
+    it("shows the remaining count on the Digest item only", async () => {
+      await renderShell(vi.fn(), 3);
+      expect(get).toHaveBeenCalledWith("/api/digest");
+      const badged = await screen.findAllByRole("link", { name: "Digest 3 to review" });
+      // Sidebar and phone bar.
+      expect(badged).toHaveLength(2);
+      for (const link of badged) {
+        expect(within(link).getByText("3")).toBeInTheDocument();
+        expect(within(link).getByText("to review")).toHaveClass("sr-only");
+      }
+      expect(screen.getAllByText(/to review/)).toHaveLength(2);
+      expect(screen.getAllByRole("link", { name: "Review" })).toHaveLength(2);
+    });
+
+    it("shows no badge when nothing remains", async () => {
+      await renderShell(vi.fn(), 0);
+      const [nav] = await screen.findAllByRole("navigation", { name: "Primary" });
+      await waitFor(() => expect(get).toHaveBeenCalled());
+      expect(within(nav as HTMLElement).getByRole("link", { name: "Digest" })).toBeInTheDocument();
+      expect(within(nav as HTMLElement).queryByText(/to review/)).not.toBeInTheDocument();
+    });
   });
 
   describe("capture", () => {

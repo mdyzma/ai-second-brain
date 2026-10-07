@@ -368,3 +368,13 @@ describe("links tab", () => {
     expect(screen.getByText("Nothing to review.")).toBeInTheDocument();
   });
 });
+
+describe("tab from the URL", () => {
+  it("opens the tab it is given and reports tab changes", async () => {
+    const onTab = vi.fn();
+    setup({ tab: "links", onTab });
+    expect(screen.getByRole("tab", { name: /^Links/ })).toHaveAttribute("aria-selected", "true");
+    await userEvent.click(screen.getByRole("tab", { name: /^Entities/ }));
+    expect(onTab).toHaveBeenCalledWith("entities");
+  });
+});

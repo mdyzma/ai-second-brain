@@ -1,5 +1,6 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { digestKeys } from "@/features/digest/api";
 import {
   decideEntity,
   decideLinks,
@@ -12,18 +13,30 @@ import {
   useReviewAutoRefresh,
 } from "@/features/graph/api";
 import { loadErrorCopy } from "@/features/graph/labels";
-import { ReviewScreen } from "@/features/graph/ReviewScreen";
+import { ReviewScreen, type ReviewTab } from "@/features/graph/ReviewScreen";
 import { statusOf } from "@/features/sources/api";
 
-export const Route = createFileRoute("/_app/review")({ component: ReviewRoute });
+type ReviewSearch = { tab?: ReviewTab };
+
+export const Route = createFileRoute("/_app/review")({
+  validateSearch: (raw: Record<string, unknown>): ReviewSearch =>
+    raw.tab === "links" ? { tab: "links" } : {},
+  component: ReviewRoute,
+});
 
 function ReviewRoute() {
   const queryClient = useQueryClient();
+  const { tab = "entities" } = Route.useSearch();
+  const navigate = useNavigate({ from: Route.fullPath });
   const status = useQuery(graphStatusQuery);
   useReviewAutoRefresh(status.data);
   const entities = useInfiniteQuery(reviewEntitiesQuery);
   const links = useInfiniteQuery(reviewLinksQuery);
-  const refresh = () => queryClient.invalidateQueries({ queryKey: graphKeys.all });
+  const refresh = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: graphKeys.all }),
+      queryClient.invalidateQueries({ queryKey: digestKeys.all }),
+    ]);
 
   if (status.data === undefined) {
     if (status.isError)
@@ -36,6 +49,10 @@ function ReviewRoute() {
   }
   return (
     <ReviewScreen
+      tab={tab}
+      onTab={(next) =>
+        void navigate({ search: next === "links" ? { tab: next } : {}, replace: true })
+      }
       status={status.data}
       entities={entities.data?.pages.flatMap((p) => p.items) ?? []}
       entitiesLoading={entities.isPending}

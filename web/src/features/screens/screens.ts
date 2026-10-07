@@ -63,8 +63,8 @@ export const SCREENS: Record<ScreenId, Screen> = {
     path: "/digest",
     label: "Digest",
     icon: Sunrise,
-    phase: "4",
-    purpose: "Your morning summary: new links, items to review and rediscovered ideas.",
+    phase: "4b",
+    purpose: "What last night's run found and what still needs your decision.",
   },
   review: {
     path: "/review",

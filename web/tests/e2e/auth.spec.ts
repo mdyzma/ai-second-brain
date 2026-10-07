@@ -22,14 +22,14 @@ test("wrong password shows an error", async ({ page }) => {
   await expect(page).toHaveURL(/\/login/);
 });
 
-test("login lands on Ask with navigation; theme toggles; logout returns to login", async ({
+test("login lands on Digest with navigation; theme toggles; logout returns to login", async ({
   page,
 }) => {
   await page.goto("/");
   await signIn(page, PASSWORD);
-  await expect(page).toHaveURL(/\/ask$/);
+  await expect(page).toHaveURL(/\/digest$/);
   await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Ask" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("link", { name: "Digest" })).toHaveAttribute("aria-current", "page");
 
   const html = page.locator("html");
   await page.getByRole("button", { name: /^Theme:/ }).click();
