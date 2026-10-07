@@ -13,6 +13,7 @@ dependencies = [
     "pydantic-settings>=2.7",
     "pyyaml>=6.0",
     "typer>=0.15",
+    "tzdata>=2026.4",
     "uvicorn[standard]>=0.54",
     "watchfiles>=1.3",
 ]

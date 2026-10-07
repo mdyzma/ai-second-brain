@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import time, tzinfo
 from functools import lru_cache
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
+from zoneinfo import ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .nightly.schedule import parse_hhmm, resolve_zone
 from .vault.paths import _excluded
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -128,6 +131,35 @@ class Settings(BaseSettings):
     embed_model: str = Field(default="bge-m3", min_length=1)
     embed_batch: int = Field(default=16, ge=1, le=128)
     reconcile_minutes: int = Field(default=15, ge=1, le=1440)
+    nightly_enabled: bool = True
+    nightly_at: str = "02:00"
+    timezone: str = ""
+    nightly_max_notes: int = Field(default=500, ge=1, le=100_000)
+    nightly_max_hours: int = Field(default=8, ge=1, le=48)
+
+    @field_validator("nightly_at")
+    @classmethod
+    def _valid_nightly_at(cls, value: str) -> str:
+        parse_hhmm(value)
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def _valid_timezone(cls, value: str) -> str:
+        try:
+            resolve_zone(value)
+        except (ValueError, KeyError, ZoneInfoNotFoundError) as error:
+            raise ValueError("unknown IANA time zone") from error
+        return value
+
+    @property
+    def nightly_time(self) -> time:
+        return parse_hhmm(self.nightly_at)
+
+    @property
+    def nightly_zone(self) -> tzinfo:
+        return resolve_zone(self.timezone)
+
     max_note_bytes: int = Field(default=2_000_000, ge=1_000, le=50_000_000)
     capture_dir_name: str = Field(default="Inbox", validation_alias="SB_CAPTURE_DIR")
     obsidian_vault: str = ""

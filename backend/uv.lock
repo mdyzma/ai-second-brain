@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -20,6 +20,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyyaml" },
     { name = "typer" },
+    { name = "tzdata" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "watchfiles" },
 ]
@@ -44,6 +45,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.7" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "typer", specifier = ">=0.15" },
+    { name = "tzdata", specifier = ">=2026.4" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54" },
     { name = "watchfiles", specifier = ">=1.3" },
 ]
