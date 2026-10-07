@@ -7,6 +7,7 @@ directory strictly inside the e2e fixture vault.
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
 FIXTURE_VAULT_TAIL = ("web", "tests", "e2e", "fixtures", "vault")
@@ -33,11 +34,25 @@ def clear_capture_dir(vault_path: str) -> bool:
     return True
 
 
-def main() -> None:
+def reset_graph() -> None:
+    """Forget extraction results and nightly runs but keep the indexed notes (between specs)."""
     import psycopg
 
     with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
-        conn.execute("TRUNCATE sources, entities, edges, ingest_runs, procrastinate_jobs CASCADE")
+        conn.execute("TRUNCATE extractions, entities, edges, nightly_runs CASCADE")
+    print("e2e graph reset", flush=True)
+
+
+def main() -> None:
+    if "--graph" in sys.argv[1:]:
+        reset_graph()
+        return
+    import psycopg
+
+    with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
+        conn.execute(
+            "TRUNCATE sources, entities, edges, ingest_runs, nightly_runs, procrastinate_jobs CASCADE"
+        )
 
     vault = os.environ.get("SB_VAULT_PATH")
     if vault:

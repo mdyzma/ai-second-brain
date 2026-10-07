@@ -1,4 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { resetGraph } from "./fixtures/reset-graph";
+
+// digest.spec.ts runs first and leaves accepted entities behind.
+test.beforeAll(resetGraph);
 
 test("extract, review and browse the graph", async ({ page }) => {
   // Extraction runs in the worker and can take a while; the default 30s is too short.

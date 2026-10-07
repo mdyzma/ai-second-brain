@@ -35,6 +35,8 @@ const serverEnv = {
   SB_CAPTURE_DIR: "Inbox",
   SB_EMBED_URL: fakeOllamaURL,
   SB_RECONCILE_MINUTES: "60",
+  // The e2e drives the nightly run by hand with "Run now"; the schedule must not fire.
+  SB_NIGHTLY_ENABLED: "false",
   FAKE_OLLAMA_PORT: fakeOllamaPort,
 };
 
