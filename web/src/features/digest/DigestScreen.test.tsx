@@ -44,6 +44,7 @@ function digest(over: Partial<Digest> = {}, runOver: Partial<NightlyRun> = {}): 
     run: run(runOver),
     review: {
       remaining: 3,
+      open_total: 3,
       entities: {
         count: 2,
         by_type: { tool: 1, person: 1 },
@@ -227,6 +228,7 @@ describe("DigestScreen", () => {
       digest({
         review: {
           remaining: 0,
+          open_total: 0,
           entities: { count: 0, by_type: {}, top: [] },
           links: { count: 0, top: [] },
         },
@@ -238,6 +240,39 @@ describe("DigestScreen", () => {
     expect(within(review).getByText("All caught up.")).toBeInTheDocument();
     expect(within(review).getByTestId("remaining")).toHaveTextContent("0");
     expect(screen.queryByRole("region", { name: /^Failed/ })).not.toBeInTheDocument();
+    expect(within(review).queryByText(/more waiting/)).not.toBeInTheDocument();
+  });
+
+  it("never says all caught up while earlier items wait", async () => {
+    mockGet(
+      digest({
+        review: {
+          remaining: 0,
+          open_total: 18,
+          entities: { count: 0, by_type: {}, top: [] },
+          links: { count: 0, top: [] },
+        },
+      }),
+    );
+    await setup();
+    const review = await screen.findByRole("region", { name: /^To review/ });
+    expect(within(review).getByText("Nothing new from this run.")).toBeInTheDocument();
+    expect(within(review).queryByText("All caught up.")).not.toBeInTheDocument();
+    expect(
+      within(review).getByRole("link", { name: "18 more waiting from earlier runs." }),
+    ).toHaveAttribute("href", "/review");
+  });
+
+  it("lists this run's items and links to the rest", async () => {
+    const base = digest();
+    mockGet({ ...base, review: base.review && { ...base.review, open_total: 5 } });
+    await setup();
+    const review = await screen.findByRole("region", { name: /^To review/ });
+    expect(within(review).getByTestId("remaining")).toHaveTextContent("3");
+    expect(within(review).getByRole("link", { name: /Proxmox/ })).toBeInTheDocument();
+    expect(
+      within(review).getByRole("link", { name: "2 more waiting from earlier runs." }),
+    ).toHaveAttribute("href", "/review");
   });
 
   it("explains an unavailable run", async () => {
@@ -311,6 +346,7 @@ describe("DigestScreen", () => {
       {
         review: {
           remaining: 0,
+          open_total: 3,
           entities: { count: 0, by_type: {}, top: [] },
           links: { count: 0, top: [] },
         },

@@ -36,6 +36,7 @@ function digest(done: number, failed: number, remaining: number): Digest {
     },
     review: {
       remaining,
+      open_total: remaining,
       entities: { count: remaining, by_type: {}, top: [] },
       links: { count: 0, top: [] },
     },

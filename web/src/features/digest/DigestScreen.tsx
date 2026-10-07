@@ -14,6 +14,8 @@ import {
   failedRunLine,
   indexedLine,
   LOAD_ERROR,
+  moreWaitingLine,
+  NOTHING_NEW,
   noRunsLine,
   runningLine,
   START_ERROR,
@@ -147,6 +149,7 @@ function DigestBody({ digest }: { digest: Digest }) {
 function ToReview({ review }: { review: NonNullable<Digest["review"]> }) {
   const headingId = useId();
   const { entities, links } = review;
+  const earlier = review.open_total - review.remaining;
   return (
     <section aria-labelledby={headingId} className={SECTION}>
       <h2 id={headingId} className="flex items-center gap-2 text-lg font-semibold">
@@ -155,8 +158,10 @@ function ToReview({ review }: { review: NonNullable<Digest["review"]> }) {
           {review.remaining}
         </span>
       </h2>
-      {review.remaining === 0 ? (
+      {review.open_total === 0 ? (
         <p className="text-sm text-fg-muted">{ALL_CAUGHT_UP}</p>
+      ) : review.remaining === 0 ? (
+        <p className="text-sm text-fg-muted">{NOTHING_NEW}</p>
       ) : (
         <>
           {Object.keys(entities.by_type).length ? (
@@ -209,6 +214,13 @@ function ToReview({ review }: { review: NonNullable<Digest["review"]> }) {
           ) : null}
         </>
       )}
+      {earlier > 0 ? (
+        <p className="text-sm">
+          <Link to="/review" className="underline underline-offset-2 hover:text-fg">
+            {moreWaitingLine(earlier)}
+          </Link>
+        </p>
+      ) : null}
       <div className="flex flex-wrap gap-2">
         <Link to="/review" className={buttonVariants({ variant: "outline", size: "sm" })}>
           Review all

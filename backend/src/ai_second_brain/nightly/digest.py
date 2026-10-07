@@ -176,6 +176,15 @@ async def digest(conn: AsyncConnection, run_id: UUID) -> dict[str, Any] | None:
         )
         failed_rows = await cur.fetchall()
 
+        # Everything awaiting review, from any run or none: what the Review screen holds.
+        await cur.execute(
+            "SELECT (SELECT count(*) FROM entities e WHERE e.status = 'proposed')"  # noqa: S608
+            " + (SELECT count(*) " + REVIEW_LINK_FROM + " WHERE " + REVIEW_LINK_VISIBLE + ")"
+            " AS n"
+        )
+        open_row = await cur.fetchone()
+        open_total = int(open_row["n"]) if open_row else 0
+
         # Indexed, in the input window.
         await cur.execute(
             _R + " SELECT"  # noqa: S608
@@ -205,6 +214,7 @@ async def digest(conn: AsyncConnection, run_id: UUID) -> dict[str, Any] | None:
             "entities": {"count": entity_count, "by_type": by_type, "top": top_entities},
             "links": {"count": link_count, "top": top_links},
             "remaining": entity_count + link_count,
+            "open_total": open_total,
         },
         "failed": {
             "count": int(failed_rows[0]["total"]) if failed_rows else 0,

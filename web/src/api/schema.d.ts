@@ -590,6 +590,8 @@ export interface components {
         DigestReview: {
             entities: components["schemas"]["DigestEntities"];
             links: components["schemas"]["DigestLinks"];
+            /** Open Total */
+            open_total: number;
             /** Remaining */
             remaining: number;
         };

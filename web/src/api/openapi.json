@@ -355,6 +355,10 @@
           "links": {
             "$ref": "#/components/schemas/DigestLinks"
           },
+          "open_total": {
+            "title": "Open Total",
+            "type": "integer"
+          },
           "remaining": {
             "title": "Remaining",
             "type": "integer"
@@ -363,7 +367,8 @@
         "required": [
           "entities",
           "links",
-          "remaining"
+          "remaining",
+          "open_total"
         ],
         "title": "DigestReview",
         "type": "object"

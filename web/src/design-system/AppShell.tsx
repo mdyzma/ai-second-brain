@@ -13,7 +13,8 @@ import { Button } from "./ui/button";
 
 function NavLinks({ layout }: { layout: "sidebar" | "bar" }) {
   const digest = useQuery(digestQuery());
-  const remaining = digest.data?.review?.remaining ?? 0;
+  // Everything awaiting review, from any run: a quiet night must not hide older items.
+  const remaining = digest.data?.review?.open_total ?? 0;
   return (
     <ul
       className={cn(

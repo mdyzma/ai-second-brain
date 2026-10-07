@@ -3,6 +3,7 @@ import type { Digest, DigestIndexed, NightlyRun } from "./types";
 export const UNAVAILABLE =
   "Extraction is off: no Ollama endpoint is configured (SB_OLLAMA_ENDPOINTS).";
 export const ALL_CAUGHT_UP = "All caught up.";
+export const NOTHING_NEW = "Nothing new from this run.";
 /** "Retried next night, or run `just graph-extract --failed` now."; the command renders as code. */
 export const FAILURES_HINT = {
   before: "Retried next night, or run ",
@@ -42,6 +43,11 @@ export function waitedHours(run: Pick<NightlyRun, "started_at" | "finished_at">)
 
 export function failedRunLine(error: string): string {
   return `Last night's run failed to start (${error}). It will try again at the next check.`;
+}
+
+/** Items awaiting review that earlier runs (or manual extraction) produced. */
+export function moreWaitingLine(n: number): string {
+  return `${n} more waiting from earlier runs.`;
 }
 
 export function noRunsLine(nightlyAt: string): string {

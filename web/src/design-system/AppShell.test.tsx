@@ -18,17 +18,19 @@ vi.mock("@/features/capture/api", () => ({ captureNote: vi.fn() }));
 const get = vi.hoisted(() => vi.fn());
 vi.mock("@/api/client", () => ({ api: { GET: get, POST: vi.fn() } }));
 
-function latestDigest(remaining: number | null) {
+function latestDigest(openTotal: number | null) {
   return {
     nightly_at: "02:00",
     nightly_enabled: true,
-    run: remaining === null ? null : { id: "r1", status: "complete" },
+    run: openTotal === null ? null : { id: "r1", status: "complete" },
     review:
-      remaining === null
+      openTotal === null
         ? null
         : {
-            remaining,
-            entities: { count: remaining, by_type: {}, top: [] },
+            // The badge counts everything awaiting review, not just the latest run's.
+            remaining: 0,
+            open_total: openTotal,
+            entities: { count: 0, by_type: {}, top: [] },
             links: { count: 0, top: [] },
           },
     failed: null,
@@ -36,8 +38,8 @@ function latestDigest(remaining: number | null) {
   };
 }
 
-async function renderShell(onLogout: () => void, remaining: number | null = null) {
-  get.mockResolvedValue({ data: latestDigest(remaining), response: { status: 200 } });
+async function renderShell(onLogout: () => void, openTotal: number | null = null) {
+  get.mockResolvedValue({ data: latestDigest(openTotal), response: { status: 200 } });
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const rootRoute = createRootRoute({
     component: () => (
@@ -105,7 +107,7 @@ describe("AppShell", () => {
   });
 
   describe("digest badge", () => {
-    it("shows the remaining count on the Digest item only", async () => {
+    it("shows everything awaiting review on the Digest item only", async () => {
       await renderShell(vi.fn(), 3);
       expect(get).toHaveBeenCalledWith("/api/digest");
       const badged = await screen.findAllByRole("link", { name: "Digest 3 to review" });

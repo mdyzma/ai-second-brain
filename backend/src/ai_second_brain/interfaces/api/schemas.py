@@ -414,7 +414,8 @@ class DigestLinks(BaseModel):
 class DigestReview(BaseModel):
     entities: DigestEntities
     links: DigestLinks
-    remaining: int
+    remaining: int  # this run's items still awaiting review
+    open_total: int  # everything awaiting review, from any run (no time window)
 
 
 class DigestFailedItem(BaseModel):

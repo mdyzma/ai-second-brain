@@ -190,6 +190,8 @@ def test_review_lists_only_this_runs_proposed_items(db_url: str, tmp_path: Path)
         # mention edges to proposed entities are not links to review (4a's Links tab)
         assert d["review"]["links"] == {"count": 0, "top": []}
         assert d["review"]["remaining"] == 3
+        # open_total has no window: Before and After wait in Review too
+        assert d["review"]["open_total"] == 5
         assert d["run"]["id"] == run and d["run"]["status"] == "complete"
         assert d["run"]["window_start"] == T - timedelta(days=1)
 
@@ -260,6 +262,8 @@ def test_links_follow_review_visibility(db_url: str, tmp_path: Path) -> None:
         await h.rows("UPDATE sources SET deleted_at = now() WHERE id = %s", notes.sources[1])
         count, ids, tab = await _link_ids(h, run)
         assert (count, ids, tab) == (0, set(), {early})  # the tab has no window
+        d = await _digest(h, run)
+        assert d["review"]["open_total"] == len(tab)  # no proposed entities: just the links
 
     scenario(db_url, tmp_path, body)
 
