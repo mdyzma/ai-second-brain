@@ -6,8 +6,10 @@ import {
   failedRunLine,
   indexedLine,
   LOAD_ERROR,
+  moreWaitingLine,
   noRunsLine,
   notesWord,
+  runLabel,
   runningLine,
   summaryLine,
   timedOutLine,
@@ -95,5 +97,25 @@ describe("digest copy", () => {
     expect(indexedLine({ created: 4, changed: 0, deleted: 0, since_beginning: true })).toBe(
       "4 added, 0 changed, 0 deleted since the beginning",
     );
+  });
+});
+
+describe("runLabel", () => {
+  it("names the date, the local start time and the trigger", () => {
+    const startedAt = "2026-10-07T02:05:00Z";
+    const at = new Date(startedAt);
+    const time = `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+    expect(runLabel({ run_date: "2026-10-07", started_at: startedAt, trigger: "schedule" })).toBe(
+      `2026-10-07 ${time} · Scheduled`,
+    );
+    expect(runLabel({ run_date: "2026-10-07", started_at: startedAt, trigger: "manual" })).toBe(
+      `2026-10-07 ${time} · Manual`,
+    );
+  });
+});
+
+describe("moreWaitingLine", () => {
+  it("counts the items from earlier runs", () => {
+    expect(moreWaitingLine(18)).toBe("18 more waiting from earlier runs.");
   });
 });

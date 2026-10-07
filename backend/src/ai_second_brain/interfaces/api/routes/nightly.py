@@ -2,6 +2,7 @@
 
 from datetime import date
 from typing import Annotated, Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
@@ -61,6 +62,22 @@ async def get_digest_by_date(run_date: date, request: Request) -> Any:
     async with request.app.state.pool.connection() as conn:
         run_id = await digests.run_id_for_date(conn, run_date)
         body = None if run_id is None else await digests.digest(conn, run_id)
+    if body is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not_found")
+    return _digest_body(request, body)
+
+
+@router.get(
+    "/digest/run/{run_id}",
+    operation_id="getDigestByRun",
+    response_model=Digest,
+    responses={**ERRORS, 404: {"model": ErrorResponse}},
+)
+async def get_digest_by_run(run_id: UUID, request: Request) -> Any:
+    """One run's digest; reaches every run, also an earlier one on the same date."""
+    await _close_drained(request)
+    async with request.app.state.pool.connection() as conn:
+        body = await digests.digest(conn, run_id)
     if body is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not_found")
     return _digest_body(request, body)

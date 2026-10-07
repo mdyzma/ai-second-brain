@@ -1,4 +1,4 @@
-import type { Digest, DigestIndexed, NightlyRun } from "./types";
+import type { Digest, DigestIndexed, NightlyRun, NightlyRunSummary } from "./types";
 
 export const UNAVAILABLE =
   "Extraction is off: no Ollama endpoint is configured (SB_OLLAMA_ENDPOINTS).";
@@ -13,6 +13,18 @@ export const FAILURES_HINT = {
 export const BUSY = "A run is already in progress.";
 export const LOAD_ERROR = "Couldn't load the digest. Try again.";
 export const START_ERROR = "Couldn't start a run. Try again.";
+export const RUN_NOT_FOUND = "That run no longer exists.";
+
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/** A picker label: "2026-10-07 02:00 · Scheduled", the start in local time. */
+export function runLabel(
+  r: Pick<NightlyRunSummary, "run_date" | "started_at" | "trigger">,
+): string {
+  const at = new Date(r.started_at);
+  const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  return `${r.run_date} ${time} · ${r.trigger === "manual" ? "Manual" : "Scheduled"}`;
+}
 
 export function notesWord(n: number): string {
   return n === 1 ? "note" : "notes";

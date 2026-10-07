@@ -6,7 +6,7 @@ import type { Digest } from "./types";
 export const digestKeys = {
   all: ["digest"] as const,
   latest: ["digest", "latest"] as const,
-  byDate: (d: string) => ["digest", d] as const,
+  byRun: (id: string) => ["digest", "run", id] as const,
   runs: ["digest", "runs"] as const,
 };
 
@@ -19,14 +19,14 @@ export function digestPollInterval(data: Pick<Digest, "run"> | undefined): numbe
   return data?.run?.status === "running" ? DIGEST_POLL_FAST_MS : DIGEST_POLL_SLOW_MS;
 }
 
-/** The latest run's digest, or the latest run on `date` (YYYY-MM-DD). */
-export function digestQuery(date?: string) {
+/** The latest run's digest, or the digest of the run with id `runId`. */
+export function digestQuery(runId?: string) {
   return queryOptions({
-    queryKey: date ? digestKeys.byDate(date) : digestKeys.latest,
+    queryKey: runId ? digestKeys.byRun(runId) : digestKeys.latest,
     refetchInterval: (query) => digestPollInterval(query.state.data),
     queryFn: async () => {
-      const { data, response } = date
-        ? await api.GET("/api/digest/{run_date}", { params: { path: { run_date: date } } })
+      const { data, response } = runId
+        ? await api.GET("/api/digest/run/{run_id}", { params: { path: { run_id: runId } } })
         : await api.GET("/api/digest");
       if (!data) throw new HttpError(response.status);
       return data;

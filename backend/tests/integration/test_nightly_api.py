@@ -1,6 +1,7 @@
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -141,6 +142,7 @@ def test_routes_require_session(make_api: Callable[..., TestClient]) -> None:
     client = make_api(login=False)
     assert client.get("/api/digest").status_code == 401
     assert client.get("/api/digest/2026-10-04").status_code == 401
+    assert client.get(f"/api/digest/run/{uuid4()}").status_code == 401
     assert client.get("/api/nightly/runs").status_code == 401
     assert client.post("/api/nightly/run", headers=SAME_ORIGIN).status_code == 401
 
@@ -162,3 +164,23 @@ def test_digest_read_leaves_a_queueing_run_open(
     insert(db_url, "2026-10-04", "manual", "running")  # zero counts, just started
     assert client.get("/api/digest").json()["run"]["status"] == "running"
     assert client.get("/api/digest/2026-10-04").json()["run"]["status"] == "running"
+
+
+def test_digest_by_run_reaches_each_run_on_a_date(
+    make_api: Callable[..., TestClient], db_url: str
+) -> None:
+    client = make_api()
+    insert(db_url, "2026-10-04", "schedule", "complete")
+    insert(db_url, "2026-10-04", "manual", "complete")
+    runs = client.get("/api/nightly/runs").json()["runs"]
+    assert [r["trigger"] for r in runs] == ["manual", "schedule"]
+    # by date, only the later (manual) run; by id, both
+    assert client.get("/api/digest/2026-10-04").json()["run"]["id"] == runs[0]["id"]
+    for listed in runs:
+        resp = client.get(f"/api/digest/run/{listed['id']}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["run"]["id"] == listed["id"] and body["nightly_at"] == "02:00"
+    missing = client.get(f"/api/digest/run/{uuid4()}")
+    assert missing.status_code == 404 and missing.json() == {"detail": "not_found"}
+    assert client.get("/api/digest/run/not-a-uuid").status_code == 422

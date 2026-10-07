@@ -17,6 +17,8 @@ import {
   moreWaitingLine,
   NOTHING_NEW,
   noRunsLine,
+  RUN_NOT_FOUND,
+  runLabel,
   runningLine,
   START_ERROR,
   summaryLine,
@@ -24,7 +26,7 @@ import {
   UNAVAILABLE,
   waitedHours,
 } from "./copy";
-import type { Digest } from "./types";
+import type { Digest, NightlyRunSummary } from "./types";
 
 const SELECT_CLASS =
   "h-10 rounded-md border border-border-input bg-surface-raised px-2 text-sm text-fg";
@@ -32,21 +34,24 @@ const SECTION = "space-y-3 rounded-lg border border-border bg-surface-raised p-4
 const COUNT_PILL = "rounded-full bg-surface px-2 py-0.5 text-sm font-medium text-fg-muted";
 
 export type DigestScreenProps = {
-  /** The run date to show (YYYY-MM-DD); undefined shows the latest run. */
-  date: string | undefined;
-  onDate: (date: string | undefined) => void;
+  /** The id of the run to show; undefined shows the latest run. */
+  runId: string | undefined;
+  onRun: (runId: string | undefined) => void;
 };
 
-export function DigestScreen({ date, onDate }: DigestScreenProps) {
-  const digest = useQuery(digestQuery(date));
+export function DigestScreen({ runId, onRun }: DigestScreenProps) {
+  const digest = useQuery(digestQuery(runId));
   const runs = useQuery(nightlyRunsQuery);
   const start = useStartNightlyRun();
   const pickerId = useId();
 
   const run = digest.data?.run ?? null;
-  const dates = [...new Set((runs.data?.runs ?? []).map((r) => r.run_date))];
-  const selected = date ?? run?.run_date ?? "";
-  if (selected && !dates.includes(selected)) dates.unshift(selected);
+  // Runs, not dates: a morning Run now must not hide the night's run on the same date.
+  const options: Pick<NightlyRunSummary, "id" | "run_date" | "started_at" | "trigger">[] = [
+    ...(runs.data?.runs ?? []),
+  ];
+  const selected = runId ?? run?.id ?? "";
+  if (run && selected === run.id && !options.some((r) => r.id === run.id)) options.unshift(run);
   const busy = start.error instanceof HttpError && start.error.status === 409;
 
   return (
@@ -61,10 +66,10 @@ export function DigestScreen({ date, onDate }: DigestScreenProps) {
           ) : null}
         </div>
         <div className="flex flex-wrap items-end gap-2">
-          {dates.length ? (
+          {options.length ? (
             <div className="flex flex-col gap-1">
               <label htmlFor={pickerId} className="text-xs text-fg-muted">
-                Run date
+                Run
               </label>
               <select
                 id={pickerId}
@@ -72,12 +77,12 @@ export function DigestScreen({ date, onDate }: DigestScreenProps) {
                 value={selected}
                 onChange={(e) => {
                   const next = e.target.value;
-                  onDate(next === runs.data?.runs[0]?.run_date ? undefined : next);
+                  onRun(next === runs.data?.runs[0]?.id ? undefined : next);
                 }}
               >
-                {dates.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
+                {options.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {runLabel(r)}
                   </option>
                 ))}
               </select>
@@ -102,8 +107,8 @@ export function DigestScreen({ date, onDate }: DigestScreenProps) {
       {digest.data ? (
         <DigestBody digest={digest.data} />
       ) : digest.isError ? (
-        statusOf(digest.error) === 404 && date ? (
-          <p className="text-sm text-fg-muted">No nightly run on {date}.</p>
+        statusOf(digest.error) === 404 && runId ? (
+          <p className="text-sm text-fg-muted">{RUN_NOT_FOUND}</p>
         ) : (
           <div role="alert" className="flex flex-wrap items-center gap-3 text-sm text-danger-fg">
             <span>{LOAD_ERROR}</span>

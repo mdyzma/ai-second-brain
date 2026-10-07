@@ -33,7 +33,7 @@ describe("digestKeys", () => {
   it("nests every digest key under all", () => {
     expect(digestKeys.all).toEqual(["digest"]);
     expect(digestKeys.latest).toEqual(["digest", "latest"]);
-    expect(digestKeys.byDate("2026-10-07")).toEqual(["digest", "2026-10-07"]);
+    expect(digestKeys.byRun("r1")).toEqual(["digest", "run", "r1"]);
     expect(digestKeys.runs).toEqual(["digest", "runs"]);
   });
 });

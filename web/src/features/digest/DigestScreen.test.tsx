@@ -10,7 +10,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Digest, NightlyRun } from "./types";
+import { runLabel } from "./copy";
+import type { Digest, NightlyRun, NightlyRunSummary } from "./types";
 
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
@@ -99,6 +100,14 @@ const RUNS = {
     },
     {
       id: "r0",
+      run_date: "2026-10-07",
+      trigger: "manual",
+      status: "complete",
+      remaining: 0,
+      started_at: "2026-10-07T01:00:00Z",
+    },
+    {
+      id: "rr",
       run_date: "2026-10-06",
       trigger: "schedule",
       status: "complete",
@@ -108,12 +117,12 @@ const RUNS = {
   ],
 };
 
-function mockGet(latest: Digest, byDate: Record<string, Digest> = {}) {
+function mockGet(latest: Digest, byRun: Record<string, Digest> = {}) {
   get.mockImplementation(
-    async (path: string, opts?: { params?: { path?: { run_date?: string } } }) => {
+    async (path: string, opts?: { params?: { path?: { run_id?: string } } }) => {
       if (path === "/api/digest") return { data: latest, response: { status: 200 } };
-      if (path === "/api/digest/{run_date}") {
-        const d = byDate[opts?.params?.path?.run_date ?? ""];
+      if (path === "/api/digest/run/{run_id}") {
+        const d = byRun[opts?.params?.path?.run_id ?? ""];
         return d
           ? { data: d, response: { status: 200 } }
           : { data: undefined, response: { status: 404 } };
@@ -124,11 +133,11 @@ function mockGet(latest: Digest, byDate: Record<string, Digest> = {}) {
   );
 }
 
-async function setup(initialDate?: string) {
+async function setup(initialRun?: string) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   function Host() {
-    const [date, setDate] = useState<string | undefined>(initialDate);
-    return <DigestScreen date={date} onDate={setDate} />;
+    const [runId, setRunId] = useState<string | undefined>(initialRun);
+    return <DigestScreen runId={runId} onRun={setRunId} />;
   }
   const root = createRootRoute({ component: Host });
   const rest = ["/review", "/entities/$entityId"].map((path) =>
@@ -341,7 +350,7 @@ describe("DigestScreen", () => {
     expect(post).toHaveBeenCalledTimes(2);
   });
 
-  it("switches runs with the date picker", async () => {
+  it("switches runs by id, also to an earlier run on the same date", async () => {
     const older = digest(
       {
         review: {
@@ -351,22 +360,29 @@ describe("DigestScreen", () => {
           links: { count: 0, top: [] },
         },
       },
-      { id: "r0", run_date: "2026-10-06", done: 5 },
+      { id: "r0", run_date: "2026-10-07", trigger: "manual", done: 5 },
     );
-    mockGet(digest(), { "2026-10-06": older });
+    mockGet(digest(), { r0: older });
     await setup();
-    const picker = await screen.findByRole("combobox", { name: "Run date" });
-    await waitFor(() =>
-      expect(within(picker).getByRole("option", { name: "2026-10-06" })).toBeInTheDocument(),
-    );
-    await userEvent.setup().selectOptions(picker, "2026-10-06");
+    const picker = await screen.findByRole("combobox", { name: "Run" });
+    const label = runLabel(RUNS.runs[1] as NightlyRunSummary);
+    expect(label).toMatch(/^2026-10-07 \d\d:\d\d · Manual$/);
+    await waitFor(() => expect(within(picker).getAllByRole("option")).toHaveLength(3));
+    expect(within(picker).getByRole("option", { name: label })).toBeInTheDocument();
+    await userEvent.setup().selectOptions(picker, "r0");
     expect(
       await screen.findByText("Last night: 5 notes read, 1 failed, 0 to review."),
     ).toBeInTheDocument();
-    expect(get).toHaveBeenCalledWith("/api/digest/{run_date}", {
-      params: { path: { run_date: "2026-10-06" } },
+    expect(get).toHaveBeenCalledWith("/api/digest/run/{run_id}", {
+      params: { path: { run_id: "r0" } },
     });
-    expect(screen.getByRole("combobox", { name: "Run date" })).toHaveValue("2026-10-06");
+    expect(screen.getByRole("combobox", { name: "Run" })).toHaveValue("r0");
+  });
+
+  it("says when a linked run no longer exists", async () => {
+    mockGet(digest());
+    await setup("gone");
+    expect(await screen.findByText("That run no longer exists.")).toBeInTheDocument();
   });
 
   it("shows the load error with a retry", async () => {
