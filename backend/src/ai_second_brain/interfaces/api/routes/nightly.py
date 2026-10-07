@@ -13,7 +13,7 @@ from ai_second_brain.interfaces.api.schemas import (
     NightlyStarted,
 )
 from ai_second_brain.nightly import digest as digests
-from ai_second_brain.nightly.run import start_run
+from ai_second_brain.nightly.run import close_open_run, start_run
 
 router = APIRouter(tags=["nightly"], dependencies=[Depends(require_session)])
 ERRORS: dict[int | str, dict[str, Any]] = {
@@ -35,8 +35,15 @@ def _digest_body(request: Request, body: dict[str, Any] | None) -> dict[str, Any
     }
 
 
+async def _close_drained(request: Request) -> None:
+    """Close-on-read: a run whose jobs have drained reads as complete at once, not at the next
+    15-minute tick. Stateless, and guarded against runs still queueing (`close_open_run`)."""
+    await close_open_run(request.app.state.pool, get_settings(request))
+
+
 @router.get("/digest", operation_id="getDigest", response_model=Digest, responses=ERRORS)
 async def get_digest(request: Request) -> Any:
+    await _close_drained(request)
     async with request.app.state.pool.connection() as conn:
         run_id = await digests.latest_run_id(conn)
         body = None if run_id is None else await digests.digest(conn, run_id)
@@ -50,6 +57,7 @@ async def get_digest(request: Request) -> Any:
     responses={**ERRORS, 404: {"model": ErrorResponse}},
 )
 async def get_digest_by_date(run_date: date, request: Request) -> Any:
+    await _close_drained(request)
     async with request.app.state.pool.connection() as conn:
         run_id = await digests.run_id_for_date(conn, run_date)
         body = None if run_id is None else await digests.digest(conn, run_id)

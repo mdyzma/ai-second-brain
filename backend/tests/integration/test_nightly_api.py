@@ -143,3 +143,22 @@ def test_routes_require_session(make_api: Callable[..., TestClient]) -> None:
     assert client.get("/api/digest/2026-10-04").status_code == 401
     assert client.get("/api/nightly/runs").status_code == 401
     assert client.post("/api/nightly/run", headers=SAME_ORIGIN).status_code == 401
+
+
+def test_digest_read_closes_a_drained_run(make_api: Callable[..., TestClient], db_url: str) -> None:
+    client = make_api()
+    insert(db_url, "2026-10-04", "manual", "running")
+    with psycopg.connect(db_url, autocommit=True) as conn:
+        # its one job has run: nothing waits on the extract queue
+        conn.execute("UPDATE nightly_runs SET queued_new = 1")
+    digest = client.get("/api/digest").json()
+    assert digest["run"]["status"] == "complete" and digest["run"]["timed_out"] is False
+
+
+def test_digest_read_leaves_a_queueing_run_open(
+    make_api: Callable[..., TestClient], db_url: str
+) -> None:
+    client = make_api()
+    insert(db_url, "2026-10-04", "manual", "running")  # zero counts, just started
+    assert client.get("/api/digest").json()["run"]["status"] == "running"
+    assert client.get("/api/digest/2026-10-04").json()["run"]["status"] == "running"
