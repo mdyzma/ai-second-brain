@@ -11,7 +11,7 @@ import json
 import logging
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, LiteralString
 from uuid import UUID
 
 from psycopg import AsyncConnection
@@ -308,6 +308,25 @@ async def review_entities(
 
 # --- review: links ---------------------------------------------------------------------------
 
+# The Links tab's rows (shared with the nightly digest, spec 4b §6.2): edges `g` with their
+# dst entity `d`, src entity `se` (entity edges) and src note `ns` (note edges).
+REVIEW_LINK_FROM: LiteralString = (
+    "FROM edges g JOIN entities d ON d.id = g.dst_entity_id"
+    " LEFT JOIN entities se ON g.src_type = 'entity' AND se.id = g.src_id"
+    " LEFT JOIN sources ns ON g.src_type = 'source' AND ns.id = g.src_id"
+)
+# Which of them the Links tab lists; needs REVIEW_LINK_FROM's aliases.
+REVIEW_LINK_VISIBLE: LiteralString = (
+    "(g.status = 'proposed' AND ("
+    "  (g.src_type = 'entity' AND d.status <> 'rejected' AND se.status <> 'rejected'"
+    # hidden while the note that produced it is tombstoned
+    "   AND NOT EXISTS (SELECT 1 FROM source_revisions pr"
+    "    JOIN sources ps ON ps.id = pr.source_id"
+    "    WHERE pr.id = g.revision_id AND ps.deleted_at IS NOT NULL))"
+    "  OR (g.src_type = 'source' AND g.relation IN ('mentions', 'about')"
+    "   AND d.status = 'accepted' AND ns.deleted_at IS NULL)))"
+)
+
 
 async def review_links(
     conn: AsyncConnection, *, cursor: str | None, vault_name: str
@@ -328,22 +347,11 @@ async def review_links(
             " ns.id AS note_id, ns.external_ref AS note_path, ns.title AS note_title,"
             " c.heading_path[cardinality(c.heading_path)] AS ev_heading,"
             " evs.external_ref AS ev_path"
-            " FROM edges g JOIN entities d ON d.id = g.dst_entity_id"
-            " LEFT JOIN entities se ON g.src_type = 'entity' AND se.id = g.src_id"
-            " LEFT JOIN sources ns ON g.src_type = 'source' AND ns.id = g.src_id"
-            " LEFT JOIN chunks c ON c.id = g.evidence_chunk_id"
+            " " + REVIEW_LINK_FROM + " LEFT JOIN chunks c ON c.id = g.evidence_chunk_id"
             " LEFT JOIN source_revisions er ON er.id = coalesce(c.revision_id, g.revision_id)"
             " LEFT JOIN sources evs ON evs.id = coalesce(er.source_id, ns.id)"
             "  AND evs.deleted_at IS NULL"
-            " WHERE g.status = 'proposed' AND ("
-            "  (g.src_type = 'entity' AND d.status <> 'rejected' AND se.status <> 'rejected'"
-            # hidden while the note that produced it is tombstoned
-            "   AND NOT EXISTS (SELECT 1 FROM source_revisions pr"
-            "    JOIN sources ps ON ps.id = pr.source_id"
-            "    WHERE pr.id = g.revision_id AND ps.deleted_at IS NOT NULL))"
-            "  OR (g.src_type = 'source' AND g.relation IN ('mentions', 'about')"
-            "   AND d.status = 'accepted' AND ns.deleted_at IS NULL))"
-            " AND (%(at)s::timestamptz IS NULL"
+            " WHERE " + REVIEW_LINK_VISIBLE + " AND (%(at)s::timestamptz IS NULL"
             "  OR (g.created_at, g.id) > (%(at)s::timestamptz, %(id)s::uuid))"
             " ORDER BY g.created_at, g.id LIMIT %(limit)s",
             {"at": after_at, "id": after_id, "limit": LINK_PAGE + 1},
